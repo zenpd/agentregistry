@@ -1,9 +1,17 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Sparkles, Settings } from 'lucide-react'
+import { LayoutDashboard, Sparkles, Settings, Bot, ShieldCheck, LayoutGrid, Building2, Cpu, DollarSign, GitBranch, Lock } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 const NAV = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/', label: 'Executive', icon: LayoutGrid },
+  { to: '/agents', label: 'AI Registry', icon: Bot },
+  { to: '/governance', label: 'Governance', icon: ShieldCheck },
+  { to: '/business', label: 'Business', icon: Building2 },
+  { to: '/platform', label: 'Platform', icon: Cpu },
+  { to: '/tokenomics', label: 'Tokenomics', icon: DollarSign },
+  { to: '/dependencies', label: 'Dependencies', icon: GitBranch },
+  { to: '/security', label: 'Security', icon: Lock },
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/playground', label: 'Playground', icon: Sparkles },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
@@ -17,9 +25,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <div className="w-8 h-8 rounded-lg bg-gradient-zen flex items-center justify-center text-white font-bold">
             Z
           </div>
-          <span className="font-bold text-gray-900">__APP_TITLE__</span>
+          <span className="font-bold text-gray-900">Agent Registry</span>
         </div>
-        <nav className="flex-1 p-3 space-y-1">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {NAV.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
@@ -42,7 +50,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       {/* Main */}
       <div className="pl-[240px]">
         <header className="h-[60px] bg-white shadow-header flex items-center px-6">
-          <h1 className="text-sm font-semibold text-gray-700">__APP_TITLE__</h1>
+          <h1 className="text-sm font-semibold text-gray-700">Enterprise AI Control Tower</h1>
         </header>
         <main className="p-6">{children}</main>
       </div>

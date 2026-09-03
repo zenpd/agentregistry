@@ -3,10 +3,10 @@ trigger:
   branches: { include: [main] }
   paths:
     include:
-      - app/**
+      - backend/**
       - azure-pipelines-be.yml
     exclude:
-      - app/ui/**
+      - ui/**
 
 variables:
   azureSubscription: 'Zenlabs-agent-foundry-connection'
@@ -14,10 +14,10 @@ variables:
   acrLoginServer: 'zafacr-gqfyc3h8eya2djey.azurecr.io'
   resourceGroup: 'Zenlabs-Agent-Foundry'
   environmentName: 'zaf-aca-pvt-env'
-  backendApp: '__APP_NAME__-be'
-  workerApp: '__APP_NAME__-worker'
-  backendRepo: '__APP_NAME__-be'
-  backendPort: '__BACKEND_PORT__'
+  backendApp: 'agentregistry-be'
+  workerApp: 'agentregistry-worker'
+  backendRepo: 'agentregistry-be'
+  backendPort: '8001'
   tag: 'latest'
 
 pool:
@@ -41,7 +41,7 @@ stages:
 
                 echo "== Build & push =="
                 az acr build --registry $(acrName) --image "$(backendRepo):$(tag)" \
-                  --file app/Dockerfile app
+                  --file backend/Dockerfile backend
 
                 echo "== Deploy backend =="
                 if az containerapp show -n $(backendApp) -g $(resourceGroup) >/dev/null 2>&1; then

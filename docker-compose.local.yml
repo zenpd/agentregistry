@@ -2,7 +2,7 @@ version: "3.9"
 
 # Minimal local dependencies (Postgres + Redis) for running the API/worker on
 # the host. For the full stack (Temporal, Phoenix, containerised API/worker),
-# use app/docker-compose.yml instead.
+# use backend/docker-compose.yml instead.
 services:
   postgres:
     image: postgres:16-alpine

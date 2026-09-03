@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# aca-setup.sh — one-time provisioning of all Azure Container Apps for __APP_NAME__
+# aca-setup.sh — one-time provisioning of all Azure Container Apps for agentregistry
 #
 # Creates (in the shared ACA environment):
-#   __APP_NAME__-be       FastAPI backend  (internal ingress, port __BACKEND_PORT__)
-#   __APP_NAME__-worker   Temporal worker  (no ingress; same image, command override)
-#   __APP_NAME__-fe       React/nginx UI   (external ingress, port 80)
+#   agentregistry-be       FastAPI backend  (internal ingress, port 8001)
+#   agentregistry-worker   Temporal worker  (no ingress; same image, command override)
+#   agentregistry-fe       React/nginx UI   (external ingress, port 80)
 #
 # Ingress design (learned the hard way):
 #   * Backend is INTERNAL + --allow-insecure so the FE nginx can proxy over
-#     http://__APP_NAME__-be.internal.<env>/... without a 301 http->https redirect.
+#     http://agentregistry-be.internal.<env>/... without a 301 http->https redirect.
 #   * FE BACKEND_URL therefore uses http:// and the .internal. FQDN.
 #
 # Prereqs: az login; a Postgres (with a database), Redis, and Azure OpenAI you
@@ -24,13 +24,13 @@ RESOURCE_GROUP="${RESOURCE_GROUP:-Zenlabs-Agent-Foundry}"
 ENVIRONMENT="${ENVIRONMENT:-zaf-aca-pvt-env}"
 ACR="${ACR:-zafacr-gqfyc3h8eya2djey.azurecr.io}"
 
-BE_APP="__APP_NAME__-be"
-WORKER_APP="__APP_NAME__-worker"
-FE_APP="__APP_NAME__-fe"
-BE_IMAGE="$ACR/__APP_NAME__-be:latest"
-FE_IMAGE="$ACR/__APP_NAME__-fe:latest"
+BE_APP="agentregistry-be"
+WORKER_APP="agentregistry-worker"
+FE_APP="agentregistry-fe"
+BE_IMAGE="$ACR/agentregistry-be:latest"
+FE_IMAGE="$ACR/agentregistry-fe:latest"
 
-BACKEND_PORT="__BACKEND_PORT__"
+BACKEND_PORT="8001"
 NAMESPACE="__NAMESPACE__"
 TASK_QUEUE="__TASK_QUEUE__"
 

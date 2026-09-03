@@ -3,7 +3,7 @@ trigger:
   branches: { include: [main] }
   paths:
     include:
-      - app/ui/**
+      - ui/**
       - azure-pipelines-fe.yml
 
 variables:
@@ -12,9 +12,9 @@ variables:
   acrLoginServer: 'zafacr-gqfyc3h8eya2djey.azurecr.io'
   resourceGroup: 'Zenlabs-Agent-Foundry'
   environmentName: 'zaf-aca-pvt-env'
-  frontendApp: '__APP_NAME__-fe'
-  backendApp: '__APP_NAME__-be'
-  frontendRepo: '__APP_NAME__-fe'
+  frontendApp: 'agentregistry-fe'
+  backendApp: 'agentregistry-be'
+  frontendRepo: 'agentregistry-fe'
   tag: 'latest'
 
 pool:
@@ -38,7 +38,7 @@ stages:
 
                 echo "== Build & push =="
                 az acr build --registry $(acrName) --image "$(frontendRepo):$(tag)" \
-                  --file app/ui/Dockerfile app/ui
+                  --file ui/Dockerfile ui
 
                 # Backend internal FQDN for the nginx /api proxy (http, allow-insecure).
                 BE_FQDN="$(az containerapp show -n $(backendApp) -g $(resourceGroup) \

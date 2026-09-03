@@ -66,18 +66,18 @@ predictive risk scoring, and a full marketplace.
 | [`THREAD_SolArch_v6_3.pdf`](THREAD_SolArch_v6_3.pdf) | Solution architecture document |
 | [`AIRegistry.html`](AIRegistry.html) | "AI Control Tower" UI prototype — open directly in a browser |
 | [`AIRegistry-V1.0.html`](AIRegistry-V1.0.html), [`2-THREAD_Figma_Style_Dynamic_Prototype_Executive.html`](2-THREAD_Figma_Style_Dynamic_Prototype_Executive.html) | "THREAD" Figma-style dynamic UI prototypes (executive view) |
-| `app/` | Backend/frontend scaffold for the registry service — see status below |
+| `backend/` | Backend/frontend scaffold for the registry service — see status below |
 | `infra/`, `azure-pipelines-*.yml` | Azure Container Apps deployment scripts + CI/CD |
-| [`BOOTSTRAP_GUIDE.md`](BOOTSTRAP_GUIDE.md) | Architecture guide for the `app/` scaffold (LangGraph supervisor loop, Temporal durability, observability) |
+| [`BOOTSTRAP_GUIDE.md`](BOOTSTRAP_GUIDE.md) | Architecture guide for the `backend/` scaffold (LangGraph supervisor loop, Temporal durability, observability) |
 
-### `app/` status
+### `backend/` status
 
-`app/` is the **ZenLabs Agent Foundry accelerator scaffold** — the same
+`backend/` is the **ZenLabs Agent Foundry accelerator scaffold** — the same
 production-shaped FastAPI + LangGraph + Temporal + React skeleton used across
 `digital-onboarding`, `zenarc`, `merchant-onboard`, `capmarkets`, and others —
 checked in as-is, **not yet bootstrapped/customized** for the registry
-(`__APP_NAME__`-style placeholders are still present in `template.config.json`,
-`app/api/main.py`, `app/shared/config.py`, etc.). It's the intended starting
+(`agentregistry`-style placeholders are still present in `template.config.json`,
+`backend/api/main.py`, `backend/shared/config.py`, etc.). It's the intended starting
 point for the registry's backend (agent registration API, discovery workers,
 ROI/risk data model) once that work begins — see
 [BOOTSTRAP_GUIDE.md](BOOTSTRAP_GUIDE.md) for how the supervisor loop, Temporal
@@ -100,7 +100,7 @@ open 2-THREAD_Figma_Style_Dynamic_Prototype_Executive.html
 ## Status
 
 Design/requirements phase — the requirements deck, solution architecture doc,
-and UI prototypes are the current source of truth. The `app/` scaffold has not
+and UI prototypes are the current source of truth. The `backend/` scaffold has not
 yet been customized to the registry's actual data model (agent inventory,
 ownership, value/ROI tracking, risk gates, dependency graph) or wired to a
 discovery integration for any of the platforms in scope.

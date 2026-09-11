@@ -37,26 +37,26 @@ async def scan_sources(org_id: str) -> dict:
                     "shadow_ai_risk": "HIGH" if agent.time_in_stage_weeks > 20 else "MEDIUM",
                 })
 
-        # Source 2: Scan for concentration risks
-        result = await db.execute(text("""
-            SELECT system_name, COUNT(*) as cnt FROM (
-                SELECT json_each.value as system_name FROM agents, json_each(agents.enterprise_systems)
-                UNION ALL
-                SELECT json_each.value as system_name FROM agents, json_each(agents.databases)
-            ) GROUP BY system_name HAVING cnt >= 2
-        """))
-        concentration_risks = result.all()
+        # Source 2: Scan for concentration risks (portable: aggregate JSON arrays in Python)
+        result = await db.execute(
+            select(Agent.enterprise_systems, Agent.databases).where(Agent.org_id == org_id)
+        )
+        sys_counts: dict = {}
+        for systems, databases in result.all():
+            for name in list(systems or []) + list(databases or []):
+                sys_counts[name] = sys_counts.get(name, 0) + 1
+        concentration_risks = [(name, cnt) for name, cnt in sys_counts.items() if cnt >= 2]
         sources_scanned.append("concentration_risk")
-        for risk in concentration_risks:
-            confidence = min(95, 60 + risk[1] * 5)
+        for risk_name, risk_count in concentration_risks:
+            confidence = min(95, 60 + risk_count * 5)
             raw_findings.append({
                 "source": "concentration_risk",
-                "name": f"Concentration risk: {risk[0]}",
+                "name": f"Concentration risk: {risk_name}",
                 "suspected_dept": "IT Operations",
                 "suspected_type": "Infrastructure",
                 "confidence": confidence,
-                "signal": f"System {risk[0]} has {risk[1]} dependent agents",
-                "shadow_ai_risk": "HIGH" if risk[1] >= 4 else "MEDIUM",
+                "signal": f"System {risk_name} has {risk_count} dependent agents",
+                "shadow_ai_risk": "HIGH" if risk_count >= 4 else "MEDIUM",
             })
 
         # Source 3: Scan for agents with no governance reviews

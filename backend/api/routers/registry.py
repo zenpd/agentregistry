@@ -17,7 +17,7 @@ from db.base import get_db_session
 from db.models import (
     Agent, Department, Organization, GovernanceReview, GovernanceException,
     Discovery, AgentTokenUsage, ModelTokenPrice, AgentBudget, WasteFinding,
-    CostAnomaly, User, AuditLog, AgentIdentity
+    CostAnomaly, User, AuditLog, AgentIdentity, AgentMetric
 )
 from api.auth import (
     hash_password, verify_password, create_access_token,
@@ -1101,14 +1101,6 @@ async def impact_analysis(node_id: str, node_type: str = "agent", _=Depends(requ
 
 # ── Additional Admin Endpoints ────────────────────────────────────────────────
 
-@admin_router.get("/users")
-async def list_users(_=Depends(require_admin)):
-    """List all users."""
-    async with get_db_session() as db:
-        result = await db.execute(select(User))
-        return [_user_to_dict(u) for u in result.scalars().all()]
-
-
 @admin_router.put("/users/{user_id}")
 async def update_user(user_id: str, user_data: dict, _=Depends(require_admin)):
     """Update a user."""
@@ -1201,33 +1193,7 @@ async def agent_graph(agent_id: str, _=Depends(require_read)):
             "consumers": agent.consumers or [],
         }
 
-# -- V2 Features (F-29, F-36, F-59, F-66, F-67) ------------------------------
-
-@value_waste_router.get("/agents/{agent_id}/tokens/trend")
-async def token_trend(agent_id: str, days: int = 30, _=Depends(require_read)):
-    """F-29: Token usage trend over time (daily aggregates)."""
-    async with get_db_session() as db:
-        result = await db.execute(
-            select(AgentMetric).where(
-                AgentMetric.agent_id == agent_id,
-                AgentMetric.metric_date >= date.today() - timedelta(days=days)
-            ).order_by(AgentMetric.metric_date)
-        )
-        metrics = result.scalars().all()
-        return {
-            "agent_id": agent_id,
-            "days": days,
-            "trend": [
-                {
-                    "date": str(m.metric_date),
-                    "avg_tokens": m.avg_tokens or 0,
-                    "total_cost": m.total_cost or 0,
-                    "error_rate": m.error_rate or 0,
-                }
-                for m in metrics
-            ],
-        }
-
+# -- V2 Features (F-59, F-66, F-67) ------------------------------------------
 
 @value_waste_router.get("/agents/{agent_id}/cost/business-outcome")
 async def cost_per_outcome(agent_id: str, _=Depends(require_read)):

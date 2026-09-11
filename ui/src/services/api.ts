@@ -382,4 +382,91 @@ export const getEuAiActCompliance = () =>
 export const getBatchProcessing = () =>
   api.get<{ batch_agents: { id: string; name: string; invocation_count: number; batch_processing: boolean; recommendation: string }[]; count: number }>('/batch-processing')
 
+// ── Dependency Graph v2 ──────────────────────────────────────────────────────
+
+export interface GraphNodeV2 {
+  id: string
+  name: string
+  kind: string
+  attrs: {
+    dept?: string
+    stage?: string
+    entry?: 'production' | 'pipeline'
+    model_name?: string
+    value_amount?: number
+    hours_saved_monthly?: number
+    token_cost?: number
+    at_risk?: boolean
+    risk_level?: string
+    worst_gate?: string
+    ref?: string
+  }
+}
+
+export interface GraphEdgeV2 {
+  from: string
+  to: string
+  type: 'CALLS' | 'CONSUMED_BY' | 'ACCESSES' | 'USES_KB' | 'USES_MCP'
+}
+
+export interface GraphLegendItem {
+  kind: string
+  label: string
+  count: number
+  color: string
+}
+
+export interface GraphV2Response {
+  nodes: GraphNodeV2[]
+  edges: GraphEdgeV2[]
+  legend: GraphLegendItem[]
+  stats: {
+    agents: number
+    nodes: number
+    edges: number
+    cross_agent_edges: number
+    cross_dept_edges: number
+    orphan_agents: number
+    orphan_agent_ids: string[]
+    production_agents: number
+  }
+}
+
+export const getGraphV2 = () => api.get<GraphV2Response>('/graph/v2')
+
+// ── Cobol-style pyvis/vis-network graph view ─────────────────────────────────
+
+export interface GraphViewLegend {
+  key: string
+  label: string
+  color: string
+  border: string
+  shape: string
+  count: number
+}
+
+export interface GraphViewResponse {
+  html: string
+  node_count: number
+  edge_count: number
+  entry_point_count: number
+  group_colors: Record<string, string>
+  legend: GraphViewLegend[]
+}
+
+export const getGraphView = () => api.get<GraphViewResponse>('/graph/view')
+
+export const getImpact = (nodeId: string) =>
+  api.get<{
+    status: string
+    target_name: string
+    affected_node_ids: string[]
+    affected_edge_keys: string[]
+    revenue_at_risk: number
+    efficiency_at_risk: number
+    blast_radius_depts: string[]
+    risk_level: string
+    mitigation_suggestions: string[]
+  }>(`/graph/impact/${nodeId}`)
+
 export default api

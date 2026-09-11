@@ -641,6 +641,49 @@ async def list_anomalies(_=Depends(require_read)):
 
 # ── Graph Router ─────────────────────────────────────────────────────────────
 
+@graph_router.get("/view")
+async def graph_view(_=Depends(require_read)):
+    """Cobol-style pyvis/vis-network HTML view (iframe srcdoc + filter runtime)."""
+    from services.graph_service import build_graph
+    from services.graph_view import build_graph_view_html
+    async with get_db_session() as db:
+        g = await build_graph(db)
+    return build_graph_view_html(g)
+
+
+@graph_router.get("/v2")
+async def full_graph_v2(_=Depends(require_read)):
+    """Dependency graph v2 — typed nodes/edges, legend, stats (shared builder)."""
+    from services.graph_service import build_graph
+    async with get_db_session() as db:
+        return await build_graph(db)
+
+
+@graph_router.get("/entry-points")
+async def graph_entry_points(_=Depends(require_read)):
+    """Agents that act as outage roots: in Production with consumers or callers."""
+    from services.graph_service import build_adjacency
+    async with get_db_session() as db:
+        adj = await build_adjacency(db)
+        entry_points = []
+        for agent_id, attrs in adj["agent_attrs"].items():
+            if attrs.get("entry") != "production":
+                continue
+            callers = adj["callers_of"].get(agent_id, [])
+            consumers = adj["consumers_of"].get(agent_id, [])
+            if callers or consumers:
+                entry_points.append({
+                    "id": agent_id,
+                    "name": adj["node_names"].get(agent_id, agent_id),
+                    "dept": attrs.get("dept"),
+                    "callers": len(callers),
+                    "consumers": len(consumers),
+                    "value_amount": attrs.get("value_amount", 0),
+                })
+        entry_points.sort(key=lambda e: -e["value_amount"])
+        return {"entry_points": entry_points, "count": len(entry_points)}
+
+
 @graph_router.get("/")
 async def full_graph(_=Depends(require_read)):
     async with get_db_session() as db:

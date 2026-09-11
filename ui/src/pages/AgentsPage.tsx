@@ -158,6 +158,7 @@ export default function AgentsPage() {
         <AgentDetailModal
           agentId={selectedAgent}
           onClose={() => setSelectedAgent(null)}
+          onSaved={() => { setSelectedAgent(null); fetchData() }}
         />
       )}
     </div>

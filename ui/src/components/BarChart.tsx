@@ -22,11 +22,11 @@ export default function BarChart({ data, width = 400, height = 200 }: BarChartPr
         const color = d.color || COLORS[i % COLORS.length]
         return (
           <g key={d.label}>
-            <text x={width - 124} y={y + 17} textAnchor="end" fill="#8C9AAB" fontSize={12} fontFamily="Inter">
+            <text x={width - 124} y={y + 17} textAnchor="end" fill="#6b7280" fontSize={12} fontFamily="Inter">
               {d.label}
             </text>
             <rect x={0} y={y} width={w} height={barH} rx={4} fill={color} opacity={0.85} />
-            <text x={w + 8} y={y + 17} fill="#E9EEF3" fontSize={11} fontFamily="JetBrains Mono">
+            <text x={w + 8} y={y + 17} fill="#111827" fontSize={11} fontFamily="JetBrains Mono">
               {d.value.toLocaleString()}
             </text>
           </g>

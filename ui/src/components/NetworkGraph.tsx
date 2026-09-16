@@ -20,9 +20,24 @@ interface Props {
 }
 
 const CAT_COLORS: Record<string, string> = {
+  // Declared-dependency kinds (PlatformView) — unchanged.
   agent: '#6EA8FE',
   mcp: '#8C7CF0',
   sys: '#3DDBD9',
+  // Phoenix/OpenInference span kinds (reconstructed-from-traces diagram —
+  // AgentDetailModal's Diagram tab). Uppercase, matching what the backend's
+  // discovery/reconstruct.py emits verbatim — never lowercased/aliased, so
+  // a color here always matches a real vendor span-kind value, not a guess.
+  AGENT: '#6EA8FE',
+  LLM: '#57C785',
+  TOOL: '#F0A85A',
+  RETRIEVER: '#3DDBD9',
+  CHAIN: '#8C7CF0',
+  GUARDRAIL: '#F0A85A',
+  EVALUATOR: '#F0A85A',
+  RERANKER: '#3DDBD9',
+  EMBEDDING: '#3DDBD9',
+  UNKNOWN: '#6b7280',
   db: '#F0A85A',
   kb: '#57C785',
 }

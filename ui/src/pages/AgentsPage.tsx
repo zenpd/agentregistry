@@ -2,6 +2,14 @@ import { useState, useEffect } from 'react'
 import { getAgents, getTaxonomy, type Agent, type Taxonomy } from '../services/api'
 import AgentDetailModal from '../components/AgentDetailModal'
 
+const STAGE_PILL: Record<string, string> = {
+  Ideation: 'status-pending',
+  Development: 'status-active',
+  Testing: 'status-review',
+  Production: 'status-complete',
+  Deprecated: 'status-failed',
+}
+
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [taxonomy, setTaxonomy] = useState<Taxonomy | null>(null)
@@ -58,16 +66,13 @@ export default function AgentsPage() {
   })
 
   if (loading && agents.length === 0) return <div className="p-8 text-center text-gray-500">Loading...</div>
-  if (error) return <div className="p-8 text-center text-red-500">Error: {error}</div>
+  if (error) return <div className="p-8 text-center text-rose-500">Error: {error}</div>
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">AI Registry</h1>
-        <button
-          onClick={() => setSelectedAgent('new')}
-          className="bg-teal-600 text-white px-4 py-2 rounded text-sm hover:bg-teal-700"
-        >
+    <div className="space-y-4 animate-fade-in">
+      <div className="page-header">
+        <h1 className="page-title text-2xl">AI Registry</h1>
+        <button onClick={() => setSelectedAgent('new')} className="btn-primary">
           + Register new AI application
         </button>
       </div>
@@ -79,9 +84,9 @@ export default function AgentsPage() {
           placeholder="Search agents..."
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="border rounded px-3 py-2 text-sm flex-1 min-w-[200px]"
+          className="input flex-1 min-w-[200px]"
         />
-        <select value={stageFilter} onChange={e => setStageFilter(e.target.value)} className="border rounded px-3 py-2 text-sm">
+        <select value={stageFilter} onChange={e => setStageFilter(e.target.value)} className="input w-auto">
           <option value="">All stages</option>
           <option value="Ideation">Ideation</option>
           <option value="Development">Development</option>
@@ -89,11 +94,11 @@ export default function AgentsPage() {
           <option value="Production">Production</option>
           <option value="Deprecated">Deprecated</option>
         </select>
-        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="border rounded px-3 py-2 text-sm">
+        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="input w-auto">
           <option value="">All types</option>
           {types.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
-        <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} className="border rounded px-3 py-2 text-sm">
+        <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} className="input w-auto">
           <option value="">All departments</option>
           {depts.map(d => <option key={d} value={d}>{d}</option>)}
         </select>
@@ -105,10 +110,10 @@ export default function AgentsPage() {
           <button
             key={cat}
             onClick={() => setCatFilter(cat === 'All' ? '' : cat.toLowerCase())}
-            className={`text-xs px-3 py-1 rounded border ${
+            className={`text-xs px-3 py-1 rounded-full border transition-colors ${
               (cat === 'All' && !catFilter) || (cat !== 'All' && catFilter === cat.toLowerCase())
                 ? 'bg-teal-600 text-white border-teal-600'
-                : 'bg-transparent text-gray-400 border-gray-700 hover:border-gray-500'
+                : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:text-gray-700'
             }`}
           >
             {cat}
@@ -122,27 +127,27 @@ export default function AgentsPage() {
           <div
             key={a.id}
             onClick={() => setSelectedAgent(a.id)}
-            className="bg-gray-900 rounded-lg border border-gray-700 p-4 hover:border-teal-500 cursor-pointer transition"
+            className="card-hover p-4"
           >
-            <div className="flex justify-between items-start">
-              <h3 className="font-semibold">{a.name}</h3>
-              <span className="text-xs px-2 py-0.5 rounded bg-gray-800">{a.stage}</span>
+            <div className="flex justify-between items-start gap-2">
+              <h3 className="font-semibold text-gray-900">{a.name}</h3>
+              <span className={`shrink-0 ${STAGE_PILL[a.stage] || 'status-pending'}`}>{a.stage}</span>
             </div>
-            <p className="text-sm text-gray-400 mt-2 line-clamp-2">{a.description}</p>
+            <p className="text-sm text-gray-500 mt-2 line-clamp-2">{a.description || 'No description yet.'}</p>
 
             {/* Dependency badges */}
             <div className="mt-2 flex flex-wrap gap-1">
               {a.enterpriseSystems?.slice(0, 2).map(s => (
-                <span key={s} className="text-xs bg-teal-900/30 text-teal-300 px-1.5 py-0.5 rounded">{s}</span>
+                <span key={s} className="text-xs bg-teal-50 text-teal-700 ring-1 ring-teal-200 px-1.5 py-0.5 rounded">{s}</span>
               ))}
               {a.databases?.slice(0, 1).map(d => (
-                <span key={d} className="text-xs bg-amber-900/30 text-amber-300 px-1.5 py-0.5 rounded">{d}</span>
+                <span key={d} className="text-xs bg-amber-50 text-amber-700 ring-1 ring-amber-200 px-1.5 py-0.5 rounded">{d}</span>
               ))}
               {a.mcpServers?.slice(0, 1).map(m => (
-                <span key={m} className="text-xs bg-purple-900/30 text-purple-300 px-1.5 py-0.5 rounded">{m}</span>
+                <span key={m} className="text-xs bg-purple-50 text-purple-700 ring-1 ring-purple-200 px-1.5 py-0.5 rounded">{m}</span>
               ))}
               {a.calls?.length > 0 && (
-                <span className="text-xs bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded">calls {a.calls.length}</span>
+                <span className="text-xs bg-blue-50 text-blue-700 ring-1 ring-blue-200 px-1.5 py-0.5 rounded">calls {a.calls.length}</span>
               )}
             </div>
 

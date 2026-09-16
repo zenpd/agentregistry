@@ -17,13 +17,14 @@ from db.base import get_db_session
 from db.models import (
     Agent, Department, Organization, GovernanceReview, GovernanceException,
     Discovery, AgentTokenUsage, ModelTokenPrice, AgentBudget, WasteFinding,
-    CostAnomaly, User, AuditLog, AgentIdentity, AgentMetric
+    CostAnomaly, User, AuditLog, AgentIdentity, AgentMetric, PhoenixConfig, AgentRisk
 )
 from api.auth import (
     hash_password, verify_password, create_access_token,
     require_create, require_read, require_update, require_delete, require_admin,
     get_current_user
 )
+from shared.config import get_settings
 
 # ── Routers ──────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,11 @@ graph_router = APIRouter(prefix="/api/v1/graph", tags=["Graph"])
 value_waste_router = APIRouter(prefix="/api/v1", tags=["Value & Waste"])
 admin_router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
 auth_router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
+# Distinct from discovery_router above (/api/v1/discoveries — SHADOW-AI
+# detection of unregistered apps, an unrelated existing concept): this one
+# is real-trace discovery FOR an already-onboarded agent, reading Phoenix's
+# REST API — see discovery/phoenix_client.py and discovery/reconstruct.py.
+phoenix_router = APIRouter(prefix="/api/v1/phoenix", tags=["Phoenix Discovery"])
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -63,6 +69,11 @@ class AgentCreate(BaseModel):
     tags: List[str] = []
     model_name: str = "GPT-5"
     risk_level: str = "LOW"
+    phoenix_project: str = ""
+    # "" means "use the common org-wide endpoint" (PhoenixConfig / Settings
+    # tab) — the onboarding form's dropdown only sends a value here when the
+    # user picked "custom endpoint for this app".
+    phoenix_endpoint: str = ""
 
     @validator("stage")
     def validate_stage(cls, v):
@@ -110,6 +121,12 @@ class AgentUpdate(BaseModel):
     risk_level: Optional[str] = None
     risk_note: Optional[str] = None
     at_risk: Optional[bool] = None
+    # Links this agent to the Phoenix project its real traces export under —
+    # the only way to back-fill this on an agent registered before the field
+    # existed (there's deliberately no auto-guess from the agent name; see
+    # Agent.phoenix_project's comment in db/models.py).
+    phoenix_project: Optional[str] = None
+    phoenix_endpoint: Optional[str] = None
 
 
 class GateUpdate(BaseModel):
@@ -261,6 +278,7 @@ async def create_agent(agent: AgentCreate, user=Depends(require_create)):
         db_agent = Agent(
             id=agent_id, org_id="org-default", name=agent.name, slug=agent_id,
             description=agent.description, ai_type=agent.ai_type, owner=agent.owner,
+            dept_id=agent.dept or None,
             lifecycle_stage=agent.stage, value_amount=agent.value_amount,
             value_type=agent.value_type, hours_saved_monthly=agent.hours_saved_monthly,
             business_outcome=agent.business_outcome, model_name=agent.model_name,
@@ -269,6 +287,8 @@ async def create_agent(agent: AgentCreate, user=Depends(require_create)):
             knowledge_bases=agent.knowledge_bases, mcp_servers=agent.mcp_servers,
             calls=agent.calls, consumers=agent.consumers, inputs=agent.inputs,
             outputs=agent.outputs, api_endpoint=agent.api_endpoint, sla=agent.sla,
+            phoenix_project=agent.phoenix_project or None,
+            phoenix_endpoint=agent.phoenix_endpoint or None,
         )
         db.add(db_agent)
         for gate in ["arb", "security", "dp"]:
@@ -860,6 +880,8 @@ def _agent_to_dict(agent: Agent) -> dict:
         "riskLevel": agent.risk_level, "riskNote": agent.risk_note,
         "atRisk": agent.at_risk, "timeInStageWeeks": agent.time_in_stage_weeks,
         "reviews": {r.gate: r.status for r in agent.governance_reviews} if agent.governance_reviews else {},
+        "phoenixProject": agent.phoenix_project,
+        "phoenixEndpoint": agent.phoenix_endpoint,
     }
 
 
@@ -1226,7 +1248,9 @@ async def register(req: UserCreate, _=Depends(require_admin)):
 async def agent_graph(agent_id: str, _=Depends(require_read)):
     """Get dependency graph for a specific agent."""
     async with get_db_session() as db:
-        result = await db.execute(select(Agent).where(Agent.id == agent_id))
+        result = await db.execute(
+            select(Agent).where(Agent.id == agent_id).options(selectinload(Agent.governance_reviews))
+        )
         agent = result.scalar_one_or_none()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
@@ -1235,6 +1259,339 @@ async def agent_graph(agent_id: str, _=Depends(require_read)):
             "calls": agent.calls or [],
             "consumers": agent.consumers or [],
         }
+
+
+class PhoenixConfigUpdate(BaseModel):
+    endpoint: str = ""
+    api_key: str = ""
+    enabled: bool = True
+
+
+@phoenix_router.get("/config")
+async def get_phoenix_config(_=Depends(require_read)):
+    """The org-wide COMMON tracing endpoint (the Settings/Config tab) — what
+    the onboarding form's "common endpoint" dropdown option resolves to.
+    Falls back to this deployment's own env-configured Phoenix (the same one
+    this app already exports its own traces to) when no row has been saved
+    yet, so a fresh install still has a sensible default to discover from."""
+    settings = get_settings()
+    async with get_db_session() as db:
+        result = await db.execute(select(PhoenixConfig).where(PhoenixConfig.org_id == "org-default"))
+        row = result.scalar_one_or_none()
+        if row:
+            return {"endpoint": row.endpoint or "", "apiKeySet": bool(row.api_key), "enabled": row.enabled, "source": "saved"}
+    return {
+        "endpoint": _phoenix_rest_base_url_from_settings(settings) or "",
+        "apiKeySet": bool(settings.arize_phoenix_api_key),
+        "enabled": True,
+        "source": "env_default",
+    }
+
+
+@phoenix_router.put("/config")
+async def update_phoenix_config(update: PhoenixConfigUpdate, _=Depends(require_admin)):
+    """Upserts the one org-wide config row. Admin-only — this is the shared
+    default every onboarding form falls back to, not a per-user preference."""
+    async with get_db_session() as db:
+        result = await db.execute(select(PhoenixConfig).where(PhoenixConfig.org_id == "org-default"))
+        row = result.scalar_one_or_none()
+        if row:
+            row.endpoint = update.endpoint or None
+            # An empty api_key in the request means "leave it as-is" (the GET
+            # above never echoes the real key back, only whether one is set)
+            # — only overwrite when a real value is actually supplied.
+            if update.api_key:
+                row.api_key = update.api_key
+            row.enabled = update.enabled
+        else:
+            db.add(PhoenixConfig(
+                id=secrets.token_hex(8), org_id="org-default",
+                endpoint=update.endpoint or None, api_key=update.api_key or None, enabled=update.enabled,
+            ))
+        return {"status": "saved"}
+
+
+@phoenix_router.get("/projects")
+async def phoenix_projects(_=Depends(require_read)):
+    """Every project Phoenix currently knows about — backs the "link this
+    agent to its real telemetry" picker in the onboarding/edit form. Real
+    discovery, not a guess: a project only appears here if Phoenix actually
+    has traces filed under that name. Always resolves against the COMMON
+    endpoint (org-wide discovery isn't scoped to one agent's custom override).
+
+    Returns an explicit `reachable: false` (never a 500) when Phoenix itself
+    can't be reached — that's a real, expected state for local dev with no
+    Phoenix running, not a bug to surface as a crash."""
+    from discovery.phoenix_client import PhoenixClient, PhoenixError
+
+    async with get_db_session() as db:
+        base_url, api_key = await _resolve_phoenix_endpoint(db, agent=None)
+    if not base_url:
+        return {"reachable": False, "reason": "No Phoenix endpoint configured", "projects": []}
+
+    try:
+        async with PhoenixClient(base_url, api_key=api_key) as client:
+            projects = await client.projects()
+        return {"reachable": True, "projects": projects}
+    except PhoenixError as exc:
+        return {"reachable": False, "reason": str(exc), "projects": []}
+
+
+@agents_router.get("/{agent_id}/reconstructed-graph")
+async def agent_reconstructed_graph(agent_id: str, _=Depends(require_read)):
+    """Reconstructs this agent's real dependency diagram from its actual
+    Phoenix traces — what the app's architecture looks like from what it
+    ACTUALLY did, as opposed to `/graph` above (this agent's hand-declared
+    `calls`/`consumers` fields). See discovery/reconstruct.py.
+
+    Resolves the tracing endpoint to use in priority order: this agent's own
+    `phoenix_endpoint` override (a "custom endpoint" pick at onboarding),
+    then the org-wide common config, then this deployment's own env default.
+
+    Four distinct "nothing to show" states, never conflated into one generic
+    error: agent not linked to a project at all, Phoenix unreachable, a
+    linked project with zero spans (real for a freshly onboarded app with no
+    traffic yet), and a real reconstructed diagram."""
+    from discovery.phoenix_client import PhoenixClient, PhoenixError
+    from discovery.reconstruct import reconstruct
+
+    async with get_db_session() as db:
+        result = await db.execute(select(Agent).where(Agent.id == agent_id))
+        agent = result.scalar_one_or_none()
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        project = agent.phoenix_project
+        if not project:
+            return {"status": "not_linked", "project": None, "spanCount": 0, "traceCount": 0, "nodes": [], "edges": []}
+        base_url, api_key = await _resolve_phoenix_endpoint(db, agent=agent)
+
+    if not base_url:
+        return {"status": "phoenix_unreachable", "project": project, "reason": "No Phoenix endpoint configured", "spanCount": 0, "traceCount": 0, "nodes": [], "edges": []}
+
+    try:
+        async with PhoenixClient(base_url, api_key=api_key) as client:
+            spans = [span async for span in client.spans(project)]
+    except PhoenixError as exc:
+        return {"status": "phoenix_unreachable", "project": project, "reason": str(exc), "spanCount": 0, "traceCount": 0, "nodes": [], "edges": []}
+
+    graph = reconstruct(spans)
+    return {"status": "ok" if graph["spanCount"] else "no_traces_yet", "project": project, **graph}
+
+
+def _phoenix_rest_base_url_from_settings(settings) -> str | None:
+    """Phoenix's REST API (`/v1/projects`, ...) lives on the same host as the
+    OTLP trace-ingest endpoint this app already exports to
+    (`phoenix_collector_endpoint`, e.g. `https://zaf-phoenix.../v1/traces`)
+    — strip the ingest-specific `/v1/traces` suffix to get the base URL the
+    REST endpoints hang off. Falls back to `phoenix_host`/`phoenix_port` for
+    local dev, matching observability/tracing.py's own fallback."""
+    endpoint = (settings.phoenix_collector_endpoint or "").rstrip("/")
+    if endpoint:
+        return endpoint[: -len("/v1/traces")] if endpoint.endswith("/v1/traces") else endpoint
+    if settings.phoenix_host:
+        return f"http://{settings.phoenix_host}:{settings.phoenix_port}"
+    return None
+
+
+async def _resolve_phoenix_endpoint(db: AsyncSession, agent: "Agent | None") -> tuple[str | None, str | None]:
+    """(base_url, api_key), resolved in priority order: agent's own custom
+    endpoint (no stored key for a custom endpoint — this deployment doesn't
+    have credentials for an arbitrary third-party Phoenix) -> saved org
+    config row -> this deployment's own env default."""
+    if agent is not None and agent.phoenix_endpoint:
+        return agent.phoenix_endpoint.rstrip("/"), None
+
+    result = await db.execute(select(PhoenixConfig).where(PhoenixConfig.org_id == "org-default"))
+    row = result.scalar_one_or_none()
+    if row and row.enabled and row.endpoint:
+        return row.endpoint.rstrip("/"), row.api_key or None
+
+    settings = get_settings()
+    return _phoenix_rest_base_url_from_settings(settings), settings.arize_phoenix_api_key or None
+
+
+# ── Risk register (governance/risk_categories.py, risk_detection.py) ────────
+#
+# Six fixed categories. Five (SECURITY, DATA_PRIVACY, OPERATIONAL, COMPLIANCE,
+# REPUTATIONAL) live in agent_risks, upserted by a /risks/scan call. FINANCIAL
+# is never stored here — it's read live from the existing waste_findings /
+# cost_anomalies tables, so it can never drift out of sync with those.
+
+def _financial_findings_from_db_rows(waste_rows: list, anomaly_rows: list) -> list[dict]:
+    findings = []
+    for w in waste_rows:
+        if w.status != "open":
+            continue
+        findings.append({
+            "category": "FINANCIAL", "severity": w.severity,
+            "title": f"Waste: {w.waste_type}", "description": w.recommendation,
+            "source": "auto", "agentId": w.agent_id,
+        })
+    for a in anomaly_rows:
+        if a.resolved_at is not None:
+            continue
+        findings.append({
+            "category": "FINANCIAL", "severity": a.severity,
+            "title": f"Cost anomaly: {a.anomaly_type}", "description": None,
+            "source": "auto", "agentId": a.agent_id,
+        })
+    return findings
+
+
+@agents_router.post("/{agent_id}/risks/scan")
+async def scan_agent_risks(agent_id: str, _=Depends(require_update)):
+    """Runs governance/risk_detection.py against this agent's current state
+    (+ its reconstructed-trace error rate, if it's linked to a Phoenix
+    project) and replaces its stored findings with the fresh result — a scan
+    reports CURRENT state, not an accumulating log, so re-scanning a
+    since-fixed agent correctly clears an old finding rather than piling up
+    a duplicate every time someone clicks the button."""
+    from discovery.phoenix_client import PhoenixClient, PhoenixError
+    from discovery.reconstruct import reconstruct
+    from governance.risk_detection import detect_risks
+
+    async with get_db_session() as db:
+        result = await db.execute(
+            select(Agent).where(Agent.id == agent_id).options(selectinload(Agent.governance_reviews))
+        )
+        agent = result.scalar_one_or_none()
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        agent_dict = _agent_to_dict(agent)
+
+        graph = None
+        if agent.phoenix_project:
+            base_url, api_key = await _resolve_phoenix_endpoint(db, agent=agent)
+            if base_url:
+                try:
+                    async with PhoenixClient(base_url, api_key=api_key) as client:
+                        spans = [span async for span in client.spans(agent.phoenix_project)]
+                    graph = {"status": "ok", **reconstruct(spans)}
+                except PhoenixError:
+                    graph = None  # best-effort — a scan still runs the other 4 categories
+
+        findings = detect_risks(agent_dict, graph)
+
+        # Replace this agent's stored findings wholesale (delete + reinsert
+        # in the same transaction) rather than trying to diff — five
+        # categories, at most one row per category, makes a diff not worth
+        # the complexity a delete+reinsert avoids.
+        await db.execute(AgentRisk.__table__.delete().where(AgentRisk.agent_id == agent_id))
+        for f in findings:
+            db.add(AgentRisk(
+                id=secrets.token_hex(8), agent_id=agent_id,
+                category=f["category"], severity=f["severity"],
+                title=f["title"], description=f.get("description"), source="auto",
+            ))
+        return {"status": "scanned", "findingCount": len(findings), "findings": findings}
+
+
+@agents_router.get("/{agent_id}/risks")
+async def agent_risks(agent_id: str, _=Depends(require_read)):
+    """This agent's current findings across all six categories — the five
+    stored ones plus FINANCIAL read live from waste/cost-anomaly."""
+    async with get_db_session() as db:
+        agent_result = await db.execute(select(Agent).where(Agent.id == agent_id))
+        if agent_result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        risk_result = await db.execute(select(AgentRisk).where(AgentRisk.agent_id == agent_id, AgentRisk.status == "open"))
+        waste_result = await db.execute(select(WasteFinding).where(WasteFinding.agent_id == agent_id))
+        anomaly_result = await db.execute(select(CostAnomaly).where(CostAnomaly.agent_id == agent_id))
+
+        findings = [
+            {"id": r.id, "category": r.category, "severity": r.severity, "title": r.title,
+             "description": r.description, "source": r.source, "detectedAt": r.detected_at.isoformat() if r.detected_at else None}
+            for r in risk_result.scalars().all()
+        ]
+        findings += _financial_findings_from_db_rows(list(waste_result.scalars().all()), list(anomaly_result.scalars().all()))
+        return {"agentId": agent_id, "findings": findings}
+
+
+@governance_router.get("/risks/summary")
+async def risks_summary(_=Depends(require_read)):
+    """Portfolio-wide risk counts, in the two shapes a pie chart and a
+    heatmap each need directly (no client-side pivoting) — byCategory for
+    the pie, byCategoryAndSeverity for the heatmap grid."""
+    from governance.risk_categories import CATEGORY_LABELS, SEVERITY_ORDER
+
+    async with get_db_session() as db:
+        risk_result = await db.execute(select(AgentRisk).where(AgentRisk.status == "open"))
+        waste_result = await db.execute(select(WasteFinding).where(WasteFinding.status == "open"))
+        anomaly_result = await db.execute(select(CostAnomaly).where(CostAnomaly.resolved_at.is_(None)))
+
+    all_findings = [
+        {"category": r.category, "severity": r.severity} for r in risk_result.scalars().all()
+    ] + _financial_findings_from_db_rows(list(waste_result.scalars().all()), list(anomaly_result.scalars().all()))
+
+    by_category: dict[str, int] = {cat: 0 for cat in CATEGORY_LABELS}
+    grid: dict[str, dict[str, int]] = {cat: {sev: 0 for sev in SEVERITY_ORDER} for cat in CATEGORY_LABELS}
+    for f in all_findings:
+        cat, sev = f["category"], f["severity"]
+        if cat not in by_category or sev not in SEVERITY_ORDER:
+            continue  # a malformed row must never blank the whole summary
+        by_category[cat] += 1
+        grid[cat][sev] += 1
+
+    return {
+        "totalFindings": len(all_findings),
+        "byCategory": [{"category": c, "label": CATEGORY_LABELS[c], "count": n} for c, n in by_category.items()],
+        "severities": SEVERITY_ORDER,
+        "heatmap": [
+            {"category": c, "label": CATEGORY_LABELS[c], "counts": grid[c]} for c in by_category
+        ],
+    }
+
+
+# ── Economics (governance/economics.py) — revenue vs expenditure ────────────
+
+@agents_router.get("/{agent_id}/economics")
+async def agent_economics_endpoint(agent_id: str, _=Depends(require_read)):
+    from governance.economics import agent_economics
+
+    async with get_db_session() as db:
+        result = await db.execute(select(Agent).where(Agent.id == agent_id))
+        agent = result.scalar_one_or_none()
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        cost_result = await db.execute(select(func.sum(AgentMetric.total_cost)).where(AgentMetric.agent_id == agent_id))
+        token_cost = cost_result.scalar() or 0.0
+
+    econ = agent_economics(value_amount=agent.value_amount, stage=agent.lifecycle_stage, token_cost_dollars=token_cost)
+    return {"agentId": agent_id, "stage": agent.lifecycle_stage, **econ}
+
+
+@value_waste_router.get("/value/economics")
+async def portfolio_economics(_=Depends(require_read)):
+    """Portfolio-wide revenue vs expenditure — the executive dashboard's
+    headline comparison. Per-agent breakdown included so a caller can chart
+    both the totals and which agents drive them, in one call."""
+    from governance.economics import agent_economics
+
+    async with get_db_session() as db:
+        agents_result = await db.execute(select(Agent))
+        agents = list(agents_result.scalars().all())
+        cost_result = await db.execute(
+            select(AgentMetric.agent_id, func.sum(AgentMetric.total_cost)).group_by(AgentMetric.agent_id)
+        )
+        token_costs = {row[0]: row[1] or 0.0 for row in cost_result.all()}
+
+    rows = []
+    total_revenue = total_expenditure = 0
+    for a in agents:
+        econ = agent_economics(value_amount=a.value_amount, stage=a.lifecycle_stage, token_cost_dollars=token_costs.get(a.id, 0.0))
+        total_revenue += econ["revenueCents"]
+        total_expenditure += econ["expenditureCents"]
+        rows.append({"agentId": a.id, "name": a.name, "stage": a.lifecycle_stage, **econ})
+
+    rows.sort(key=lambda r: r["revenueCents"], reverse=True)
+    return {
+        "totalRevenueCents": total_revenue,
+        "totalExpenditureCents": total_expenditure,
+        "totalNetCents": total_revenue - total_expenditure,
+        "agents": rows,
+    }
+
 
 # -- V2 Features (F-59, F-66, F-67) ------------------------------------------
 

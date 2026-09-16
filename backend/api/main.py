@@ -12,7 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routers import example, health
 from api.routers.registry import (
     agents_router, governance_router, discovery_router,
-    tokenomics_router, graph_router, value_waste_router, admin_router, auth_router
+    tokenomics_router, graph_router, value_waste_router, admin_router, auth_router,
+    phoenix_router
 )
 from api.error_handling import add_error_handling
 from api.rate_limiting import RateLimitMiddleware
@@ -89,6 +90,7 @@ app.include_router(tokenomics_router)
 app.include_router(graph_router)
 app.include_router(value_waste_router)
 app.include_router(admin_router)
+app.include_router(phoenix_router)
 # Orchestration and WebSocket routers
 from api.routers.orchestrations import router as orchestrations_router
 from api.websocket_events import router as websocket_router

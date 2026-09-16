@@ -75,6 +75,18 @@ class Agent(Base):
     framework: Mapped[Optional[str]] = mapped_column(String(100))
     api_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
     sla: Mapped[Optional[str]] = mapped_column(String(255))
+    # Which Phoenix project this agent's real traces are exported under (see
+    # discovery/phoenix_client.py) — a human-set link, never guessed from the
+    # agent name, since a real deployment's OTel service/project name doesn't
+    # reliably match its registry display name (e.g. "retail bank onboarding"
+    # vs the real project "retail-onboarding"). NULL means "not linked yet" —
+    # the Diagram tab shows a clear empty state for that, not an error.
+    phoenix_project: Mapped[Optional[str]] = mapped_column(String(255))
+    # Per-agent OVERRIDE of the org-wide common endpoint (PhoenixConfig / the
+    # Settings tab) — NULL means "use the common one". Set only when this
+    # specific app exports traces to its own Phoenix/OTel collector instead
+    # of the shared org instance (the onboarding form's endpoint dropdown).
+    phoenix_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
 
     # Value
     value_amount: Mapped[int] = mapped_column(Integer, default=0)
@@ -289,6 +301,38 @@ class CostAnomaly(Base):
     details: Mapped[Optional[dict]] = mapped_column(JSON)
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     resolved_by: Mapped[Optional[str]] = mapped_column(String(255))
+
+
+# The general (non-financial) risk register. Financial risk stays modeled as
+# WasteFinding/CostAnomaly above, deliberately not duplicated here — the
+# portfolio-wide risk summary endpoint (governance/risks/summary) merges rows
+# from all three tables into one categorized view rather than one table
+# trying to be everything. Categories are a closed, fixed set (see
+# governance/risk_categories.py) — this column is NOT a free-text field a
+# caller can invent a new category into.
+class AgentRisk(Base):
+    __tablename__ = "agent_risks"
+    __table_args__ = (
+        Index("idx_agent_risks_agent_id", "agent_id"),
+        Index("idx_agent_risks_category", "category"),
+        Index("idx_agent_risks_status", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id"), nullable=False)
+    category: Mapped[str] = mapped_column(String(30), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, default="LOW")
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    # How this finding was produced — "auto" findings come from
+    # governance/risk_detection.py reading real signals (governance gate
+    # status, reconstructed-trace error rates); "manual" ones are hand-added
+    # by a reviewer. Never silently overwritten by a re-scan either way — see
+    # that module's upsert logic.
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="auto")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class User(Base):

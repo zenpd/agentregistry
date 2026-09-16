@@ -87,6 +87,7 @@ export interface Agent {
   atRisk: boolean
   timeInStageWeeks?: number
   reviews?: Record<string, string>
+  phoenixProject?: string | null
 }
 
 export interface PaginationInfo {
@@ -153,6 +154,112 @@ export const updateAgent = (id: string, updates: Partial<Agent>) =>
 
 export const deleteAgent = (id: string) =>
   api.delete<{ status: string }>(`/agents/${id}`)
+
+// ── Phoenix discovery — reconstructing an onboarded app's real dependency
+// diagram from its actual traces, not its hand-declared calls/consumers ──────
+
+export interface PhoenixProjectsResponse {
+  reachable: boolean
+  reason?: string
+  projects: string[]
+}
+
+export const getPhoenixProjects = () =>
+  api.get<PhoenixProjectsResponse>('/phoenix/projects')
+
+export interface ReconstructedNode {
+  id: string
+  name: string
+  kind: string
+  count: number
+  errorCount: number
+  avgLatencyMs: number | null
+}
+
+export interface ReconstructedEdge {
+  from: string
+  to: string
+  count: number
+}
+
+export interface ReconstructedGraph {
+  status: 'not_linked' | 'phoenix_unreachable' | 'no_traces_yet' | 'ok'
+  project: string | null
+  reason?: string
+  spanCount: number
+  traceCount: number
+  nodes: ReconstructedNode[]
+  edges: ReconstructedEdge[]
+}
+
+export const getReconstructedGraph = (agentId: string) =>
+  api.get<ReconstructedGraph>(`/agents/${agentId}/reconstructed-graph`)
+
+// ── Phoenix config (Settings tab — the "common" tracing endpoint) ───────────
+
+export interface PhoenixConfigResponse {
+  endpoint: string
+  apiKeySet: boolean
+  enabled: boolean
+  source: 'saved' | 'env_default'
+}
+
+export const getPhoenixConfig = () => api.get<PhoenixConfigResponse>('/phoenix/config')
+
+export const updatePhoenixConfig = (update: { endpoint: string; api_key?: string; enabled: boolean }) =>
+  api.put<{ status: string }>('/phoenix/config', update)
+
+// ── Risk register (governance/risk_categories.py) ────────────────────────────
+
+export interface RiskFinding {
+  id?: string
+  category: string
+  severity: string
+  title: string
+  description?: string | null
+  source?: string
+  detectedAt?: string | null
+  agentId?: string
+}
+
+export const scanAgentRisks = (agentId: string) =>
+  api.post<{ status: string; findingCount: number; findings: RiskFinding[] }>(`/agents/${agentId}/risks/scan`)
+
+export const getAgentRisks = (agentId: string) =>
+  api.get<{ agentId: string; findings: RiskFinding[] }>(`/agents/${agentId}/risks`)
+
+export interface RiskSummary {
+  totalFindings: number
+  byCategory: { category: string; label: string; count: number }[]
+  severities: string[]
+  heatmap: { category: string; label: string; counts: Record<string, number> }[]
+}
+
+export const getRiskSummary = () => api.get<RiskSummary>('/governance/risks/summary')
+
+// ── Economics (governance/economics.py) — revenue vs expenditure ────────────
+
+export interface AgentEconomics {
+  agentId: string
+  stage: string
+  revenueCents: number
+  tokenCostCents: number
+  estimatedInfraCostCents: number
+  expenditureCents: number
+  netCents: number
+}
+
+export const getAgentEconomics = (agentId: string) =>
+  api.get<AgentEconomics>(`/agents/${agentId}/economics`)
+
+export interface PortfolioEconomics {
+  totalRevenueCents: number
+  totalExpenditureCents: number
+  totalNetCents: number
+  agents: (AgentEconomics & { name: string })[]
+}
+
+export const getPortfolioEconomics = () => api.get<PortfolioEconomics>('/value/economics')
 
 // ── Governance ────────────────────────────────────────────────────────────────
 

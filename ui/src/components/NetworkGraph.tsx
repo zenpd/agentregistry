@@ -25,7 +25,7 @@ const CAT_COLORS: Record<string, string> = {
   mcp: '#8C7CF0',
   sys: '#3DDBD9',
   // Phoenix/OpenInference span kinds (reconstructed-from-traces diagram —
-  // AgentDetailModal's Diagram tab). Uppercase, matching what the backend's
+  // AgentPage's Diagram tab). Uppercase, matching what the backend's
   // discovery/reconstruct.py emits verbatim — never lowercased/aliased, so
   // a color here always matches a real vendor span-kind value, not a guess.
   AGENT: '#6EA8FE',

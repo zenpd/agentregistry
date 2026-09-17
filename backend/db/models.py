@@ -87,6 +87,11 @@ class Agent(Base):
     # specific app exports traces to its own Phoenix/OTel collector instead
     # of the shared org instance (the onboarding form's endpoint dropdown).
     phoenix_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
+    # Free-form markdown the owner pastes at onboarding time to describe the
+    # app in their own words (architecture notes, gotchas, links) — optional,
+    # shown verbatim on the agent's own page. Not parsed/validated; it's
+    # reference context, not structured data the registry reasons over.
+    context_md: Mapped[Optional[str]] = mapped_column(Text)
 
     # Value
     value_amount: Mapped[int] = mapped_column(Integer, default=0)

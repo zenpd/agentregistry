@@ -74,6 +74,9 @@ class AgentCreate(BaseModel):
     # tab) — the onboarding form's dropdown only sends a value here when the
     # user picked "custom endpoint for this app".
     phoenix_endpoint: str = ""
+    # Optional free-form markdown context the owner pastes in at onboarding
+    # time — shown verbatim on the agent's own page, never parsed.
+    context_md: str = ""
 
     @validator("stage")
     def validate_stage(cls, v):
@@ -127,6 +130,7 @@ class AgentUpdate(BaseModel):
     # Agent.phoenix_project's comment in db/models.py).
     phoenix_project: Optional[str] = None
     phoenix_endpoint: Optional[str] = None
+    context_md: Optional[str] = None
 
 
 class GateUpdate(BaseModel):
@@ -289,6 +293,7 @@ async def create_agent(agent: AgentCreate, user=Depends(require_create)):
             outputs=agent.outputs, api_endpoint=agent.api_endpoint, sla=agent.sla,
             phoenix_project=agent.phoenix_project or None,
             phoenix_endpoint=agent.phoenix_endpoint or None,
+            context_md=agent.context_md or None,
         )
         db.add(db_agent)
         for gate in ["arb", "security", "dp"]:
@@ -882,6 +887,7 @@ def _agent_to_dict(agent: Agent) -> dict:
         "reviews": {r.gate: r.status for r in agent.governance_reviews} if agent.governance_reviews else {},
         "phoenixProject": agent.phoenix_project,
         "phoenixEndpoint": agent.phoenix_endpoint,
+        "contextMd": agent.context_md,
     }
 
 

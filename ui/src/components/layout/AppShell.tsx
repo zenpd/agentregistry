@@ -1,17 +1,17 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Sparkles, Settings, Bot, ShieldCheck, LayoutGrid, Building2, Cpu, DollarSign, GitBranch, Lock } from 'lucide-react'
+import { Sparkles, Settings, Bot, ShieldCheck, LayoutGrid, Cpu, GitBranch } from 'lucide-react'
 import type { ReactNode } from 'react'
 
+// Trimmed to what's still distinct now that agent-level detail (diagram,
+// governance, risk, economics) lives on each agent's own page: Business,
+// Tokenomics, Security and Dashboard were folded into the Executive
+// dashboard's KPIs / revenue-vs-expenditure / risk pie+heatmap sections.
 const NAV = [
   { to: '/', label: 'Executive', icon: LayoutGrid },
   { to: '/agents', label: 'AI Registry', icon: Bot },
   { to: '/governance', label: 'Governance', icon: ShieldCheck },
-  { to: '/business', label: 'Business', icon: Building2 },
   { to: '/platform', label: 'Platform', icon: Cpu },
-  { to: '/tokenomics', label: 'Tokenomics', icon: DollarSign },
   { to: '/dependencies', label: 'Dependencies', icon: GitBranch },
-  { to: '/security', label: 'Security', icon: Lock },
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/playground', label: 'Playground', icon: Sparkles },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]

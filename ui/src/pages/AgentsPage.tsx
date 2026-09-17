@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { getAgents, getTaxonomy, type Agent, type Taxonomy } from '../services/api'
-import AgentDetailModal from '../components/AgentDetailModal'
+import OnboardingModal from '../components/OnboardingModal'
 
 const STAGE_PILL: Record<string, string> = {
   Ideation: 'status-pending',
@@ -11,6 +12,7 @@ const STAGE_PILL: Record<string, string> = {
 }
 
 export default function AgentsPage() {
+  const navigate = useNavigate()
   const [agents, setAgents] = useState<Agent[]>([])
   const [taxonomy, setTaxonomy] = useState<Taxonomy | null>(null)
   const [loading, setLoading] = useState(true)
@@ -20,7 +22,7 @@ export default function AgentsPage() {
   const [typeFilter, setTypeFilter] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
   const [catFilter, setCatFilter] = useState('')
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
+  const [showOnboarding, setShowOnboarding] = useState(false)
 
   useEffect(() => { fetchData() }, [])
 
@@ -72,7 +74,7 @@ export default function AgentsPage() {
     <div className="space-y-4 animate-fade-in">
       <div className="page-header">
         <h1 className="page-title text-2xl">AI Registry</h1>
-        <button onClick={() => setSelectedAgent('new')} className="btn-primary">
+        <button onClick={() => setShowOnboarding(true)} className="btn-primary">
           + Register new AI application
         </button>
       </div>
@@ -126,7 +128,7 @@ export default function AgentsPage() {
         {filtered.map(a => (
           <div
             key={a.id}
-            onClick={() => setSelectedAgent(a.id)}
+            onClick={() => navigate(`/agents/${a.id}`)}
             className="card-hover p-4"
           >
             <div className="flex justify-between items-start gap-2">
@@ -159,11 +161,10 @@ export default function AgentsPage() {
         ))}
       </div>
 
-      {selectedAgent && (
-        <AgentDetailModal
-          agentId={selectedAgent}
-          onClose={() => setSelectedAgent(null)}
-          onSaved={() => { setSelectedAgent(null); fetchData() }}
+      {showOnboarding && (
+        <OnboardingModal
+          onClose={() => setShowOnboarding(false)}
+          onSaved={() => { setShowOnboarding(false); fetchData() }}
         />
       )}
     </div>

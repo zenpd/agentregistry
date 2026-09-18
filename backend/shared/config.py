@@ -74,6 +74,23 @@ class Settings(BaseSettings):
     arize_phoenix_api_key: str = ""          # resolved from KV
     arize_phoenix_api_key_kv_uri: str = ""
 
+    # ── Agent operations ───────────────────────────────────────────────────────
+    # In-process daily jobs (usage ingestion, cost rollup, risk scan, ...).
+    scheduler_enabled: bool = False
+    # Days of Phoenix history to backfill the first time an agent is ingested.
+    usage_backfill_days: int = 30
+    # Azure Cost Management scope, e.g. /subscriptions/<id> or
+    # /subscriptions/<id>/resourceGroups/<rg>. Empty = infra collector not configured.
+    azure_cost_scope: str = ""
+    azure_cost_tag_key: str = "agent-id"
+    # Approval validity for governance gates, by agent risk level (days).
+    gate_validity_days_high: int = 180
+    gate_validity_days_default: int = 365
+    # Blended hourly rate used to value hours saved (USD).
+    blended_hourly_rate_usd: float = 60.0
+    # context.md analysis with the Azure OpenAI deployment (rule-based always runs).
+    context_llm_enabled: bool = True
+
     # ── Prompts ────────────────────────────────────────────────────────────────
     prompts_dir: str = "config/prompts"
 

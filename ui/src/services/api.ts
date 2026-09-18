@@ -32,6 +32,24 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// A 401 means the stored token is missing, invalid or expired (JWTs here are
+// valid for 7 days — a browser tab left open past that, or a token from a
+// stale localStorage, both land here). Every page's own error text otherwise
+// dead-ends the user with no way back in; send them to a fresh login instead.
+// The login POST itself is exempt — a wrong password must stay a form error.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && !error.config?.url?.includes('/auth/login')) {
+      clearAuthToken()
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login'
+      }
+    }
+    return Promise.reject(error)
+  },
+)
+
 // ── Bootstrap API (existing) ─────────────────────────────────────────────────
 
 export interface SessionResponse {
@@ -151,9 +169,6 @@ export const getAgent = (id: string) => api.get<Agent>(`/agents/${id}`)
 export const createAgent = (agent: Partial<Agent>) =>
   api.post<{ id: string; status: string }>('/agents/', agent)
 
-export const updateAgent = (id: string, updates: Partial<Agent>) =>
-  api.put<{ status: string }>(`/agents/${id}`, updates)
-
 export const deleteAgent = (id: string) =>
   api.delete<{ status: string }>(`/agents/${id}`)
 
@@ -184,19 +199,6 @@ export interface ReconstructedEdge {
   count: number
 }
 
-export interface ReconstructedGraph {
-  status: 'not_linked' | 'phoenix_unreachable' | 'no_traces_yet' | 'ok'
-  project: string | null
-  reason?: string
-  spanCount: number
-  traceCount: number
-  nodes: ReconstructedNode[]
-  edges: ReconstructedEdge[]
-}
-
-export const getReconstructedGraph = (agentId: string) =>
-  api.get<ReconstructedGraph>(`/agents/${agentId}/reconstructed-graph`)
-
 // ── Phoenix config (Settings tab — the "common" tracing endpoint) ───────────
 
 export interface PhoenixConfigResponse {
@@ -212,23 +214,6 @@ export const updatePhoenixConfig = (update: { endpoint: string; api_key?: string
   api.put<{ status: string }>('/phoenix/config', update)
 
 // ── Risk register (governance/risk_categories.py) ────────────────────────────
-
-export interface RiskFinding {
-  id?: string
-  category: string
-  severity: string
-  title: string
-  description?: string | null
-  source?: string
-  detectedAt?: string | null
-  agentId?: string
-}
-
-export const scanAgentRisks = (agentId: string) =>
-  api.post<{ status: string; findingCount: number; findings: RiskFinding[] }>(`/agents/${agentId}/risks/scan`)
-
-export const getAgentRisks = (agentId: string) =>
-  api.get<{ agentId: string; findings: RiskFinding[] }>(`/agents/${agentId}/risks`)
 
 export interface RiskSummary {
   totalFindings: number
@@ -251,8 +236,6 @@ export interface AgentEconomics {
   netCents: number
 }
 
-export const getAgentEconomics = (agentId: string) =>
-  api.get<AgentEconomics>(`/agents/${agentId}/economics`)
 
 export interface PortfolioEconomics {
   totalRevenueCents: number
@@ -262,77 +245,6 @@ export interface PortfolioEconomics {
 }
 
 export const getPortfolioEconomics = () => api.get<PortfolioEconomics>('/value/economics')
-
-// ── Per-agent tokenomics detail (real usage rows in agent_token_usage /
-// agent_budgets / model_token_prices — the Tokenomics tab on the agent page).
-// Distinct from AgentEconomics above: economics is the executive-level
-// revenue-vs-expenditure roll-up; these are the underlying usage/cost/budget
-// mechanics that roll up into its expenditure side. ─────────────────────────
-
-export interface AgentTokenSummary {
-  agentId: string
-  inputTokens: number
-  outputTokens: number
-  cachedTokens: number
-  invocations: number
-  costCents: number
-  costPerInvocation: number
-}
-
-export const getAgentTokenSummary = (agentId: string) =>
-  api.get<AgentTokenSummary>(`/agents/${agentId}/tokens/summary`)
-
-export interface TokenTrendPoint {
-  date: string
-  inputTokens: number
-  outputTokens: number
-  invocations: number
-}
-
-export const getAgentTokenTrend = (agentId: string, days = 30) =>
-  api.get<{ agentId: string; days: number; trend: TokenTrendPoint[] }>(`/agents/${agentId}/tokens/trend?days=${days}`)
-
-export interface AgentCost {
-  agentId: string
-  monthlyCost: number
-  costPerInvocation: number
-}
-
-export const getAgentCost = (agentId: string) => api.get<AgentCost>(`/agents/${agentId}/cost`)
-
-export interface CostForecast {
-  agentId: string
-  currentMonthlyAvg: number
-  forecast: { month: number; projectedCost: number }[]
-  totalProjected: number
-}
-
-export const getAgentCostForecast = (agentId: string, months = 3) =>
-  api.get<CostForecast>(`/agents/${agentId}/cost/forecast?months=${months}`)
-
-export interface AgentBudgetStatus {
-  agentId: string
-  monthlyBudget: number
-  currentSpend: number
-  remaining: number
-  budgetUsagePct: number
-}
-
-export const getAgentBudget = (agentId: string) => api.get<AgentBudgetStatus>(`/agents/${agentId}/budget`)
-
-// Note: this one endpoint predates the camelCase convention used everywhere
-// else in this file — kept as the backend actually returns it (snake_case)
-// rather than silently renaming fields that wouldn't then match the response.
-export interface CostPerOutcome {
-  agent_id: string
-  total_cost: number
-  business_outcome: number
-  cost_per_outcome: number
-  efficiency_rating: string
-}
-
-export const getCostPerOutcome = (agentId: string) =>
-  api.get<CostPerOutcome>(`/agents/${agentId}/cost/business-outcome`)
 
 // ── Governance ────────────────────────────────────────────────────────────────
 
@@ -546,9 +458,6 @@ export const createUser = (data: { email: string; name: string; role: string; pa
   api.post<{ id: string; status: string }>('/admin/users', data)
 
 // ── V2 Features ──────────────────────────────────────────────────────────────
-// (getAgentTokenTrend / getCostPerOutcome live above, next to the rest of the
-// per-agent tokenomics block — this section previously had stale, unused,
-// mis-typed duplicates of both.)
 
 export const findDuplicates = () =>
   api.get<{ duplicates: { agent_a: { id: string; name: string; dept: string }; agent_b: { id: string; name: string; dept: string }; similarity: number; shared_endpoint: boolean; shared_systems: string[] }[]; count: number }>('/agents/duplicates')

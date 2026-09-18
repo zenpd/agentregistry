@@ -40,8 +40,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.error("database.init_failed", error=str(e))
 
+    from orchestrations.scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
+
     log.info("api.startup", env=settings.app_env, version=APP_VERSION)
     yield
+    await stop_scheduler()
     log.info("api.shutdown")
 
 
@@ -83,6 +87,9 @@ add_error_handling(app)
 app.include_router(health.router, tags=["Health"])
 app.include_router(example.router, prefix="/api/v1/example", tags=["Example"])
 app.include_router(auth_router)
+from api.routers.ops import ROUTERS as OPS_ROUTERS
+for _ops_router in OPS_ROUTERS:
+    app.include_router(_ops_router)
 app.include_router(agents_router)
 app.include_router(governance_router)
 app.include_router(discovery_router)

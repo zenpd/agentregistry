@@ -67,10 +67,84 @@ SEED_MODEL_PRICES = [
 ]
 
 
+# Azure OpenAI Global Standard list prices, USD per 1M tokens.
+REFERENCE_MODEL_PRICES = [
+    {"id": "price-gpt-4.1", "model_name": "gpt-4.1", "provider": "azure-openai", "input_price_per_1m": 2.00, "output_price_per_1m": 8.00, "cache_read_price_per_1m": 0.50, "tier": "mid"},
+    {"id": "price-gpt-4.1-mini", "model_name": "gpt-4.1-mini", "provider": "azure-openai", "input_price_per_1m": 0.40, "output_price_per_1m": 1.60, "cache_read_price_per_1m": 0.10, "tier": "lightweight"},
+    {"id": "price-gpt-4.1-nano", "model_name": "gpt-4.1-nano", "provider": "azure-openai", "input_price_per_1m": 0.10, "output_price_per_1m": 0.40, "cache_read_price_per_1m": 0.025, "tier": "lightweight"},
+    {"id": "price-gpt-4o", "model_name": "gpt-4o", "provider": "azure-openai", "input_price_per_1m": 2.50, "output_price_per_1m": 10.00, "cache_read_price_per_1m": 1.25, "tier": "mid"},
+    {"id": "price-gpt-4o-mini", "model_name": "gpt-4o-mini", "provider": "azure-openai", "input_price_per_1m": 0.15, "output_price_per_1m": 0.60, "cache_read_price_per_1m": 0.075, "tier": "lightweight"},
+    {"id": "price-text-embedding-3-small", "model_name": "text-embedding-3-small", "provider": "azure-openai", "input_price_per_1m": 0.02, "output_price_per_1m": 0.0, "cache_read_price_per_1m": 0.0, "tier": "lightweight"},
+]
+
+REFERENCE_MODEL_ALIASES = {
+    "gpt-4.1-2025-04-14": "gpt-4.1",
+    "gpt-4.1-mini-2025-04-14": "gpt-4.1-mini",
+    "gpt-4.1-nano-2025-04-14": "gpt-4.1-nano",
+    "gpt-4o-2024-08-06": "gpt-4o",
+    "gpt-4o-2024-11-20": "gpt-4o",
+    "gpt-4o-mini-2024-07-18": "gpt-4o-mini",
+}
+
+
+def _sql_default(column):
+    default = column.default.arg if column.default is not None and not callable(column.default.arg) else None
+    if isinstance(default, bool):
+        return " DEFAULT " + ("1" if default else "0")
+    if isinstance(default, (int, float)):
+        return f" DEFAULT {default}"
+    if isinstance(default, str):
+        return " DEFAULT '" + default.replace("'", "''") + "'"
+    return ""
+
+
+async def sync_missing_columns() -> list[str]:
+    """create_all never alters existing tables; add any model column the
+    live table lacks (dev convenience — production uses Alembic)."""
+    from sqlalchemy import inspect
+
+    added: list[str] = []
+    async with engine.begin() as conn:
+        def _sync(sync_conn):
+            insp = inspect(sync_conn)
+            existing_tables = set(insp.get_table_names())
+            for table in Base.metadata.sorted_tables:
+                if table.name not in existing_tables:
+                    continue
+                have = {c["name"] for c in insp.get_columns(table.name)}
+                for column in table.columns:
+                    if column.name in have:
+                        continue
+                    col_type = column.type.compile(dialect=sync_conn.dialect)
+                    sync_conn.exec_driver_sql(
+                        f'ALTER TABLE {table.name} ADD COLUMN {column.name} {col_type}{_sql_default(column)}'
+                    )
+                    added.append(f"{table.name}.{column.name}")
+        await conn.run_sync(_sync)
+    return added
+
+
+async def ensure_reference_data() -> None:
+    """Idempotent: prices and aliases for the models actually seen in traces."""
+    from db.models import ModelAlias
+
+    async with get_db_session() as db:
+        for price in REFERENCE_MODEL_PRICES:
+            if await db.get(ModelTokenPrice, price["id"]) is None:
+                db.add(ModelTokenPrice(**price))
+        for alias, model_name in REFERENCE_MODEL_ALIASES.items():
+            if await db.get(ModelAlias, alias) is None:
+                db.add(ModelAlias(alias=alias, model_name=model_name))
+
+
 async def init_db():
     """Initialize database tables and seed data."""
     print("Creating tables...")
     await create_all_tables()
+    added = await sync_missing_columns()
+    if added:
+        print(f"Added missing columns: {', '.join(added)}")
+    await ensure_reference_data()
 
     async with get_db_session() as db:
         # Check if already seeded

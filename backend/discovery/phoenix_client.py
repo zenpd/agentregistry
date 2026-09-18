@@ -68,7 +68,16 @@ class PhoenixClient:
         page = await self._get("/v1/projects", params={"limit": PAGE_SIZE})
         return [p["name"] for p in (page or {}).get("data") or []]
 
-    async def spans(self, project: str, limit: int = PAGE_SIZE, max_pages: int = 5) -> AsyncIterator[dict]:
+    async def spans(
+        self,
+        project: str,
+        limit: int = PAGE_SIZE,
+        max_pages: int = 5,
+        *,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        span_kind: str | None = None,
+    ) -> AsyncIterator[dict]:
         """Spans for one project, newest first, page by page.
 
         `max_pages` bounds the sweep (default up to `max_pages * limit` =
@@ -82,6 +91,12 @@ class PhoenixClient:
         pages_fetched = 0
         while pages_fetched < max_pages:
             params: dict[str, Any] = {"limit": limit}
+            if start_time:
+                params["start_time"] = start_time
+            if end_time:
+                params["end_time"] = end_time
+            if span_kind:
+                params["span_kind"] = span_kind
             if cursor:
                 params["cursor"] = cursor
             page = await self._get(f"/v1/projects/{project}/spans", params=params)

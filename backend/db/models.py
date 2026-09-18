@@ -166,6 +166,11 @@ class GovernanceReview(Base):
     reviewer: Mapped[Optional[str]] = mapped_column(String(255))
     notes: Mapped[Optional[str]] = mapped_column(Text)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    conditions: Mapped[Optional[str]] = mapped_column(Text)
+    evidence: Mapped[list] = mapped_column(JSON, default=list)
+    checklist: Mapped[dict] = mapped_column(JSON, default=dict)
+    # When the current approval stops counting; NULL until approved.
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -230,6 +235,12 @@ class AgentTokenUsage(Base):
     latency_avg_ms: Mapped[Optional[int]] = mapped_column(Integer)
     error_count: Mapped[int] = mapped_column(Integer, default=0)
     iterations_max: Mapped[Optional[int]] = mapped_column(Integer)
+    # "phoenix" rows come from real traces; "seed" rows are demo data and are
+    # ignored for an agent once it has any phoenix rows.
+    source: Mapped[str] = mapped_column(String(20), default="seed")
+    run_count: Mapped[int] = mapped_column(Integer, default=0)
+    raw_model_names: Mapped[list] = mapped_column(JSON, default=list)
+    ingested_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     agent: Mapped["Agent"] = relationship(back_populates="token_usage")
 
@@ -335,9 +346,21 @@ class AgentRisk(Base):
     # by a reviewer. Never silently overwritten by a re-scan either way — see
     # that module's upsert logic.
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="auto")
+    # Lifecycle: open → acknowledged → mitigating → resolved, or accepted
+    # (until accepted_until). A re-scan closes auto findings whose condition
+    # cleared and reopens resolved ones that reappear (matched by rule_id).
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    rule_id: Mapped[Optional[str]] = mapped_column(String(100))
+    owner: Mapped[Optional[str]] = mapped_column(String(255))
+    mitigation: Mapped[Optional[str]] = mapped_column(Text)
+    due_date: Mapped[Optional[date]] = mapped_column(Date)
+    accepted_until: Mapped[Optional[date]] = mapped_column(Date)
+    accepted_by: Mapped[Optional[str]] = mapped_column(String(255))
+    last_detected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # Append-only list of {at, by, action, note} entries.
+    history: Mapped[list] = mapped_column(JSON, default=list)
 
 
 class User(Base):
@@ -415,3 +438,118 @@ class ModelRouting(Base):
     model_name: Mapped[str] = mapped_column(String(100), nullable=False)
     routing_pct: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Agent operations (tokenomics, infra cost, context, jobs) ────────────────
+
+class ModelAlias(Base):
+    """Maps a model name as it appears in traces (e.g. gpt-4.1-mini-2025-04-14)
+    to the model_token_prices.model_name it is billed as."""
+    __tablename__ = "model_aliases"
+
+    alias: Mapped[str] = mapped_column(String(150), primary_key=True)
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentInfraProfile(Base):
+    """Owner-declared hosting cost — used when no metered cost exists."""
+    __tablename__ = "agent_infra_profiles"
+
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id"), primary_key=True)
+    platform: Mapped[Optional[str]] = mapped_column(String(100))
+    resource_group: Mapped[Optional[str]] = mapped_column(String(255))
+    monthly_cost_cents: Mapped[int] = mapped_column(Integer, default=0)
+    components: Mapped[list] = mapped_column(JSON, default=list)
+    effective_from: Mapped[Optional[date]] = mapped_column(Date)
+    updated_by: Mapped[Optional[str]] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AgentResourceLink(Base):
+    """Links an Azure resource (or resource group) to an agent for metered
+    cost allocation when the resource has no agent-id tag, or is shared."""
+    __tablename__ = "agent_resource_links"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "resource_id", name="uq_agent_resource_link"),
+        Index("idx_agent_resource_links_agent_id", "agent_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id"), nullable=False)
+    resource_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    share_pct: Mapped[int] = mapped_column(Integer, default=100)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentInfraCost(Base):
+    """Daily metered infrastructure cost per agent and resource
+    (Azure Cost Management)."""
+    __tablename__ = "agent_infra_costs"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "cost_date", "resource_id", name="uq_agent_infra_cost"),
+        Index("idx_agent_infra_costs_agent_id", "agent_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id"), nullable=False)
+    cost_date: Mapped[date] = mapped_column(Date, nullable=False)
+    resource_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    service_name: Mapped[Optional[str]] = mapped_column(String(150))
+    cost_cents: Mapped[int] = mapped_column(Integer, default=0)
+    currency: Mapped[str] = mapped_column(String(10), default="USD")
+    source: Mapped[str] = mapped_column(String(20), default="azure")
+    allocation: Mapped[str] = mapped_column(String(20), default="tag")
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentContextVersion(Base):
+    """Every saved version of an agent's context.md."""
+    __tablename__ = "agent_context_versions"
+    __table_args__ = (
+        Index("idx_agent_context_versions_agent_id", "agent_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id"), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    saved_by: Mapped[Optional[str]] = mapped_column(String(255))
+    saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentContextInsight(Base):
+    """Cached analysis of one context.md version (rule-based always,
+    LLM-assisted when available). Keyed by content hash so it is computed
+    once per version."""
+    __tablename__ = "agent_context_insights"
+
+    content_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id"), nullable=False)
+    sections: Mapped[dict] = mapped_column(JSON, default=dict)
+    completeness_pct: Mapped[int] = mapped_column(Integer, default=0)
+    keyword_hits: Mapped[list] = mapped_column(JSON, default=list)
+    suggested_risks: Mapped[list] = mapped_column(JSON, default=list)
+    suggested_dependencies: Mapped[list] = mapped_column(JSON, default=list)
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    llm_status: Mapped[str] = mapped_column(String(20), default="not_run")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class JobRun(Base):
+    """One execution of a scheduled or manually triggered job."""
+    __tablename__ = "job_runs"
+    __table_args__ = (
+        Index("idx_job_runs_job_started", "job", "started_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    job: Mapped[str] = mapped_column(String(64), nullable=False)
+    agent_id: Mapped[Optional[str]] = mapped_column(String(64))
+    trigger: Mapped[str] = mapped_column(String(20), default="manual")
+    status: Mapped[str] = mapped_column(String(20), default="running")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[Optional[str]] = mapped_column(Text)

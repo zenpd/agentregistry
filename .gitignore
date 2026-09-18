@@ -26,3 +26,21 @@ build/
 Thumbs.db
 .vscode/
 .idea/
+
+# Office lock files (created automatically while a .pptx/.docx/.xlsx is open)
+~$*
+
+# Session working docs — local context, not for the shared repo
+CLAUDE.md
+AGENT_OPERATIONS_PLAN.md
+DISCOVERY_PLAN.md
+GOVERNANCE_MODEL.md
+ONBOARDING_AGENT_PAGE_PLAN.md
+PROJECT_ANALYSIS.md
+SESSION_HANDOFF.md
+
+# Ad-hoc local test spec, not part of the CI suite
+ui/onboarding-verify.spec.cjs
+
+# Lockfile excluded from this repo by team choice
+ui/package-lock.json

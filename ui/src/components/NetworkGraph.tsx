@@ -19,7 +19,7 @@ interface Props {
   height?: number
 }
 
-const CAT_COLORS: Record<string, string> = {
+export const CAT_COLORS: Record<string, string> = {
   // Declared-dependency kinds (PlatformView) — unchanged.
   agent: '#6EA8FE',
   mcp: '#8C7CF0',

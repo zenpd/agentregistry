@@ -59,9 +59,9 @@ SEED_DISCOVERIES = [
 ]
 
 SEED_MODEL_PRICES = [
-    {"id": "price-gpt5", "model_name": "GPT-5", "provider": "openai", "input_price_per_1m": 2.50, "output_price_per_1m": 15.00, "cache_read_price_per_1m": 0.25, "tier": "frontier"},
-    {"id": "price-gpt5-mini", "model_name": "GPT-5-mini", "provider": "openai", "input_price_per_1m": 0.75, "output_price_per_1m": 4.50, "cache_read_price_per_1m": 0.08, "tier": "mid"},
-    {"id": "price-gpt5-nano", "model_name": "GPT-5-nano", "provider": "openai", "input_price_per_1m": 0.20, "output_price_per_1m": 1.25, "cache_read_price_per_1m": 0.02, "tier": "lightweight"},
+    {"id": "price-gpt5", "model_name": "GPT-5", "provider": "openai", "input_price_per_1m": 1.25, "output_price_per_1m": 10.00, "cache_read_price_per_1m": 0.125, "tier": "frontier"},
+    {"id": "price-gpt5-mini", "model_name": "GPT-5-mini", "provider": "openai", "input_price_per_1m": 0.25, "output_price_per_1m": 2.00, "cache_read_price_per_1m": 0.025, "tier": "mid"},
+    {"id": "price-gpt5-nano", "model_name": "GPT-5-nano", "provider": "openai", "input_price_per_1m": 0.05, "output_price_per_1m": 0.40, "cache_read_price_per_1m": 0.005, "tier": "lightweight"},
     {"id": "price-sonnet", "model_name": "Claude Sonnet 4.5", "provider": "anthropic", "input_price_per_1m": 3.00, "output_price_per_1m": 15.00, "cache_read_price_per_1m": 0.30, "tier": "mid"},
     {"id": "price-haiku", "model_name": "Claude Haiku 4.5", "provider": "anthropic", "input_price_per_1m": 1.00, "output_price_per_1m": 5.00, "cache_read_price_per_1m": 0.10, "tier": "lightweight"},
 ]

@@ -196,6 +196,10 @@ export interface ReconstructedNode {
 export interface ReconstructedEdge {
   from: string
   to: string
+  // 'calls': a true nested span call (agent → tool/sub-step). 'sequence':
+  // same trace, no span-nesting reaches between them (e.g. a supervisor's
+  // routing handoff) — recovered from real start_time ordering instead.
+  kind: 'calls' | 'sequence'
   count: number
 }
 

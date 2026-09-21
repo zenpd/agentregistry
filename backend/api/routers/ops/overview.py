@@ -12,21 +12,22 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from api.auth import require_read, require_update
-from api.routers.registry import _resolve_phoenix_endpoint
+from api.routers.registry import _agent_to_dict, _resolve_phoenix_endpoint
 from db.base import get_db_session
 from db.models import Agent, AgentBudget, AgentRisk, Department, User
 from governance import context_reader as cr
 from governance import costing
-from governance.risk_categories import SEVERITY_ORDER, max_severity
+from governance import risk_lifecycle as lifecycle
+from orchestrations.risk_scan import live_financial, risk_row_dict
 from services import context_service as ctx
 from services.usage_repo import priced_usage
 from shared.config import get_settings
 
 router = APIRouter(prefix="/api/v1", tags=["Agent Ops — Overview"])
 
-ACTIVE_RISK_STATUSES = ("open", "acknowledged", "mitigating", "accepted")
 GATES = ("arb", "security", "dp")
 
 _OBSERVABILITY_TOKENS = frozenset({
@@ -86,18 +87,33 @@ def _iso(value: datetime | None) -> str | None:
 
 
 async def _get_agent(db: AsyncSession, agent_id: str) -> Agent:
-    agent = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
+    # governance_reviews is eager-loaded because _agent_to_dict walks it while
+    # scoring risk; lazy-loading it there raises MissingGreenlet under async.
+    agent = (await db.execute(
+        select(Agent).where(Agent.id == agent_id).options(selectinload(Agent.governance_reviews))
+    )).scalar_one_or_none()
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
     return agent
 
 
-async def _risk_score(db: AsyncSession, agent_id: str) -> dict:
-    result = await db.execute(select(AgentRisk.severity).where(
-        AgentRisk.agent_id == agent_id, AgentRisk.status.in_(ACTIVE_RISK_STATUSES)))
-    severities = [s for s in result.scalars().all() if s]
-    counts = {s: severities.count(s) for s in SEVERITY_ORDER}
-    return {"worst": max_severity(severities) if severities else None, "openCounts": counts, "total": len(severities)}
+async def _risk_score(db: AsyncSession, agent: Agent) -> dict:
+    """The same population, scored by the same function, as the Risk tab.
+
+    FINANCIAL findings are read live from waste_findings/cost_anomalies and
+    deliberately never stored in agent_risks, so counting that table alone
+    silently dropped them: one agent read 7 here and 8 on the Risk tab. Both
+    now go through lifecycle.score, which is what keeps them from drifting
+    apart again. Read-only on purpose — unlike the Risk tab this does not
+    expire acceptances, which cannot change the totals since an expired
+    acceptance is active either way.
+    """
+    rows = (await db.execute(select(AgentRisk).where(AgentRisk.agent_id == agent.id))).scalars().all()
+    stored = [risk_row_dict(r) for r in rows]
+    active = [r for r in stored if r["status"] in lifecycle.ACTIVE_STATUSES]
+    financial = await live_financial(db, agent, _agent_to_dict(agent))
+    scored = lifecycle.score(active + financial)
+    return {"worst": scored["worst"], "openCounts": scored["countsBySeverity"], "total": scored["total"]}
 
 
 async def _usage(db: AsyncSession, agent: Agent, today: date) -> tuple[dict, dict | None]:
@@ -217,7 +233,7 @@ async def agent_overview(agent_id: str, _=Depends(require_read)):
                 "owner": agent.owner,
                 "dept": dept.name if dept else agent.dept_id,
                 "riskLevel": agent.risk_level,
-                "riskScore": await _risk_score(db, agent.id),
+                "riskScore": await _risk_score(db, agent),
                 "gates": {g: gates.get(g, "Not Submitted") for g in GATES},
                 "budget": budget,
                 "telemetry": telemetry,

@@ -452,3 +452,44 @@ async def test_expired_acceptance_reopens_on_read(client, db):
     m1 = next(f for f in listing["findings"] if f["id"] == "M1")
     assert m1["status"] == "open"
     assert m1["history"][-1]["action"] == "acceptance expired"
+
+
+@pytest_asyncio.fixture
+async def both_tabs(db):
+    """Overview and Risk routers on one app, so their answers can be compared."""
+    from api.auth import require_read, require_update
+    from api.routers.ops.overview import router as overview_router
+    from api.routers.ops.risk import router as risk_router
+
+    app = FastAPI()
+    app.include_router(risk_router)
+    app.include_router(overview_router)
+    for dep in (require_read, require_update):
+        app.dependency_overrides[dep] = lambda: {"user_id": "u1", "role": "admin"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+        yield c
+
+
+@pytest.mark.asyncio
+async def test_overview_header_and_risk_tab_report_the_same_totals(both_tabs, db):
+    """FINANCIAL findings are read live from waste_findings/cost_anomalies and
+    deliberately never stored in agent_risks. The Overview header used to count
+    that table alone, so it silently dropped them and the two tabs disagreed
+    about one agent in the same breath (7 in the header, 8 on the Risk tab).
+    """
+    from db.models import WasteFinding
+
+    async with db() as s:
+        s.add(WasteFinding(id="W1", agent_id=AGENT, waste_type="idle_agent", severity="MEDIUM",
+                           monthly_waste_cents=5000, recommendation="Retire or consolidate", status="open"))
+
+    risk = (await both_tabs.get(f"/api/v1/agents/{AGENT}/risks")).json()
+    header = (await both_tabs.get(f"/api/v1/agents/{AGENT}/overview")).json()["header"]["riskScore"]
+
+    # The waste finding must actually reach the Risk tab, or this proves nothing.
+    assert risk["score"]["countsByCategory"]["FINANCIAL"] >= 1
+    assert any(f["category"] == "FINANCIAL" for f in risk["financial"])
+
+    assert header["total"] == risk["score"]["total"]
+    assert header["worst"] == risk["score"]["worst"]
+    assert header["openCounts"] == risk["score"]["countsBySeverity"]

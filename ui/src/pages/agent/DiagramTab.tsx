@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import type { ReconstructedNode } from '../../services/api'
+import type { ReconstructedNode, ReconstructedEdge } from '../../services/api'
 import {
   getDiagramGraph, getDependencies, adoptDependencies, linkPhoenixProject, ADOPT_TARGET,
   type DiagramGraph, type DependenciesResponse, type DependencyComparison, type DeclaredDeps,
   type ObservedOnlyDep, type AdoptResponse, type BlastRadius, type UpstreamDep, type SharedResource,
 } from '../../services/ops/diagram'
 import { Loading, SectionLabel, SourceBadge, MiniStat, STAGE_PILL, fmtDollars, fmtNumber, type TabProps } from './shared'
-import TraceNetworkGraph from '../../components/TraceNetworkGraph'
+import TraceNetworkGraph, { styleFor } from '../../components/TraceNetworkGraph'
+import TrajectoryDiagram from '../../components/TrajectoryDiagram'
 import PhoenixProjectPicker from '../../components/PhoenixProjectPicker'
 
 // Sample-quality and error-colour thresholds from the diagram research: a
@@ -23,7 +24,8 @@ const GRAPH_NODE_CAP = 30
 
 const KIND_LABEL: Record<string, string> = {
   system: 'System', database: 'Database', knowledge_base: 'Knowledge base', mcp_server: 'MCP server',
-  agent: 'Agent', model: 'Model', tool: 'Tool', retriever: 'Retriever', embedding: 'Embedding',
+  agent: 'Agent', model: 'Model', tool: 'Tool', retriever: 'Retriever', embedding: 'Embedding', guardrail: 'Guardrail',
+  step: 'Workflow step',
 }
 
 const FIELD_LABEL: Record<string, string> = {
@@ -186,31 +188,33 @@ export default function DiagramTab({ agent, agentId, onChanged }: TabProps) {
   )
 }
 
+const SHAPE_GLYPH: Record<string, string> = { agent: '●', step: '⬭', tool: '▭', mcp_server: '▭', retriever: '⛁', guardrail: '▭' }
+
+const GRAPH_VIEWS = ['trajectory', 'graph'] as const
+type GraphView = typeof GRAPH_VIEWS[number]
+const GRAPH_VIEW_LABEL: Record<GraphView, string> = { trajectory: 'Trajectory', graph: 'Connected Graph' }
+
+// Same reconstructed sample, two ways to read it: Trajectory lays it out
+// left-to-right by call order in role lanes (discovery/reconstruct.py's
+// depth/role/isRoot) — good for "what happened, in what order." Connected
+// Graph is a free-form force-directed network with search, per-kind
+// filtering and a call/called-by detail panel — good for "what's connected
+// to what" when order matters less than the shape of the whole graph.
 function TraceGraph({ graph, refreshing, onRefresh }: { graph: DiagramGraph; refreshing: boolean; onRefresh: () => void }) {
-  const [showAll, setShowAll] = useState(false)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const byCount = [...graph.nodes].sort((a, b) => b.count - a.count)
-  const drawn = showAll ? byCount : byCount.slice(0, GRAPH_NODE_CAP)
-  const drawnIds = new Set(drawn.map(n => n.id))
-  const nwEdges = graph.edges.filter(e => drawnIds.has(e.from) && drawnIds.has(e.to))
-  const errorNodes = graph.nodes.filter(n => n.errorCount > 0)
+  const [view, setView] = useState<GraphView>('trajectory')
   const orphanRate = graph.orphanRate ?? 0
-  const selected = selectedId ? drawn.find(n => n.id === selectedId) : null
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-3 mb-2">
-        <div className="text-xs text-gray-500 space-y-0.5">
-          <p>
-            Reconstructed from <b className="text-gray-700">{fmtNumber(graph.spanCount)}</b> span(s) across{' '}
-            <b className="text-gray-700">{fmtNumber(graph.traceCount)}</b> trace(s) — project <span className="font-mono">{graph.project}</span>
-          </p>
-          <p className="text-gray-400">
-            {graph.truncated ? `Newest ${fmtNumber(graph.sampleLimit)} spans only, ` : 'Sample '}
-            window {fmtWhen(graph.sampleWindow?.from)} → {fmtWhen(graph.sampleWindow?.to)}
-            {' · '}cached at {fmtWhen(graph.cachedAt)}{graph.fromCache ? ' (served from cache)' : ''}
-          </p>
-        </div>
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <p
+          className="text-xs text-gray-500 truncate cursor-help"
+          title={`${graph.truncated ? `Newest ${fmtNumber(graph.sampleLimit)} spans` : 'Full sample'}, window ${fmtWhen(graph.sampleWindow?.from)} → ${fmtWhen(graph.sampleWindow?.to)} · cached ${fmtWhen(graph.cachedAt)}${graph.fromCache ? ' (served from cache)' : ''}`}
+        >
+          Reconstructed from <b className="text-gray-700">{fmtNumber(graph.spanCount)}</b> span(s) across{' '}
+          <b className="text-gray-700">{fmtNumber(graph.traceCount)}</b> trace(s) — project <span className="font-mono">{graph.project}</span>
+          <span className="text-gray-400 ml-1" title="Hover for sample window and cache details">ⓘ</span>
+        </p>
         <div className="flex items-center gap-2 flex-shrink-0">
           <SourceBadge source="phoenix" />
           <button onClick={onRefresh} disabled={refreshing} className="text-xs text-teal-600 hover:text-teal-700 disabled:opacity-50">
@@ -225,10 +229,35 @@ function TraceGraph({ graph, refreshing, onRefresh }: { graph: DiagramGraph; ref
         </p>
       )}
 
-      <div className="rounded-xl border border-gray-100 bg-gray-900/95 overflow-hidden relative">
-        <TraceNetworkGraph nodes={drawn} edges={nwEdges} height={440} selectedId={selectedId} onSelect={setSelectedId} />
-        <p className="absolute bottom-1.5 right-2 text-[10px] text-gray-500">drag to move · scroll to zoom · click a node to trace its calls</p>
+      <div className="flex gap-1 border-b border-gray-100 mb-3">
+        {GRAPH_VIEWS.map(v => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors ${
+              view === v ? 'border-teal-600 text-teal-700' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {GRAPH_VIEW_LABEL[v]}
+          </button>
+        ))}
       </div>
+
+      {view === 'trajectory' ? <TrajectoryView graph={graph} /> : <ConnectedGraphView graph={graph} />}
+    </div>
+  )
+}
+
+function TrajectoryView({ graph }: { graph: DiagramGraph }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selected = selectedId ? graph.nodes.find(n => n.id === selectedId) : null
+
+  return (
+    <div>
+      <div className="rounded-xl border border-gray-100 bg-gray-900/95 overflow-hidden">
+        <TrajectoryDiagram nodes={graph.nodes} edges={graph.edges} height={440} selectedId={selectedId} onSelect={setSelectedId} />
+      </div>
+      <p className="text-[10px] text-gray-400 mt-1">left → right is call order, top → bottom is step / tool / resource / check · solid line = calls (real nesting), dashed = sequence (ran next, recovered from timing) · scroll to zoom, drag canvas to pan, drag a node to nudge it (it springs back) · click "?" for the legend</p>
       {selected && (
         <div className={`mt-2 text-xs rounded-lg ring-1 px-3 py-2 ${nodeTone(selected)}`}>
           <span className="font-medium">{selected.name}</span>
@@ -237,29 +266,197 @@ function TraceGraph({ graph, refreshing, onRefresh }: { graph: DiagramGraph; ref
           <button onClick={() => setSelectedId(null)} className="ml-2 text-teal-700 hover:text-teal-800">clear</button>
         </div>
       )}
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {drawn.map(n => (
-          <button key={n.id} onClick={() => setSelectedId(n.id === selectedId ? null : n.id)}
-            className={`text-xs px-2 py-0.5 rounded-full ring-1 ${nodeTone(n)} ${n.id === selectedId ? 'ring-2 ring-teal-500' : ''}`}>
-            {n.name}{' '}
-            <span className="text-gray-400">
-              · {n.kind} · ×{n.count}{n.errorCount > 0 ? ` · ${n.errorCount} err` : ''}
-              {n.avgLatencyMs != null ? ` · ${Math.round(n.avgLatencyMs)}ms` : ''}
-            </span>
-          </button>
+    </div>
+  )
+}
+
+function ConnectedGraphView({ graph }: { graph: DiagramGraph }) {
+  const [showAll, setShowAll] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [hiddenKinds, setHiddenKinds] = useState<Set<string>>(new Set())
+  const [search, setSearch] = useState('')
+  const [focusSignal, setFocusSignal] = useState<{ id: string; token: number } | null>(null)
+
+  // Memoized on the underlying graph data (not on selection/hover state) so
+  // TraceNetworkGraph's own dataset-build memo doesn't see a "new" nodes/edges
+  // array on every click — that was rebuilding the vis-network instance from
+  // scratch and restarting physics on every single selection, making the
+  // whole layout visibly jump instead of just highlighting.
+  const byCount = useMemo(() => [...graph.nodes].sort((a, b) => b.count - a.count), [graph.nodes])
+  const drawn = useMemo(() => (showAll ? byCount : byCount.slice(0, GRAPH_NODE_CAP)), [byCount, showAll])
+  // A supervisor dispatching to a step and getting control back is one
+  // relationship, not two. The reconstruction reports both directions, which
+  // drew every hub edge twice (an in-line and an out-line side by side); they
+  // collapse here into a single line with an arrowhead at each end.
+  const nwEdges = useMemo(() => {
+    const drawnIds = new Set(drawn.map(n => n.id))
+    const merged: (ReconstructedEdge & { bidirectional?: boolean })[] = []
+    const seen = new Map<string, number>()
+    for (const e of graph.edges) {
+      if (!drawnIds.has(e.from) || !drawnIds.has(e.to)) continue
+      const reverse = seen.get(`${e.to}|${e.from}|${e.kind}`)
+      if (reverse !== undefined) {
+        merged[reverse].bidirectional = true
+        merged[reverse].count += e.count
+        continue
+      }
+      const forward = `${e.from}|${e.to}|${e.kind}`
+      if (seen.has(forward)) continue
+      seen.set(forward, merged.length)
+      merged.push({ ...e })
+    }
+    return merged
+  }, [drawn, graph.edges])
+  const nodeById = useMemo(() => new Map(drawn.map(n => [n.id, n])), [drawn])
+  const selected = selectedId ? nodeById.get(selectedId) : null
+
+  // Legend chips — one toggle per node kind, counted over what's actually drawn
+  // (busiest-30 cap included), so a toggle's count always matches what it affects.
+  const legend = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const n of drawn) counts.set(n.kind, (counts.get(n.kind) ?? 0) + 1)
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([kind, count]) => ({ kind, count, label: KIND_LABEL[kind] || kind, color: styleFor(kind).border }))
+  }, [drawn])
+
+  const callsCount = nwEdges.filter(e => e.kind !== 'sequence').length
+  const sequenceCount = nwEdges.length - callsCount
+  const errorCount = drawn.filter(n => n.errorCount > 0).length
+
+  function searchFocus() {
+    const q = search.trim().toLowerCase()
+    if (!q) return
+    const match = drawn.find(n => n.name.toLowerCase().includes(q))
+    if (match) {
+      setSelectedId(match.id)
+      setFocusSignal({ id: match.id, token: Date.now() })
+    }
+  }
+
+  return (
+    <div>
+      <div className="grid grid-cols-4 gap-2 mb-2">
+        {([
+          ['Steps', drawn.length],
+          ['Dependencies', nwEdges.length],
+          ['Calls', callsCount],
+          ['Errors', errorCount],
+        ] as [string, number][]).map(([label, value]) => (
+          <div key={label} className="rounded-lg border bg-white p-2 text-center">
+            <div className="text-lg font-bold text-gray-800">{value}</div>
+            <div className="text-[10px] uppercase text-gray-500">{label}</div>
+          </div>
         ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        {legend.map(item => {
+          const off = hiddenKinds.has(item.kind)
+          return (
+            <button
+              key={item.kind}
+              onClick={() => setHiddenKinds(prev => {
+                const next = new Set(prev)
+                if (next.has(item.kind)) next.delete(item.kind)
+                else next.add(item.kind)
+                return next
+              })}
+              title={`${item.count} node(s) — click to show/hide these and every edge touching them`}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-opacity ${off ? 'opacity-35' : ''}`}
+              style={{ borderColor: item.color }}
+            >
+              <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full border" style={{ background: item.color, borderColor: item.color }} />
+              {item.label} ({item.count})
+            </button>
+          )
+        })}
+        {legend.length > 0 && (
+          <>
+            <button onClick={() => setHiddenKinds(new Set())} className="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">
+              Show all
+            </button>
+            <button onClick={() => setHiddenKinds(new Set(legend.map(i => i.kind)))} className="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">
+              Hide all
+            </button>
+          </>
+        )}
         {byCount.length > GRAPH_NODE_CAP && (
           <button onClick={() => setShowAll(!showAll)} className="text-xs text-teal-600 hover:text-teal-700 px-1">
-            {showAll ? `Show the ${GRAPH_NODE_CAP} busiest steps only` : `+${byCount.length - GRAPH_NODE_CAP} quieter step(s) — show all`}
+            {showAll ? `Show ${GRAPH_NODE_CAP} busiest only` : `+${byCount.length - GRAPH_NODE_CAP} quieter — show all`}
           </button>
         )}
+        <div className="ml-auto flex items-center gap-2">
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') searchFocus() }}
+            placeholder="Search & focus…"
+            className="w-44 rounded-lg border px-3 py-1.5 text-xs"
+          />
+          <button onClick={searchFocus} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50">
+            Go
+          </button>
+        </div>
       </div>
-      {errorNodes.length > 0 && (
-        <p className="text-xs text-gray-400 mt-2">
-          {errorNodes.length} step(s) recorded at least one error in this sample. Steps are coloured only at {ERROR_MIN_CALLS}+ calls
-          with an error rate above {ERROR_AMBER_RATE * 100}% (amber) or {ERROR_RED_RATE * 100}% (red).
-        </p>
-      )}
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="col-span-2 rounded-lg border bg-white overflow-hidden relative">
+          <TraceNetworkGraph nodes={drawn} edges={nwEdges} hiddenKinds={hiddenKinds} height={540} selectedId={selectedId} onSelect={setSelectedId} focusSignal={focusSignal} />
+          <p className="absolute bottom-1.5 right-2 text-[10px] text-gray-400">drag to move · scroll to zoom · click a node to trace its calls</p>
+        </div>
+
+        <div className="rounded-lg border border-gray-100 bg-white p-3 text-xs" style={{ maxHeight: 540, overflowY: 'auto' }}>
+          {selected ? (
+            <div className="space-y-3">
+              <div>
+                <h4 className="font-semibold text-gray-800">{selected.name}</h4>
+                <span className={`inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full ring-1 ${nodeTone(selected)}`}>
+                  {SHAPE_GLYPH[selected.kind] || '●'} {KIND_LABEL[selected.kind] || selected.kind} · ×{fmtNumber(selected.count)}
+                </span>
+              </div>
+              {selected.errorCount > 0 && (
+                <p className="text-rose-600">{selected.errorCount} error(s) in this sample ({Math.round((selected.errorCount / selected.count) * 1000) / 10}%).</p>
+              )}
+              {selected.avgLatencyMs != null && <p className="text-gray-500">{Math.round(selected.avgLatencyMs)}ms avg latency</p>}
+              <div>
+                <h5 className="text-[10px] font-semibold uppercase text-gray-400">Calls / runs next</h5>
+                <ul className="mt-1 space-y-1">
+                  {nwEdges.filter(e => e.from === selected.id).map(e => (
+                    <li key={`${e.to}-${e.kind}`} className="cursor-pointer text-teal-700 hover:underline" onClick={() => setSelectedId(e.to)}>
+                      {e.kind === 'sequence' ? '⇢' : '→'} {nodeById.get(e.to)?.name ?? e.to}
+                    </li>
+                  ))}
+                  {nwEdges.filter(e => e.from === selected.id).length === 0 && <li className="text-gray-400">none</li>}
+                </ul>
+              </div>
+              <div>
+                <h5 className="text-[10px] font-semibold uppercase text-gray-400">Called by</h5>
+                <ul className="mt-1 space-y-1">
+                  {nwEdges.filter(e => e.to === selected.id).map(e => (
+                    <li key={`${e.from}-${e.kind}`} className="cursor-pointer text-emerald-700 hover:underline" onClick={() => setSelectedId(e.from)}>
+                      ← {nodeById.get(e.from)?.name ?? e.from}
+                    </li>
+                  ))}
+                  {nwEdges.filter(e => e.to === selected.id).length === 0 && <li className="text-gray-400">none</li>}
+                </ul>
+              </div>
+              <button onClick={() => setSelectedId(null)} className="text-[11px] text-teal-700 hover:text-teal-800">clear selection</button>
+            </div>
+          ) : (
+            <p className="text-gray-400">Click a step for details — its calls, callers and error rate. Hover any node for a quick tooltip.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-2 rounded-lg border bg-gray-50 p-3 text-[11px] leading-relaxed text-gray-600">
+        <b>How to read this graph</b><br />
+        ● solid blue circle = agent · ⬭ grey ellipse = workflow step (a framework graph node — a wait, an interrupt, a terminal state — not an agent) · ▭ amber box = tool · ▭ purple box = MCP server · ⛁ green cylinder = retriever · ▭ rose box = guardrail — busier steps are drawn larger, with bigger type<br />
+        Amber/red border = error rate above {ERROR_AMBER_RATE * 100}%/{ERROR_RED_RATE * 100}% (at {ERROR_MIN_CALLS}+ calls only — thin sample sizes aren't coloured)<br />
+        Lines take the colour of what they point at: violet to an agent · grey to a workflow step · amber to a tool · fuchsia to an MCP server · green to a retriever<br />
+        Solid line = <b>calls</b> ({fmtNumber(callsCount)}), a real nested call · dashed = <b>sequence</b> ({fmtNumber(sequenceCount)}), ran next in the same trace with no nested call · an arrowhead at both ends means control went both ways (e.g. a supervisor dispatching and getting it back)<br />
+        Drag nodes to rearrange · scroll to zoom · click a legend chip to show/hide that kind.
+      </div>
     </div>
   )
 }

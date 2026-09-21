@@ -24,22 +24,17 @@ export const CAT_COLORS: Record<string, string> = {
   agent: '#6EA8FE',
   mcp: '#8C7CF0',
   sys: '#3DDBD9',
-  // Phoenix/OpenInference span kinds (reconstructed-from-traces diagram —
-  // AgentPage's Diagram tab). Uppercase, matching what the backend's
-  // discovery/reconstruct.py emits verbatim — never lowercased/aliased, so
-  // a color here always matches a real vendor span-kind value, not a guess.
-  AGENT: '#6EA8FE',
-  LLM: '#57C785',
-  TOOL: '#F0A85A',
-  RETRIEVER: '#3DDBD9',
-  CHAIN: '#8C7CF0',
-  GUARDRAIL: '#F0A85A',
-  EVALUATOR: '#F0A85A',
-  RERANKER: '#3DDBD9',
-  EMBEDDING: '#3DDBD9',
-  UNKNOWN: '#6b7280',
   db: '#F0A85A',
   kb: '#57C785',
+  // Lineage-diagram node kinds (AgentPage's Diagram tab, reconstructed from
+  // real Phoenix traces via discovery/observed_deps.classify_span — the
+  // same resolver the declared-vs-observed comparison on that tab uses).
+  // Deliberately NOT raw Phoenix/OpenInference span kinds: an LLM call with
+  // no tool/agent signal is plumbing, folded away rather than drawn.
+  tool: '#F0A85A',
+  mcp_server: '#8C7CF0',
+  retriever: '#57C785',
+  guardrail: '#e11d48',
 }
 
 export default function NetworkGraph({ nodes, edges, width = 500, height = 400 }: Props) {

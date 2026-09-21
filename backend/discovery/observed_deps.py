@@ -41,6 +41,10 @@ _GEN_AI_OPERATION_KIND = {
 
 # LangGraph emits these as AGENT/CHAIN spans; they are routing plumbing, not agents.
 _FRAMEWORK_AGENT_NAMES = frozenset({"next_agent", "langgraph", "__start__", "__end__"})
+# LangGraph/OTel internal node-naming conventions: a leading underscore
+# (_entry_route) or dunder wrapping (__start__) — routing/bookkeeping, never
+# a name a team would give their own business step.
+_PLUMBING_PATTERN = re.compile(r"^_.+|^__.+__$")
 
 OBSERVED_KEYS = ("tools", "mcp_servers", "retrievers", "models", "agents", "embeddings")
 OBSERVED_KIND = {
@@ -183,6 +187,108 @@ def observed_from_spans(spans: Iterable[Mapping[str, Any]]) -> dict[str, list[di
               for name, count in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0].lower()))]
         for key, counter in counters.items()
     }
+
+
+# Node kinds a lineage diagram draws — deliberately narrower than the full
+# OpenInference span-kind vocabulary. LLM/EMBEDDING calls are collapsed into
+# their calling agent (shown as its token/model metadata, not a separate
+# box); only agent steps, tool calls, MCP servers, retrievers and guardrail
+# checks are meaningful nodes in a "what depends on what" picture.
+LINEAGE_KINDS = ("agent", "tool", "step", "mcp_server", "retriever", "guardrail")
+
+
+def agent_name_index(spans: Iterable[Mapping[str, Any]]) -> frozenset[str]:
+    """Lower-cased names with real agent evidence somewhere in the sample: an
+    AGENT-kind span, or an ``agent.name``/``gen_ai.agent.name`` attribute.
+
+    Needed because LangGraph emits each agent step twice — once as an AGENT
+    span carrying ``agent.name`` and once as a bare CHAIN span carrying no
+    agent attribute at all. Classifying a span on its own would therefore
+    split every agent into an agent node and a step node. A name is an agent
+    everywhere as soon as it is an agent anywhere; a CHAIN name that never
+    gets that evidence is a graph/workflow step, not an agent.
+    """
+    names: set[str] = set()
+    for span in spans:
+        if not isinstance(span, Mapping):
+            continue
+        attrs = span.get("attributes") or {}
+        if not isinstance(attrs, Mapping):
+            attrs = {}
+        declared = _text(_attr(attrs, "agent.name")) or _text(_attr(attrs, "gen_ai.agent.name"))
+        if declared:
+            names.add(declared.strip().lower())
+            continue
+        if _kind(span, attrs) != "AGENT":
+            continue
+        name = _text(span.get("name"))
+        if not name:
+            continue
+        lname = name.strip().lower()
+        if lname in _FRAMEWORK_AGENT_NAMES or _PLUMBING_PATTERN.match(lname):
+            continue
+        names.add(lname)
+    return frozenset(names)
+
+
+def classify_span(
+    span: Mapping[str, Any],
+    agent_names: frozenset[str] = frozenset(),
+) -> tuple[str, str] | None:
+    """Resolves one span to a lineage node ``(kind, name)``, or ``None`` when
+    the span is LangGraph/OTel routing or bookkeeping plumbing (a supervisor
+    dispatch step, a checkpoint/interrupt marker, the graph's own root run)
+    that carries no information of its own — the caller folds it through to
+    its nearest resolved ancestor instead of dropping the edge. Shared by
+    the trace-reconstructed graph (``discovery/reconstruct.py``) and the
+    declared-vs-observed comparison above, so the two views of one agent's
+    dependencies can never disagree with each other.
+
+    ``agent_names`` comes from :func:`agent_name_index` over the same sample.
+    Without it a CHAIN span can only be reported as a ``step``, since the
+    evidence that it is an agent lives on its AGENT twin, not on itself."""
+    attrs = span.get("attributes") or {}
+    if not isinstance(attrs, Mapping):
+        attrs = {}
+    kind = _kind(span, attrs)
+    name = _text(span.get("name"))
+
+    tool = (_text(_attr(attrs, "tool.name")) or _text(_attr(attrs, "gen_ai.tool.name"))
+            or _text(_attr(attrs, "mcp.tool")))
+    if tool:
+        return ("tool", tool)
+    if kind == "TOOL" and name:
+        return ("tool", name)
+
+    server = _text(_attr(attrs, "mcp.server"))
+    if server:
+        return ("mcp_server", server)
+
+    if kind == "RETRIEVER" and name:
+        return ("retriever", name)
+
+    agent = _text(_attr(attrs, "agent.name")) or _text(_attr(attrs, "gen_ai.agent.name"))
+    if agent:
+        return ("agent", agent)
+
+    if not name:
+        return None
+    lname = name.strip().lower()
+    if lname in _FRAMEWORK_AGENT_NAMES or _PLUMBING_PATTERN.match(lname):
+        return None
+
+    if kind == "AGENT":
+        return ("agent", name)
+    # LangGraph's default auto-instrumentation emits a domain agent step as a
+    # plain CHAIN span too, so a CHAIN name is an agent when its AGENT twin
+    # exists in this sample. Everything else CHAIN-kind is a graph/workflow
+    # node (an interrupt, a wait, a terminal state) — real, but not an agent.
+    if kind == "CHAIN":
+        return ("agent", name) if lname in agent_names else ("step", name)
+    if kind == "GUARDRAIL":
+        return ("guardrail", name)
+
+    return None  # LLM/EMBEDDING/EVALUATOR/RERANKER/UNKNOWN with no other signal
 
 
 def _parse_ts(value: Any) -> datetime | None:

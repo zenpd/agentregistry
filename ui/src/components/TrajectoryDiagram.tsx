@@ -205,6 +205,7 @@ export default function TrajectoryDiagram({ nodes, edges, height = 440, selected
       .attr('fill', 'none')
       .attr('stroke', '#7c8ba1')
       .attr('stroke-width', d => 1 + (d.count / maxEdgeCount) * 2.5)
+      .attr('stroke-dasharray', d => (d.kind === 'sequence' ? '4,3' : null))
       .attr('opacity', 0.55)
       .attr('marker-end', 'url(#traj-arrow)')
 

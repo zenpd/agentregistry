@@ -1,0 +1,34 @@
+properties:
+  environmentId: /subscriptions/bc978289-ba91-4be9-8eee-82dc18f9cde9/resourceGroups/Zenlabs-Agent-Foundry/providers/Microsoft.App/managedEnvironments/zaf-aca-pvt-env
+  configuration:
+    triggerType: Manual
+    replicaTimeout: 120
+    replicaRetryLimit: 0
+    manualTriggerConfig:
+      parallelism: 1
+      replicaCompletionCount: 1
+    registries:
+      - server: zafacr-gqfyc3h8eya2djey.azurecr.io
+        username: __ACR_USER__
+        passwordSecretRef: acr-pw
+    secrets:
+      - name: acr-pw
+        value: "__ACR_PASS__"
+      - name: pg-admin-pw
+        value: "__PG_ADMIN_PW__"
+  template:
+    containers:
+      - image: zafacr-gqfyc3h8eya2djey.azurecr.io/agentregistry-be:v1
+        name: db-setup
+        command:
+          - sh
+          - -c
+          - echo $PYSCRIPT_B64 | base64 -d | python3
+        env:
+          - name: PGADMINPW
+            secretRef: pg-admin-pw
+          - name: PYSCRIPT_B64
+            value: "__PYSCRIPT_B64__"
+        resources:
+          cpu: 0.5
+          memory: 1Gi

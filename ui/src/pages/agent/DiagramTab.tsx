@@ -8,6 +8,7 @@ import {
 } from '../../services/ops/diagram'
 import { Loading, SectionLabel, SourceBadge, MiniStat, STAGE_PILL, fmtDollars, fmtNumber, type TabProps } from './shared'
 import TraceNetworkGraph, { styleFor } from '../../components/TraceNetworkGraph'
+import TrajectoryDiagram from '../../components/TrajectoryDiagram'
 import PhoenixProjectPicker from '../../components/PhoenixProjectPicker'
 
 // Sample-quality and error-colour thresholds from the diagram research: a
@@ -189,7 +190,87 @@ export default function DiagramTab({ agent, agentId, onChanged }: TabProps) {
 
 const SHAPE_GLYPH: Record<string, string> = { agent: '●', step: '⬭', tool: '▭', mcp_server: '▭', retriever: '⛁', guardrail: '▭' }
 
+const GRAPH_VIEWS = ['trajectory', 'graph'] as const
+type GraphView = typeof GRAPH_VIEWS[number]
+const GRAPH_VIEW_LABEL: Record<GraphView, string> = { trajectory: 'Trajectory', graph: 'Connected Graph' }
+
+// Same reconstructed sample, two ways to read it: Trajectory lays it out
+// left-to-right by call order in role lanes (discovery/reconstruct.py's
+// depth/role/isRoot) — good for "what happened, in what order." Connected
+// Graph is a free-form force-directed network with search, per-kind
+// filtering and a call/called-by detail panel — good for "what's connected
+// to what" when order matters less than the shape of the whole graph.
 function TraceGraph({ graph, refreshing, onRefresh }: { graph: DiagramGraph; refreshing: boolean; onRefresh: () => void }) {
+  const [view, setView] = useState<GraphView>('trajectory')
+  const orphanRate = graph.orphanRate ?? 0
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <p
+          className="text-xs text-gray-500 truncate cursor-help"
+          title={`${graph.truncated ? `Newest ${fmtNumber(graph.sampleLimit)} spans` : 'Full sample'}, window ${fmtWhen(graph.sampleWindow?.from)} → ${fmtWhen(graph.sampleWindow?.to)} · cached ${fmtWhen(graph.cachedAt)}${graph.fromCache ? ' (served from cache)' : ''}`}
+        >
+          Reconstructed from <b className="text-gray-700">{fmtNumber(graph.spanCount)}</b> span(s) across{' '}
+          <b className="text-gray-700">{fmtNumber(graph.traceCount)}</b> trace(s) — project <span className="font-mono">{graph.project}</span>
+          <span className="text-gray-400 ml-1" title="Hover for sample window and cache details">ⓘ</span>
+        </p>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <SourceBadge source="phoenix" />
+          <button onClick={onRefresh} disabled={refreshing} className="text-xs text-teal-600 hover:text-teal-700 disabled:opacity-50">
+            {refreshing ? 'Refreshing…' : '↻ Refresh'}
+          </button>
+        </div>
+      </div>
+
+      {orphanRate > PARTIAL_ORPHAN_RATE && (
+        <p className="text-xs text-amber-700 bg-amber-50 ring-1 ring-amber-200 rounded-lg px-3 py-2 mb-2">
+          Partial sample: {Math.round(orphanRate * 1000) / 10}% of spans have a parent outside the sample, so some calls between steps are missing.
+        </p>
+      )}
+
+      <div className="flex gap-1 border-b border-gray-100 mb-3">
+        {GRAPH_VIEWS.map(v => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors ${
+              view === v ? 'border-teal-600 text-teal-700' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {GRAPH_VIEW_LABEL[v]}
+          </button>
+        ))}
+      </div>
+
+      {view === 'trajectory' ? <TrajectoryView graph={graph} /> : <ConnectedGraphView graph={graph} />}
+    </div>
+  )
+}
+
+function TrajectoryView({ graph }: { graph: DiagramGraph }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selected = selectedId ? graph.nodes.find(n => n.id === selectedId) : null
+
+  return (
+    <div>
+      <div className="rounded-xl border border-gray-100 bg-gray-900/95 overflow-hidden">
+        <TrajectoryDiagram nodes={graph.nodes} edges={graph.edges} height={440} selectedId={selectedId} onSelect={setSelectedId} />
+      </div>
+      <p className="text-[10px] text-gray-400 mt-1">left → right is call order, top → bottom is step / tool / resource / check · solid line = calls (real nesting), dashed = sequence (ran next, recovered from timing) · scroll to zoom, drag canvas to pan, drag a node to nudge it (it springs back) · click "?" for the legend</p>
+      {selected && (
+        <div className={`mt-2 text-xs rounded-lg ring-1 px-3 py-2 ${nodeTone(selected)}`}>
+          <span className="font-medium">{selected.name}</span>
+          <span className="text-gray-400"> · {selected.kind} · ×{selected.count}{selected.errorCount > 0 ? ` · ${selected.errorCount} err` : ''}
+            {selected.avgLatencyMs != null ? ` · ${Math.round(selected.avgLatencyMs)}ms avg` : ''}</span>
+          <button onClick={() => setSelectedId(null)} className="ml-2 text-teal-700 hover:text-teal-800">clear</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ConnectedGraphView({ graph }: { graph: DiagramGraph }) {
   const [showAll, setShowAll] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [hiddenKinds, setHiddenKinds] = useState<Set<string>>(new Set())
@@ -227,7 +308,6 @@ function TraceGraph({ graph, refreshing, onRefresh }: { graph: DiagramGraph; ref
     return merged
   }, [drawn, graph.edges])
   const nodeById = useMemo(() => new Map(drawn.map(n => [n.id, n])), [drawn])
-  const orphanRate = graph.orphanRate ?? 0
   const selected = selectedId ? nodeById.get(selectedId) : null
 
   // Legend chips — one toggle per node kind, counted over what's actually drawn
@@ -256,29 +336,6 @@ function TraceGraph({ graph, refreshing, onRefresh }: { graph: DiagramGraph; ref
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-3 mb-2">
-        <p
-          className="text-xs text-gray-500 truncate cursor-help"
-          title={`${graph.truncated ? `Newest ${fmtNumber(graph.sampleLimit)} spans` : 'Full sample'}, window ${fmtWhen(graph.sampleWindow?.from)} → ${fmtWhen(graph.sampleWindow?.to)} · cached ${fmtWhen(graph.cachedAt)}${graph.fromCache ? ' (served from cache)' : ''}`}
-        >
-          Reconstructed from <b className="text-gray-700">{fmtNumber(graph.spanCount)}</b> span(s) across{' '}
-          <b className="text-gray-700">{fmtNumber(graph.traceCount)}</b> trace(s) — project <span className="font-mono">{graph.project}</span>
-          <span className="text-gray-400 ml-1" title="Hover for sample window and cache details">ⓘ</span>
-        </p>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <SourceBadge source="phoenix" />
-          <button onClick={onRefresh} disabled={refreshing} className="text-xs text-teal-600 hover:text-teal-700 disabled:opacity-50">
-            {refreshing ? 'Refreshing…' : '↻ Refresh'}
-          </button>
-        </div>
-      </div>
-
-      {orphanRate > PARTIAL_ORPHAN_RATE && (
-        <p className="text-xs text-amber-700 bg-amber-50 ring-1 ring-amber-200 rounded-lg px-3 py-2 mb-2">
-          Partial sample: {Math.round(orphanRate * 1000) / 10}% of spans have a parent outside the sample, so some calls between steps are missing.
-        </p>
-      )}
-
       <div className="grid grid-cols-4 gap-2 mb-2">
         {([
           ['Steps', drawn.length],

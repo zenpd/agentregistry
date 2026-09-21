@@ -38,6 +38,7 @@ Two distinct edge kinds, verified against this project's own real traces
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable
@@ -48,6 +49,22 @@ from discovery.observed_deps import agent_name_index, classify_span
 # ancestor — generous enough for any real LangGraph interrupt/routing
 # chain, bounded so a malformed parent_id cycle can never loop forever.
 _MAX_ANCESTOR_WALK = 50
+
+# Groups classify_span's lineage-node kinds into the handful of lanes the
+# Diagram tab's trajectory view draws: the agent's own steps, the tools/
+# skills it invokes, the resources (MCP servers, retrievers) it reads, and
+# the guardrail checks it runs. LLM/EMBEDDING calls never reach here — they
+# are folded into their calling step above, not drawn as their own node —
+# so there is deliberately no "model" kind in LINEAGE_KINDS to map.
+_ROLE_BY_KIND = {
+    "agent": "step",
+    "step": "step",
+    "tool": "tool",
+    "mcp_server": "tool",
+    "retriever": "resource",
+    "guardrail": "check",
+}
+ROLE_LANES = ["step", "model", "tool", "resource", "check", "other"]
 
 CALLS = "calls"
 SEQUENCE = "sequence"
@@ -85,6 +102,46 @@ class _EdgeAgg:
     to: str
     kind: str
     count: int = 0
+
+
+def _layer_depths(node_keys: Iterable[str], edge_pairs: Iterable[tuple[str, str]]) -> tuple[dict[str, int], set[str]]:
+    """BFS distance from a root, for a left-to-right trajectory layout.
+
+    This was originally longest-path-from-root (depth = one more than the
+    deepest prerequisite), which reads naturally for a straight-line
+    pipeline — but a real LangGraph supervisor pattern loops (supervisor ->
+    agent -> back to supervisor -> next agent, dozens of times per trace),
+    and longest-path has no ceiling on a cycle: on real retail-onboarding
+    traces it inflated to depth 99-100, which would draw a diagram 100
+    columns wide. BFS first-visit-wins depth is bounded by the graph's
+    actual diameter regardless of how many times it loops, so the layout
+    stays a handful of columns wide even for a heavily looping graph.
+    """
+    keys = list(node_keys)
+    adj: dict[str, list[str]] = {k: [] for k in keys}
+    incoming = {k: 0 for k in keys}
+    for frm, to in edge_pairs:
+        if frm in adj and to in adj:
+            adj[frm].append(to)
+            incoming[to] += 1
+    roots = {k for k in keys if incoming[k] == 0} or set(keys[:1])
+
+    depth: dict[str, int] = {}
+    queue: deque[str] = deque()
+    for r in roots:
+        depth[r] = 0
+        queue.append(r)
+    while queue:
+        cur = queue.popleft()
+        for nxt in adj[cur]:
+            if nxt not in depth:
+                depth[nxt] = depth[cur] + 1
+                queue.append(nxt)
+    # A node no root can reach (disconnected component, or every path into
+    # it runs through another such node) still needs a column to draw in.
+    for k in keys:
+        depth.setdefault(k, 0)
+    return depth, roots
 
 
 def reconstruct(spans: Iterable[dict]) -> dict:
@@ -204,6 +261,13 @@ def reconstruct(spans: Iterable[dict]) -> dict:
         for (frm, _), (to, _) in zip(ordered, ordered[1:]):
             _add_edge(frm, to, SEQUENCE)
 
+    # The trajectory layout's depth/root computation walks BOTH edge kinds —
+    # not just "calls". This matters: LangGraph nests this app's real steps
+    # as siblings under one root-run span (see module docstring), so "calls"
+    # alone leaves most steps looking like their own root at depth 0.
+    # "sequence" edges are exactly what recovers the true order between them.
+    depth_by_key, root_keys = _layer_depths(nodes.keys(), ((e.frm, e.to) for e in edges.values()))
+
     return {
         "spanCount": span_count,
         "traceCount": len(trace_ids),
@@ -215,6 +279,9 @@ def reconstruct(spans: Iterable[dict]) -> dict:
                 "count": n.count,
                 "errorCount": n.error_count,
                 "avgLatencyMs": round(n.total_latency_ms / n.latency_samples, 1) if n.latency_samples else None,
+                "role": _ROLE_BY_KIND.get(n.kind, "other"),
+                "depth": depth_by_key.get(key, 0),
+                "isRoot": key in root_keys,
             }
             for key, n in nodes.items()
         ],

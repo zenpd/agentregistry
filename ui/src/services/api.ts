@@ -184,6 +184,9 @@ export interface PhoenixProjectsResponse {
 export const getPhoenixProjects = () =>
   api.get<PhoenixProjectsResponse>('/phoenix/projects')
 
+// role/depth/isRoot classify a node for the trajectory layout — role picks
+// its lane (step/model/tool/resource/check/other), depth its left-to-right
+// column (longest path from a root), isRoot whether it starts the trace.
 export interface ReconstructedNode {
   id: string
   name: string
@@ -191,6 +194,9 @@ export interface ReconstructedNode {
   count: number
   errorCount: number
   avgLatencyMs: number | null
+  role: string
+  depth: number
+  isRoot: boolean
 }
 
 export interface ReconstructedEdge {

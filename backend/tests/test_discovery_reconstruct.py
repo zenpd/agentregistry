@@ -126,3 +126,102 @@ def test_orphan_parent_id_pointing_nowhere_is_ignored():
     result = reconstruct(spans)
     assert len(result["nodes"]) == 1
     assert result["edges"] == []
+
+
+def _node(result, name):
+    return next(n for n in result["nodes"] if n["name"] == name)
+
+
+def test_span_kinds_map_to_trajectory_roles():
+    spans = [
+        _span("s1", None, "onboarding_graph", "AGENT"),
+        _span("s2", "s1", "classify_document", "LLM"),
+        _span("s3", "s1", "sanctions_screen", "TOOL"),
+        _span("s4", "s1", "policy_kb", "RETRIEVER"),
+        _span("s5", "s1", "pii_guardrail", "GUARDRAIL"),
+    ]
+    result = reconstruct(spans)
+    assert _node(result, "onboarding_graph")["role"] == "step"
+    assert _node(result, "classify_document")["role"] == "model"
+    assert _node(result, "sanctions_screen")["role"] == "tool"
+    assert _node(result, "policy_kb")["role"] == "resource"
+    assert _node(result, "pii_guardrail")["role"] == "check"
+
+
+def test_root_span_has_depth_zero_and_is_flagged_root():
+    spans = [_span("s1", None, "onboarding_graph", "AGENT")]
+    result = reconstruct(spans)
+    root = result["nodes"][0]
+    assert root["depth"] == 0
+    assert root["isRoot"] is True
+
+
+def test_depth_increases_along_the_call_chain():
+    """root -> classify -> sanctions_screen must lay out left-to-right in
+    that order, not scattered — depth is what the frontend positions on."""
+    spans = [
+        _span("s1", None, "onboarding_graph", "AGENT"),
+        _span("s2", "s1", "classify_document", "LLM"),
+        _span("s3", "s2", "sanctions_screen", "TOOL"),
+    ]
+    result = reconstruct(spans)
+    assert _node(result, "onboarding_graph")["depth"] == 0
+    assert _node(result, "classify_document")["depth"] == 1
+    assert _node(result, "sanctions_screen")["depth"] == 2
+    assert _node(result, "onboarding_graph")["isRoot"] is True
+    assert _node(result, "classify_document")["isRoot"] is False
+
+
+def test_depth_uses_shortest_path_when_paths_converge():
+    """A node reachable both directly from the root and via a longer chain
+    lays out at its shallowest reachable position (BFS), not its deepest —
+    see _layer_depths' docstring for why longest-path was dropped."""
+    spans = [
+        _span("s1", None, "root", "AGENT"),
+        _span("s2", "s1", "step_a", "TOOL"),
+        _span("s3", "s2", "step_b", "TOOL"),
+        _span("s4", "s3", "converge", "TOOL"),
+        _span("s5", "s1", "converge", "TOOL"),  # same structural node, direct from root
+    ]
+    result = reconstruct(spans)
+    assert _node(result, "converge")["depth"] == 1
+
+
+def test_cyclic_trace_does_not_hang_or_crash():
+    """A retry loop (LangGraph revisiting a node) creates a real cycle in the
+    span graph — the layering must still terminate with small, sensible
+    depths (not inflate with every trip around the loop)."""
+    spans = [
+        _span("s1", None, "graph", "AGENT"),
+        _span("s2", "s1", "retry_step", "TOOL"),
+        _span("s3", "s2", "graph", "AGENT"),  # cycle: retry_step -> graph again
+    ]
+    result = reconstruct(spans)
+    assert len(result["nodes"]) == 2
+    assert _node(result, "graph")["depth"] == 0
+    assert _node(result, "retry_step")["depth"] == 1
+
+
+def test_supervisor_loop_depth_stays_bounded_not_inflated_by_loop_count():
+    """A LangGraph supervisor dispatching to N agents and looping back is a
+    real, common shape (this is what broke the original longest-path
+    design on live retail-onboarding traces: depth hit 99-100). However many
+    times the loop repeats, depth must stay bounded by the graph's actual
+    shape, not the number of spans sampled."""
+    spans = [_span("root", None, "supervisor", "AGENT")]
+    trace_id = "t1"
+    for i in range(60):
+        spans.append(_span(f"a{i}", "root", "next_agent", "AGENT", trace_id=trace_id))
+        spans.append(_span(f"b{i}", f"a{i}", "supervisor", "AGENT", trace_id=trace_id))
+    result = reconstruct(spans)
+    depths = {n["name"]: n["depth"] for n in result["nodes"]}
+    assert depths["supervisor"] <= 2
+    assert depths["next_agent"] <= 2
+
+
+def test_no_root_falls_back_to_first_node_without_crashing():
+    """A sample that is pure cycle (or whose true root fell outside the
+    page window) still needs a starting column for layout."""
+    spans = [_span("s1", "s2", "a", "TOOL"), _span("s2", "s1", "b", "TOOL")]
+    result = reconstruct(spans)
+    assert any(n["isRoot"] for n in result["nodes"])

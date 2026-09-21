@@ -13,6 +13,7 @@ happened across the sampled traces.
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable
@@ -28,6 +29,26 @@ _KNOWN_KINDS = {
     "AGENT", "LLM", "TOOL", "RETRIEVER", "CHAIN",
     "GUARDRAIL", "EVALUATOR", "RERANKER", "EMBEDDING", "UNKNOWN",
 }
+
+# Groups the vendor span-kind vocabulary into the handful of lanes the
+# Diagram tab actually draws: the agent's own orchestration steps, the
+# models it calls, the tools/skills it invokes, the resources (knowledge
+# bases, retrievers) it reads, and the guardrail/evaluator checks it runs.
+# This is what turns "a bag of spans" into "what tools/resources/skills does
+# this agent use" — the question the diagram exists to answer.
+_ROLE_BY_KIND = {
+    "AGENT": "step",
+    "CHAIN": "step",
+    "LLM": "model",
+    "EMBEDDING": "model",
+    "TOOL": "tool",
+    "RETRIEVER": "resource",
+    "GUARDRAIL": "check",
+    "EVALUATOR": "check",
+    "RERANKER": "check",
+    "UNKNOWN": "other",
+}
+ROLE_LANES = ["step", "model", "tool", "resource", "check", "other"]
 
 
 def _span_kind(span: dict) -> str:
@@ -66,6 +87,46 @@ class _EdgeAgg:
     frm: str
     to: str
     count: int = 0
+
+
+def _layer_depths(node_keys: Iterable[str], edge_pairs: Iterable[tuple[str, str]]) -> tuple[dict[str, int], set[str]]:
+    """BFS distance from a root, for a left-to-right trajectory layout.
+
+    This was originally longest-path-from-root (depth = one more than the
+    deepest prerequisite), which reads naturally for a straight-line
+    pipeline — but a real LangGraph supervisor pattern loops (supervisor ->
+    agent -> back to supervisor -> next agent, dozens of times per trace),
+    and longest-path has no ceiling on a cycle: on real retail-onboarding
+    traces it inflated to depth 99-100, which would draw a diagram 100
+    columns wide. BFS first-visit-wins depth is bounded by the graph's
+    actual diameter regardless of how many times it loops, so the layout
+    stays a handful of columns wide even for a heavily looping graph.
+    """
+    keys = list(node_keys)
+    adj: dict[str, list[str]] = {k: [] for k in keys}
+    incoming = {k: 0 for k in keys}
+    for frm, to in edge_pairs:
+        if frm in adj and to in adj:
+            adj[frm].append(to)
+            incoming[to] += 1
+    roots = {k for k in keys if incoming[k] == 0} or set(keys[:1])
+
+    depth: dict[str, int] = {}
+    queue: deque[str] = deque()
+    for r in roots:
+        depth[r] = 0
+        queue.append(r)
+    while queue:
+        cur = queue.popleft()
+        for nxt in adj[cur]:
+            if nxt not in depth:
+                depth[nxt] = depth[cur] + 1
+                queue.append(nxt)
+    # A node no root can reach (disconnected component, or every path into
+    # it runs through another such node) still needs a column to draw in.
+    for k in keys:
+        depth.setdefault(k, 0)
+    return depth, roots
 
 
 def reconstruct(spans: Iterable[dict]) -> dict:
@@ -118,6 +179,8 @@ def reconstruct(spans: Iterable[dict]) -> dict:
         edge = edges.setdefault((parent_key, node_key), _EdgeAgg(frm=parent_key, to=node_key))
         edge.count += 1
 
+    depth_by_key, root_keys = _layer_depths(nodes.keys(), edges.keys())
+
     return {
         "spanCount": span_count,
         "traceCount": len(trace_ids),
@@ -129,6 +192,9 @@ def reconstruct(spans: Iterable[dict]) -> dict:
                 "count": n.count,
                 "errorCount": n.error_count,
                 "avgLatencyMs": round(n.total_latency_ms / n.latency_samples, 1) if n.latency_samples else None,
+                "role": _ROLE_BY_KIND.get(n.kind, "other"),
+                "depth": depth_by_key.get(key, 0),
+                "isRoot": key in root_keys,
             }
             for key, n in nodes.items()
         ],

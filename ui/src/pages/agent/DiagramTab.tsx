@@ -7,7 +7,7 @@ import {
   type ObservedOnlyDep, type AdoptResponse, type BlastRadius, type UpstreamDep, type SharedResource,
 } from '../../services/ops/diagram'
 import { Loading, SectionLabel, SourceBadge, MiniStat, STAGE_PILL, fmtDollars, fmtNumber, type TabProps } from './shared'
-import TraceNetworkGraph from '../../components/TraceNetworkGraph'
+import TrajectoryDiagram from '../../components/TrajectoryDiagram'
 import PhoenixProjectPicker from '../../components/PhoenixProjectPicker'
 
 // Sample-quality and error-colour thresholds from the diagram research: a
@@ -225,10 +225,10 @@ function TraceGraph({ graph, refreshing, onRefresh }: { graph: DiagramGraph; ref
         </p>
       )}
 
-      <div className="rounded-xl border border-gray-100 bg-gray-900/95 overflow-hidden relative">
-        <TraceNetworkGraph nodes={drawn} edges={nwEdges} height={440} selectedId={selectedId} onSelect={setSelectedId} />
-        <p className="absolute bottom-1.5 right-2 text-[10px] text-gray-500">drag to move · scroll to zoom · click a node to trace its calls</p>
+      <div className="rounded-xl border border-gray-100 bg-gray-900/95 overflow-hidden">
+        <TrajectoryDiagram nodes={drawn} edges={nwEdges} height={440} selectedId={selectedId} onSelect={setSelectedId} />
       </div>
+      <p className="text-[10px] text-gray-400 mt-1">left → right is call order, top → bottom is step / model / tool / resource / check · scroll to zoom, drag canvas to pan, drag a node to nudge it (it springs back) · click "?" for the legend</p>
       {selected && (
         <div className={`mt-2 text-xs rounded-lg ring-1 px-3 py-2 ${nodeTone(selected)}`}>
           <span className="font-medium">{selected.name}</span>

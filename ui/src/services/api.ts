@@ -52,24 +52,7 @@ api.interceptors.response.use(
 
 // ── Bootstrap API (existing) ─────────────────────────────────────────────────
 
-export interface SessionResponse {
-  session_id: string
-  current_step: string
-  step_status: string
-  messages: { role: string; agent?: string; content: string }[]
-  collected: Record<string, unknown>
-}
-
 export const checkHealth = () => api.get<{ status: string }>('/health')
-
-export const startSession = (message: string, context?: Record<string, unknown>) =>
-  api.post<SessionResponse>('/example/start', { message, context })
-
-export const resumeSession = (session_id: string, message: string) =>
-  api.post<SessionResponse>('/example/resume', { session_id, message })
-
-export const getSession = (session_id: string) =>
-  api.get<SessionResponse>(`/example/${session_id}`)
 
 // ── Agent Registry API ───────────────────────────────────────────────────────
 
@@ -108,6 +91,78 @@ export interface Agent {
   phoenixProject?: string | null
   phoenixEndpoint?: string | null
   contextMd?: string | null
+  capabilities: string[]
+  rateLimit?: string | null
+}
+
+export interface ReuseUnmet {
+  code: 'stage' | 'gate_not_approved' | 'gate_expired' | 'open_high_risk'
+  gate: string | null
+  message: string
+}
+
+// Derived on the server from stage, governance gates and the Risk tab.
+export interface ReuseStatus {
+  certified: boolean
+  unmet: ReuseUnmet[]
+  withConditions: string[]
+}
+
+export interface RegistryCard {
+  costPerCallCents: number | null
+  source: 'phoenix' | 'seed' | 'none'
+  partialPricing: boolean
+  consumerCount: number
+}
+
+// One row of the registry list: the agent plus figures computed for the card.
+export interface RegistryAgent extends Agent {
+  reuse: ReuseStatus
+  card: RegistryCard
+  matchedTerms: string[]
+}
+
+export interface SimilarAgent {
+  id: string
+  name: string
+  stage: string
+  owner: string
+  description: string
+  score: number
+  matchedTerms: string[]
+  sharedCapabilities: string[]
+  sameEndpoint: boolean
+  certified: boolean
+}
+
+export interface AgentCreateInput {
+  name: string
+  dept: string
+  owner: string
+  owner_contact: string
+  stage: string
+  ai_type: string
+  description: string
+  business_outcome: string
+  value_amount: number
+  hours_saved_monthly: number
+  model_name: string
+  api_endpoint: string
+  sla: string
+  rate_limit: string
+  phoenix_project: string
+  phoenix_endpoint: string
+  context_md: string
+  capabilities: string[]
+  inputs: string[]
+  outputs: string[]
+  enterprise_systems: string[]
+  databases: string[]
+  knowledge_bases: string[]
+  mcp_servers: string[]
+  calls: string[]
+  consumers: string[]
+  reuse_justification: string
 }
 
 export interface PaginationInfo {
@@ -146,6 +201,8 @@ export const login = async (email: string, password: string): Promise<LoginRespo
   return resp.data
 }
 
+export const getMe = () => api.get<{ user_id: string; role: string }>('/auth/me')
+
 export const logout = () => {
   clearAuthToken()
 }
@@ -155,22 +212,45 @@ export const getAgents = (page = 1, limit = 50, filters?: {
   stage?: string
   type?: string
   q?: string
+  certified?: boolean
 }) => {
   const params = new URLSearchParams({ page: String(page), limit: String(limit) })
   if (filters?.dept) params.set('dept', filters.dept)
   if (filters?.stage) params.set('stage', filters.stage)
   if (filters?.type) params.set('type', filters.type)
   if (filters?.q) params.set('q', filters.q)
-  return api.get<PaginatedResponse<Agent>>(`/agents/?${params.toString()}`)
+  if (filters?.certified) params.set('certified', 'true')
+  return api.get<PaginatedResponse<RegistryAgent>>(`/agents/?${params.toString()}`)
 }
 
 export const getAgent = (id: string) => api.get<Agent>(`/agents/${id}`)
 
-export const createAgent = (agent: Partial<Agent>) =>
+export const createAgent = (agent: AgentCreateInput) =>
   api.post<{ id: string; status: string }>('/agents/', agent)
 
+export const findSimilarAgents = (query: {
+  name: string; description: string; business_outcome: string; capabilities: string[]; api_endpoint: string
+}) => api.post<{ similar: SimilarAgent[] }>('/agents/similar', query)
+
 export const deleteAgent = (id: string) =>
-  api.delete<{ status: string }>(`/agents/${id}`)
+  api.delete<{ status: string }>(`/agents/${encodeURIComponent(id)}`)
+
+// Profile fields only: stage changes go through the Governance tab's gates,
+// and the contract is edited on the Integrate tab.
+export interface AgentProfileUpdate {
+  name: string
+  description: string
+  owner: string
+  owner_contact: string
+  dept: string
+  ai_type: string
+  business_outcome: string
+  value_amount: number
+  hours_saved_monthly: number
+}
+
+export const updateAgent = (id: string, update: Partial<AgentProfileUpdate>) =>
+  api.put<{ status: string }>(`/agents/${encodeURIComponent(id)}`, update)
 
 // ── Phoenix discovery — reconstructing an onboarded app's real dependency
 // diagram from its actual traces, not its hand-declared calls/consumers ──────

@@ -8,12 +8,13 @@ import GovernanceTab from './agent/GovernanceTab'
 import TokenomicsTab from './agent/TokenomicsTab'
 import RevenueTab from './agent/RevenueTab'
 import RiskTab from './agent/RiskTab'
+import IntegrateTab from './agent/IntegrateTab'
 
-const TABS = ['overview', 'diagram', 'governance', 'tokenomics', 'revenue', 'risk'] as const
+const TABS = ['overview', 'diagram', 'governance', 'tokenomics', 'revenue', 'risk', 'integrate'] as const
 type Tab = typeof TABS[number]
 const TAB_LABEL: Record<Tab, string> = {
   overview: 'Overview', diagram: 'Diagram', governance: 'Governance',
-  tokenomics: 'Tokenomics', revenue: 'Revenue & Expenditure', risk: 'Risk',
+  tokenomics: 'Tokenomics', revenue: 'Revenue & Expenditure', risk: 'Risk', integrate: 'Integrate',
 }
 
 // Every tab is scoped to the agent id in the route.
@@ -93,6 +94,7 @@ export default function AgentPage() {
         {tab === 'tokenomics' && <TokenomicsTab {...tabProps} />}
         {tab === 'revenue' && <RevenueTab {...tabProps} />}
         {tab === 'risk' && <RiskTab {...tabProps} />}
+        {tab === 'integrate' && <IntegrateTab {...tabProps} />}
       </div>
     </div>
   )

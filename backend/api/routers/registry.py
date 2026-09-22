@@ -9,7 +9,7 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, validator
-from sqlalchemy import select, func, and_, case
+from sqlalchemy import select, func, and_, case, delete, update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -17,14 +17,23 @@ from db.base import get_db_session
 from db.models import (
     Agent, Department, Organization, GovernanceReview, GovernanceException,
     Discovery, AgentTokenUsage, ModelTokenPrice, AgentBudget, WasteFinding,
-    CostAnomaly, User, AuditLog, AgentIdentity, AgentMetric, PhoenixConfig, AgentRisk
+    CostAnomaly, User, AuditLog, AgentIdentity, AgentMetric, PhoenixConfig, AgentRisk, AgentAccessRequest,
+    ModelRouting, AgentInfraProfile, AgentResourceLink, AgentInfraCost, AgentContextVersion, AgentContextInsight,
 )
 from api.auth import (
     hash_password, verify_password, create_access_token,
     require_create, require_read, require_update, require_delete, require_admin,
     get_current_user
 )
+from governance import reuse
+from services import reuse_repo
 from shared.config import get_settings
+
+# Tables that reference an agent without an ORM cascade.
+_AGENT_OWNED_TABLES = (
+    AgentAccessRequest, GovernanceException, WasteFinding, CostAnomaly, AgentRisk, AgentMetric, ModelRouting,
+    AgentInfraProfile, AgentResourceLink, AgentInfraCost, AgentContextVersion, AgentContextInsight,
+)
 
 # ── Routers ──────────────────────────────────────────────────────────────────
 
@@ -44,6 +53,12 @@ phoenix_router = APIRouter(prefix="/api/v1/phoenix", tags=["Phoenix Discovery"])
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
+
+AI_TYPES = [
+    "Autonomous Agent", "Copilot / Assistant", "Predictive / ML Model",
+    "Generative AI Feature", "Conversational AI / Chatbot", "Computer Vision Model",
+]
+
 
 class AgentCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -77,6 +92,15 @@ class AgentCreate(BaseModel):
     # Optional free-form markdown context the owner pastes in at onboarding
     # time — shown verbatim on the agent's own page, never parsed.
     context_md: str = ""
+    capabilities: List[str] = []
+    rate_limit: str = Field("", max_length=255)
+    owner_contact: str = Field("", max_length=255)
+    # Required when similar agents already exist: why none of them fit.
+    reuse_justification: str = Field("", max_length=4000)
+
+    @validator("capabilities", "inputs", "outputs")
+    def validate_lists(cls, v):
+        return reuse.clean_list(v)
 
     @validator("stage")
     def validate_stage(cls, v):
@@ -87,12 +111,8 @@ class AgentCreate(BaseModel):
 
     @validator("ai_type")
     def validate_ai_type(cls, v):
-        valid = [
-            "Autonomous Agent", "Copilot / Assistant", "Predictive / ML Model",
-            "Generative AI Feature", "Conversational AI / Chatbot", "Computer Vision Model"
-        ]
-        if v not in valid:
-            raise ValueError(f"Invalid ai_type. Must be one of: {', '.join(valid)}")
+        if v not in AI_TYPES:
+            raise ValueError(f"Invalid ai_type. Must be one of: {', '.join(AI_TYPES)}")
         return v
 
     @validator("risk_level")
@@ -115,6 +135,17 @@ class AgentCreate(BaseModel):
         return v
 
 
+class SimilarQuery(BaseModel):
+    name: str = ""
+    description: str = ""
+    business_outcome: str = ""
+    capabilities: List[str] = []
+    api_endpoint: str = ""
+
+
+MIN_REUSE_JUSTIFICATION_CHARS = 20
+
+
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
@@ -131,6 +162,30 @@ class AgentUpdate(BaseModel):
     phoenix_project: Optional[str] = None
     phoenix_endpoint: Optional[str] = None
     context_md: Optional[str] = None
+    owner_contact: Optional[str] = Field(None, max_length=255)
+    # Department id; stored as dept_id.
+    dept: Optional[str] = Field(None, max_length=64)
+    ai_type: Optional[str] = None
+    business_outcome: Optional[str] = None
+    hours_saved_monthly: Optional[int] = Field(None, ge=0)
+
+    @validator("name")
+    def validate_name(cls, v):
+        if v is not None and not v.strip():
+            raise ValueError("Name cannot be empty")
+        return v.strip() if v else v
+
+    @validator("value_amount")
+    def validate_value_amount(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("Value cannot be negative")
+        return v
+
+    @validator("ai_type")
+    def validate_ai_type(cls, v):
+        if v is not None and v not in AI_TYPES:
+            raise ValueError(f"Invalid ai_type. Must be one of: {', '.join(AI_TYPES)}")
+        return v
 
 
 class GateUpdate(BaseModel):
@@ -200,8 +255,12 @@ async def list_agents(
     stage: str = "",
     type: str = "",
     q: str = "",
+    certified: bool = False,
     _=Depends(require_read)
 ):
+    """q searches what agents do (name, capabilities, tags, description,
+    outcome, inputs/outputs), not only names; with q, results are ranked by
+    relevance. certified=true keeps only agents certified for reuse."""
     async with get_db_session() as db:
         query = select(Agent).options(selectinload(Agent.governance_reviews))
         if dept:
@@ -210,20 +269,60 @@ async def list_agents(
             query = query.where(Agent.lifecycle_stage == stage)
         if type:
             query = query.where(Agent.ai_type == type)
-        if q:
-            query = query.where(Agent.name.ilike(f"%{q}%"))
+        agents = (await db.execute(query.order_by(Agent.value_amount.desc(), Agent.name))).scalars().all()
 
-        count_result = await db.execute(select(func.count()).select_from(query.subquery()))
-        total = count_result.scalar()
+        matches: dict[str, dict] = {}
+        if q.strip():
+            for a in agents:
+                m = reuse.search_match(q, reuse_repo.agent_mapping(a))
+                if m is not None:
+                    matches[a.id] = m
+            # Stable sort: equal relevance keeps the value order.
+            agents = sorted((a for a in agents if a.id in matches), key=lambda a: -matches[a.id]["score"])
 
-        query = query.order_by(Agent.value_amount.desc()).offset((page - 1) * limit).limit(limit)
-        result = await db.execute(query)
-        agents = result.scalars().all()
+        certs: dict[str, dict] = {}
+        if certified:
+            certs = await reuse_repo.certifications(db, agents)
+            agents = [a for a in agents if certs[a.id]["certified"]]
+
+        total = len(agents)
+        page_agents = agents[(page - 1) * limit: page * limit]
+        if not certified:
+            certs = await reuse_repo.certifications(db, page_agents)
+        costs = await reuse_repo.cost_per_call(db, [a.id for a in page_agents])
 
         return {
-            "data": [_agent_to_dict(a) for a in agents],
+            "data": [
+                {
+                    **_agent_to_dict(a),
+                    "reuse": certs[a.id],
+                    "card": {**costs[a.id], "consumerCount": len(a.consumers or [])},
+                    "matchedTerms": matches[a.id]["matched"] if a.id in matches else [],
+                }
+                for a in page_agents
+            ],
             "pagination": {"page": page, "limit": limit, "total": total, "pages": (total + limit - 1) // limit}
         }
+
+
+async def _similar(db: AsyncSession, candidate: dict) -> list[dict]:
+    agents = (await db.execute(
+        select(Agent).options(selectinload(Agent.governance_reviews))
+    )).scalars().all()
+    found = reuse.similar_agents(candidate, [reuse_repo.agent_mapping(a) for a in agents])
+    if not found:
+        return []
+    by_id = {a.id: a for a in agents}
+    certs = await reuse_repo.certifications(db, [by_id[m["id"]] for m in found])
+    return [{**m, "certified": certs[m["id"]]["certified"]} for m in found]
+
+
+@agents_router.post("/similar")
+async def similar_agents(body: SimilarQuery, _=Depends(require_read)):
+    """Existing agents that already seem to do what a new registration
+    describes — shown before registering so a team can reuse instead."""
+    async with get_db_session() as db:
+        return {"similar": await _similar(db, body.model_dump())}
 
 
 @agents_router.get("/duplicates")
@@ -276,6 +375,20 @@ async def get_agent(agent_id: str, _=Depends(require_read)):
 @agents_router.post("/")
 async def create_agent(agent: AgentCreate, user=Depends(require_create)):
     async with get_db_session() as db:
+        # The duplicate check is enforced here, not only in the form, so no
+        # client can register a look-alike without saying why.
+        similar = await _similar(db, {
+            "name": agent.name, "description": agent.description, "business_outcome": agent.business_outcome,
+            "capabilities": agent.capabilities, "api_endpoint": agent.api_endpoint,
+        })
+        justification = agent.reuse_justification.strip()
+        if similar and len(justification) < MIN_REUSE_JUSTIFICATION_CHARS:
+            raise HTTPException(status_code=409, detail={
+                "code": "similar_agents_exist",
+                "message": f"{len(similar)} similar agent(s) already exist. Reuse one, or explain in at least "
+                           f"{MIN_REUSE_JUSTIFICATION_CHARS} characters why none of them fit.",
+                "similar": similar,
+            })
         # Generate URL-safe agent ID
         slug = re.sub(r'[^a-z0-9-]', '', agent.name.lower().replace(" ", "-"))
         agent_id = f"{slug}-{secrets.token_hex(4)}"
@@ -294,6 +407,12 @@ async def create_agent(agent: AgentCreate, user=Depends(require_create)):
             phoenix_project=agent.phoenix_project or None,
             phoenix_endpoint=agent.phoenix_endpoint or None,
             context_md=agent.context_md or None,
+            capabilities=agent.capabilities,
+            rate_limit=agent.rate_limit.strip() or None,
+            owner_contact=agent.owner_contact.strip() or None,
+            reuse_checked=[{"id": m["id"], "name": m["name"], "score": m["score"], "certified": m["certified"]}
+                           for m in similar],
+            reuse_justification=justification if similar else None,
         )
         db.add(db_agent)
         for gate in ["arb", "security", "dp"]:
@@ -308,7 +427,8 @@ async def create_agent(agent: AgentCreate, user=Depends(require_create)):
             action="create",
             entity_type="agent",
             entity_id=agent_id,
-            changes={"name": agent.name, "stage": agent.stage, "ai_type": agent.ai_type},
+            changes={"name": agent.name, "stage": agent.stage, "ai_type": agent.ai_type,
+                     "similar_shown": [m["id"] for m in similar]},
         ))
 
         return {"id": agent_id, "status": "created"}
@@ -322,6 +442,15 @@ async def update_agent(agent_id: str, update: AgentUpdate, user=Depends(require_
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         update_data = update.model_dump(exclude_unset=True)
+        # Columns the table requires; an explicit null would fail in the DB.
+        for required in ("name", "owner", "description", "ai_type", "lifecycle_stage"):
+            if required in update_data and update_data[required] is None:
+                raise HTTPException(status_code=422, detail=f"{required} cannot be null")
+        if "dept" in update_data:
+            dept = update_data.pop("dept") or None
+            if dept and await db.get(Department, dept) is None:
+                raise HTTPException(status_code=422, detail=f"Unknown department '{dept}'")
+            update_data["dept_id"] = dept
         for field, value in update_data.items():
             setattr(agent, field, value)
 
@@ -354,6 +483,15 @@ async def delete_agent(agent_id: str, user=Depends(require_delete)):
             changes={"name": agent.name, "stage": agent.lifecycle_stage},
         ))
 
+        # Rows that reference the agent without an ORM cascade. Left behind
+        # they would keep counting in portfolio totals (the risk summary reads
+        # agent_risks directly), and on Postgres the FKs would refuse the delete.
+        for model in _AGENT_OWNED_TABLES:
+            await db.execute(delete(model).where(model.agent_id == agent_id))
+        # A discovery is a record of detection and outlives the agent.
+        await db.execute(
+            sql_update(Discovery).where(Discovery.registered_agent_id == agent_id).values(registered_agent_id=None)
+        )
         await db.delete(agent)
         return {"status": "deleted"}
 
@@ -833,6 +971,8 @@ def _agent_to_dict(agent: Agent) -> dict:
         "phoenixProject": agent.phoenix_project,
         "phoenixEndpoint": agent.phoenix_endpoint,
         "contextMd": agent.context_md,
+        "capabilities": agent.capabilities or [],
+        "rateLimit": agent.rate_limit,
     }
 
 

@@ -115,6 +115,14 @@ class Agent(Base):
     consumers: Mapped[list] = mapped_column(JSON, default=list)
     inputs: Mapped[list] = mapped_column(JSON, default=list)
     outputs: Mapped[list] = mapped_column(JSON, default=list)
+    # What the agent does, as short phrases ("KYC document extraction") —
+    # what capability search and the registration duplicate check match on.
+    capabilities: Mapped[list] = mapped_column(JSON, default=list)
+    rate_limit: Mapped[Optional[str]] = mapped_column(String(255))
+    # Recorded at registration when similar agents already existed: which
+    # ones the registering team was shown, and why none of them fit.
+    reuse_checked: Mapped[list] = mapped_column(JSON, default=list)
+    reuse_justification: Mapped[Optional[str]] = mapped_column(Text)
 
     # Source tracking
     source: Mapped[str] = mapped_column(String(50), default="manual")
@@ -149,6 +157,32 @@ class AgentIdentity(Base):
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     agent: Mapped["Agent"] = relationship(back_populates="identity")
+
+
+class AgentAccessRequest(Base):
+    """A team asking to consume an agent. Approval adds the team to the
+    agent's consumers, which is what puts it in the dependency graph."""
+    __tablename__ = "agent_access_requests"
+    __table_args__ = (
+        Index("idx_agent_access_requests_agent_id", "agent_id"),
+        Index("idx_agent_access_requests_status", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    requester_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    requester_name: Mapped[Optional[str]] = mapped_column(String(255))
+    team: Mapped[str] = mapped_column(String(255), nullable=False)
+    purpose: Mapped[str] = mapped_column(Text, nullable=False)
+    # pending → approved | rejected; approved → revoked.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    decided_by: Mapped[Optional[str]] = mapped_column(String(255))
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    decision_note: Mapped[Optional[str]] = mapped_column(Text)
+    # True when approval is what added the team to consumers; revoking only
+    # removes a consumer entry this request put there, never a declared one.
+    added_to_consumers: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class GovernanceReview(Base):

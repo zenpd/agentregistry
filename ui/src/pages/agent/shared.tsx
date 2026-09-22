@@ -87,6 +87,23 @@ export function Loading({ text }: { text: string }) {
   return <div className="py-10 text-center text-sm text-gray-400">{text}</div>
 }
 
+export function errorMessage(e: any, fallback: string): string {
+  const detail = e?.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) return detail.map((d: any) => d.msg || String(d)).join('; ')
+  if (detail?.message) return detail.message
+  return e?.message || fallback
+}
+
+// Cost per call is usually a fraction of a cent, so it keeps three significant figures.
+export function fmtCostPerCall(cents: number | null | undefined): string {
+  if (cents == null) return '—'
+  const n = cents / 100
+  if (n === 0) return '$0.00'
+  if (Math.abs(n) >= 1) return '$' + n.toFixed(2)
+  return '$' + Number(n.toPrecision(3)).toString()
+}
+
 export function SectionLabel({ children }: { children: React.ReactNode }) {
   return <span className="text-xs text-gray-400">{children}</span>
 }

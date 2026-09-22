@@ -90,6 +90,12 @@ class Settings(BaseSettings):
     blended_hourly_rate_usd: float = 60.0
     # context.md analysis with the Azure OpenAI deployment (rule-based always runs).
     context_llm_enabled: bool = True
+    # Try it (Integrate tab): base URL that relative agent endpoints such as
+    # /agents/v1/foo are served under, e.g. the org's API gateway. Empty means
+    # only agents with an absolute endpoint can be tried.
+    agent_gateway_base_url: str = ""
+    try_it_timeout_seconds: float = 20.0
+    try_it_calls_per_minute: int = 10
 
     # ── Prompts ────────────────────────────────────────────────────────────────
     prompts_dir: str = "config/prompts"

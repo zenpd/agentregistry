@@ -1,13 +1,14 @@
-import { useState } from 'react'
-import { createAgent } from '../services/api'
+import { useEffect, useState } from 'react'
+import { BadgeCheck } from 'lucide-react'
+import { createAgent, findSimilarAgents, type SimilarAgent } from '../services/api'
 import PhoenixProjectPicker from './PhoenixProjectPicker'
 
-const AI_TYPES = [
+export const AI_TYPES = [
   'Autonomous Agent', 'Copilot / Assistant', 'Predictive / ML Model',
   'Generative AI Feature', 'Conversational AI / Chatbot', 'Computer Vision Model',
 ]
 const STAGES = ['Ideation', 'Development', 'Testing', 'Production', 'Deprecated']
-const DEPTS = ['dept-finance', 'dept-cx', 'dept-hr', 'dept-it-ops', 'dept-sales', 'dept-marketing', 'dept-legal', 'dept-supply-chain', 'dept-engineering']
+export const DEPTS = ['dept-finance', 'dept-cx', 'dept-hr', 'dept-it-ops', 'dept-sales', 'dept-marketing', 'dept-legal', 'dept-supply-chain', 'dept-engineering']
 
 interface FormState {
   name: string
@@ -31,7 +32,17 @@ interface FormState {
   mcp_servers: string
   calls: string
   consumers: string
+  capabilities: string
+  inputs: string
+  outputs: string
+  sla: string
+  rate_limit: string
+  owner_contact: string
+  reuse_justification: string
 }
+
+// Must match MIN_REUSE_JUSTIFICATION_CHARS in api/routers/registry.py.
+const MIN_JUSTIFICATION = 20
 
 const INITIAL_FORM: FormState = {
   name: '', dept: 'dept-finance', owner: '', stage: 'Ideation',
@@ -41,12 +52,14 @@ const INITIAL_FORM: FormState = {
   context_md: '',
   enterprise_systems: '', databases: '', knowledge_bases: '', mcp_servers: '',
   calls: '', consumers: '',
+  capabilities: '', inputs: '', outputs: '', sla: '', rate_limit: '', owner_contact: '', reuse_justification: '',
 }
 
 export default function OnboardingModal({ onClose, onSaved }: { onClose: () => void; onSaved?: () => void }) {
   const [form, setForm] = useState<FormState>(INITIAL_FORM)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [similar, setSimilar] = useState<SimilarAgent[]>([])
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm(prev => ({ ...prev, [key]: value }))
@@ -56,9 +69,38 @@ export default function OnboardingModal({ onClose, onSaved }: { onClose: () => v
     return value.split(',').map(s => s.trim()).filter(Boolean)
   }
 
+  function splitLines(value: string): string[] {
+    return value.split('\n').map(s => s.trim()).filter(Boolean)
+  }
+
+  // Look for agents that already do this while the team is still describing it.
+  useEffect(() => {
+    if (!form.name.trim() && !form.description.trim() && !form.capabilities.trim()) {
+      setSimilar([])
+      return
+    }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      findSimilarAgents({
+        name: form.name, description: form.description, business_outcome: form.business_outcome,
+        capabilities: splitLines(form.capabilities), api_endpoint: form.api_endpoint,
+      })
+        .then(r => { if (!cancelled) setSimilar(r.data.similar) })
+        .catch(() => { /* the server repeats this check on submit */ })
+    }, 400)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [form.name, form.description, form.business_outcome, form.capabilities, form.api_endpoint])
+
+  const needsReason = similar.length > 0
+  const reasonShort = needsReason && form.reuse_justification.trim().length < MIN_JUSTIFICATION
+
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.name.trim()) { setError('Name is required'); return }
+    if (reasonShort) {
+      setError(`Similar agents already exist. Say why none of them fit (at least ${MIN_JUSTIFICATION} characters).`)
+      return
+    }
     setSaving(true)
     setError(null)
     try {
@@ -66,6 +108,7 @@ export default function OnboardingModal({ onClose, onSaved }: { onClose: () => v
         name: form.name.trim(),
         dept: form.dept,
         owner: form.owner,
+        owner_contact: form.owner_contact.trim(),
         stage: form.stage,
         ai_type: form.ai_type,
         description: form.description,
@@ -74,6 +117,12 @@ export default function OnboardingModal({ onClose, onSaved }: { onClose: () => v
         hours_saved_monthly: Number(form.hours_saved_monthly) || 0,
         model_name: form.model_name,
         api_endpoint: form.api_endpoint,
+        sla: form.sla.trim(),
+        rate_limit: form.rate_limit.trim(),
+        capabilities: splitLines(form.capabilities),
+        inputs: splitLines(form.inputs),
+        outputs: splitLines(form.outputs),
+        reuse_justification: needsReason ? form.reuse_justification.trim() : '',
         phoenix_project: form.phoenix_project.trim(),
         phoenix_endpoint: form.phoenix_endpoint_mode === 'custom' ? form.phoenix_endpoint.trim() : '',
         context_md: form.context_md.trim(),
@@ -83,11 +132,17 @@ export default function OnboardingModal({ onClose, onSaved }: { onClose: () => v
         mcp_servers: splitTags(form.mcp_servers),
         calls: splitTags(form.calls),
         consumers: splitTags(form.consumers),
-      } as any)
+      })
       onSaved?.()
       onClose()
     } catch (e: any) {
       const detail = e.response?.data?.detail
+      if (detail?.code === 'similar_agents_exist') {
+        // The server found look-alikes this form had not shown yet.
+        setSimilar(detail.similar)
+        setError(detail.message)
+        return
+      }
       setError(typeof detail === 'string' ? detail : JSON.stringify(detail) || e.message || 'Failed to register agent')
     } finally {
       setSaving(false)
@@ -149,6 +204,52 @@ export default function OnboardingModal({ onClose, onSaved }: { onClose: () => v
             <label className={label}>Business outcome</label>
             <input className="input" value={form.business_outcome} onChange={e => set('business_outcome', e.target.value)} placeholder="e.g. 40% faster invoice processing" />
           </div>
+          <div>
+            <label className={label}>Capabilities (one per line)</label>
+            <textarea className="input" rows={2} value={form.capabilities} onChange={e => set('capabilities', e.target.value)} placeholder={'e.g. Invoice matching\nPO lookup'} />
+            <p className="text-xs text-gray-400 mt-1">What other teams would search for to find this agent.</p>
+          </div>
+
+          {similar.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2" data-testid="similar-agents">
+              <div className="text-sm font-semibold text-amber-900">
+                {similar.length === 1 ? 'An agent that may already do this is' : `${similar.length} agents that may already do this are`} registered
+              </div>
+              <p className="text-xs text-amber-800">Consider reusing one instead. Each opens in a new tab so this form is kept.</p>
+              <ul className="space-y-1.5">
+                {similar.map(m => (
+                  <li key={m.id} className="rounded-lg bg-white/70 px-3 py-2 text-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <a href={`/agents/${m.id}?tab=integrate`} target="_blank" rel="noreferrer" className="font-medium text-teal-700 hover:underline">{m.name}</a>
+                      <span className="text-xs text-gray-500">{m.stage} · {m.owner}</span>
+                      {m.certified && <span className="inline-flex items-center gap-0.5 text-xs text-emerald-700"><BadgeCheck size={12} /> Certified for reuse</span>}
+                      <span className="ml-auto text-xs text-gray-400">{Math.round(m.score * 100)}% match</span>
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {m.sameEndpoint && 'Same API endpoint. '}
+                      {m.sharedCapabilities.length > 0 && `Shared capability: ${m.sharedCapabilities.join(', ')}. `}
+                      {m.matchedTerms.length > 0 && `Shared terms: ${m.matchedTerms.slice(0, 6).join(', ')}`}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <div>
+                <label className={label}>Why doesn’t an existing agent fit? *</label>
+                <textarea
+                  className="input"
+                  rows={2}
+                  value={form.reuse_justification}
+                  onChange={e => set('reuse_justification', e.target.value)}
+                  placeholder="e.g. Needs multi-currency line matching, which the existing agent does not support"
+                  aria-label="Reason for building new"
+                />
+                <p className={`text-xs mt-1 ${reasonShort ? 'text-amber-700' : 'text-gray-400'}`}>
+                  Required to register. Stored with this agent for the governance reviewers
+                  ({form.reuse_justification.trim().length}/{MIN_JUSTIFICATION} characters minimum).
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -188,9 +289,34 @@ export default function OnboardingModal({ onClose, onSaved }: { onClose: () => v
             </div>
           </div>
 
-          <div>
-            <label className={label}>API endpoint</label>
-            <input className="input" value={form.api_endpoint} onChange={e => set('api_endpoint', e.target.value)} placeholder="https://…" />
+          <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 space-y-3">
+            <label className={label}>How other teams call it (shown on the agent's Integrate tab)</label>
+            <div>
+              <label className={label}>API endpoint</label>
+              <input className="input" value={form.api_endpoint} onChange={e => set('api_endpoint', e.target.value)} placeholder="https://… or /agents/v1/…" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={label}>Inputs (one per line)</label>
+                <textarea className="input" rows={2} value={form.inputs} onChange={e => set('inputs', e.target.value)} placeholder="Vendor invoice (PDF)" />
+              </div>
+              <div>
+                <label className={label}>Outputs (one per line)</label>
+                <textarea className="input" rows={2} value={form.outputs} onChange={e => set('outputs', e.target.value)} placeholder="Match disposition" />
+              </div>
+              <div>
+                <label className={label}>SLA</label>
+                <input className="input" value={form.sla} onChange={e => set('sla', e.target.value)} placeholder="99.5% uptime" />
+              </div>
+              <div>
+                <label className={label}>Rate limit</label>
+                <input className="input" value={form.rate_limit} onChange={e => set('rate_limit', e.target.value)} placeholder="10 requests/second" />
+              </div>
+              <div className="col-span-2">
+                <label className={label}>Owner contact</label>
+                <input className="input" value={form.owner_contact} onChange={e => set('owner_contact', e.target.value)} placeholder="team email or channel" />
+              </div>
+            </div>
           </div>
 
           <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 space-y-3">
@@ -233,7 +359,8 @@ export default function OnboardingModal({ onClose, onSaved }: { onClose: () => v
             <button type="button" onClick={onClose} className="btn-secondary btn-sm">
               Cancel
             </button>
-            <button type="submit" disabled={saving} className="btn-primary btn-sm">
+            <button type="submit" disabled={saving || reasonShort} className="btn-primary btn-sm"
+              title={reasonShort ? 'Say why none of the similar agents fit first' : undefined}>
               {saving ? 'Registering…' : 'Register application'}
             </button>
           </div>

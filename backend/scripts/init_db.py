@@ -163,6 +163,16 @@ async def init_db():
             for dept in SEED_DEPARTMENTS:
                 db.add(Department(id=dept["id"], org_id="org-default", name=dept["name"], cost_center=dept.get("cost_center", "")))
 
+            # Flush org/departments before anything that references them by FK
+            # (org_id/dept_id). A single flush at commit time relies on
+            # SQLAlchemy's automatic dependency sort across every entity type
+            # added below (Agent, GovernanceReview, AgentTokenUsage, Discovery,
+            # User, AgentIdentity) — verified failing under async Postgres: the
+            # very first Agent insert raised ForeignKeyViolationError because
+            # org-default hadn't actually landed yet. An explicit flush here
+            # makes the ordering a guarantee, not an ORM implementation detail.
+            await db.flush()
+
             # Create agents
             for agent_data in SEED_AGENTS:
                 reviews = agent_data.pop("reviews", {})

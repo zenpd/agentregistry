@@ -83,6 +83,11 @@ async def seed_database():
         for dept in SEED_DEPARTMENTS:
             db.add(Department(id=dept["id"], org_id="org-default", name=dept["name"], cost_center=dept.get("cost_center", "")))
 
+        # Flush before anything that references org_id/dept_id by FK — see
+        # scripts/init_db.py's seeding for why this is required, not optional,
+        # under async Postgres.
+        await db.flush()
+
         # Create agents
         for agent_data in SEED_AGENTS:
             reviews = agent_data.pop("reviews", {})

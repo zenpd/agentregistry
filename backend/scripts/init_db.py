@@ -156,21 +156,20 @@ async def init_db():
         print("Seeding database...")
 
         try:
-            # Create default org
+            # Create default org, flushed alone before ANYTHING that
+            # references it by FK. Verified failing under async Postgres
+            # even with departments flushed in the SAME batch as the org
+            # row (both raised ForeignKeyViolationError: org-default not
+            # present) — SQLAlchemy's automatic same-flush dependency sort
+            # is not a real guarantee here, so each FK layer gets its own
+            # explicit flush rather than trusting the ORM to order a batch
+            # spanning this many interdependent entity types correctly.
             db.add(Organization(id="org-default", name="Default Organization", slug="default"))
+            await db.flush()
 
-            # Create departments
+            # Create departments, flushed before agents (dept_id FK)
             for dept in SEED_DEPARTMENTS:
                 db.add(Department(id=dept["id"], org_id="org-default", name=dept["name"], cost_center=dept.get("cost_center", "")))
-
-            # Flush org/departments before anything that references them by FK
-            # (org_id/dept_id). A single flush at commit time relies on
-            # SQLAlchemy's automatic dependency sort across every entity type
-            # added below (Agent, GovernanceReview, AgentTokenUsage, Discovery,
-            # User, AgentIdentity) — verified failing under async Postgres: the
-            # very first Agent insert raised ForeignKeyViolationError because
-            # org-default hadn't actually landed yet. An explicit flush here
-            # makes the ordering a guarantee, not an ORM implementation detail.
             await db.flush()
 
             # Create agents

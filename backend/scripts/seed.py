@@ -76,16 +76,16 @@ async def seed_database():
             print("Database already seeded, skipping.")
             return
 
-        # Create default org
+        # Create default org, flushed alone before anything that references
+        # it by FK — see scripts/init_db.py's seeding for why each FK layer
+        # needs its own explicit flush under async Postgres, not one shared
+        # across the whole batch.
         db.add(Organization(id="org-default", name="Default Organization", slug="default"))
+        await db.flush()
 
-        # Create departments
+        # Create departments, flushed before agents (dept_id FK)
         for dept in SEED_DEPARTMENTS:
             db.add(Department(id=dept["id"], org_id="org-default", name=dept["name"], cost_center=dept.get("cost_center", "")))
-
-        # Flush before anything that references org_id/dept_id by FK — see
-        # scripts/init_db.py's seeding for why this is required, not optional,
-        # under async Postgres.
         await db.flush()
 
         # Create agents

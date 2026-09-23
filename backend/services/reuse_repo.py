@@ -17,7 +17,7 @@ from governance.costing import cost_per_call_cents, effective_rows, price_rows
 from governance.economics import load_economics
 from governance.risk_detection import financial_findings
 from orchestrations.risk_scan import as_utc, cost_anomaly_dict, risk_row_dict, waste_dict
-from services.usage_repo import load_aliases, load_prices, load_usage_rows
+from services.usage_repo import load_aliases, load_prices, load_usage_rows_bulk
 
 # Same trailing window as the Tokenomics tab's default "Cost / call".
 COST_WINDOW_DAYS = 30
@@ -81,21 +81,29 @@ async def certifications(db: AsyncSession, agents: Sequence[Agent], now: datetim
 
 
 async def cost_per_call(db: AsyncSession, agent_ids: Sequence[str], today: date | None = None) -> dict[str, dict]:
-    """{costPerCallCents, source, partialPricing} per agent over the
-    trailing 30 days. partialPricing means some calls ran on a model with no
-    price, so the figure is a lower bound."""
+    """{costPerCallCents, source, pricing} per agent over the trailing 30
+    days. pricing is 'ok', 'partial' (some calls ran on a model with no
+    price, so the figure is a lower bound) or 'missing' (nothing priced, so
+    the cost is unknown and reported as None rather than a false $0).
+
+    One query for every agent's usage (load_usage_rows_bulk), not one query
+    per agent — the registry list page calls this for every card on the
+    page, so a per-agent loop here was an N+1."""
     today = today or datetime.now(timezone.utc).date()
     start = today - timedelta(days=COST_WINDOW_DAYS - 1)
     prices, aliases = await load_prices(db), await load_aliases(db)
+    raw_by_agent = await load_usage_rows_bulk(db, agent_ids)
     out = {}
     for agent_id in agent_ids:
-        rows, source = effective_rows(await load_usage_rows(db, agent_id))
+        rows, source = effective_rows(raw_by_agent.get(agent_id, []))
         priced, _ = price_rows(rows, prices, aliases)
         window = [r for r in priced if start <= r["day"] <= today]
-        cpc = cost_per_call_cents(window)
+        unpriced = [r for r in window if not r["priced"]]
+        pricing = "ok" if not unpriced else "missing" if len(unpriced) == len(window) else "partial"
+        cpc = None if pricing == "missing" else cost_per_call_cents(window)
         out[agent_id] = {
             "costPerCallCents": None if cpc is None else round(cpc, 4),
             "source": source,
-            "partialPricing": any(not r["priced"] for r in window),
+            "pricing": pricing,
         }
     return out

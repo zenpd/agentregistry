@@ -4,16 +4,21 @@ in what order," derived from what the app actually did rather than from
 hand-declared fields.
 
 Every span is resolved to a lineage node via ``discovery.observed_deps.
-classify_span`` (agent / tool / mcp_server / retriever / guardrail), the
-same resolver the declared-vs-observed comparison uses, so the two views
-of one agent's dependencies never disagree. A span that resolves to
-nothing — LangGraph's own routing dispatch, `interrupt()` bookkeeping, the
-graph's own root run, a bare LLM/embedding call — is plumbing: it is
-folded through to its nearest resolved ancestor rather than dropped, so a
-true nested call still gets an edge even when several plumbing hops sit
-between the two spans. LangGraph also commonly emits a CHAIN span and an
-AGENT span for the same logical step (e.g. "supervisor" appearing twice);
-resolving purely on (kind, name) merges them into one node for free.
+classify_span`` (agent / tool / mcp_server / retriever / guardrail) — the
+same function the declared-vs-observed comparison's own classifier agrees
+with on *kind*, so a step is never an agent on one view and a plain step on
+the other. Their *counts* can still differ (see classify_span's docstring):
+this module's per-node count is a span tally, and a CHAIN span merges into
+the same node as its AGENT twin without deduplicating, so a step with both
+counts twice here. A span that resolves to nothing — LangGraph's own
+routing dispatch, `interrupt()` bookkeeping, the graph's own root run, a
+bare LLM/embedding call — is plumbing: it is folded through to its nearest
+resolved ancestor rather than dropped, so a true nested call still gets an
+edge even when several plumbing hops sit between the two spans. LangGraph
+also commonly emits a CHAIN span and an AGENT span for the same logical
+step (e.g. "supervisor" appearing twice); resolving purely on (kind, name)
+merges them into one node, with a combined (summed, not deduplicated)
+count — see ``test_chain_and_agent_twin_spans_merge_into_one_node``.
 
 Two distinct edge kinds, verified against this project's own real traces
 (``retail-onboarding``) rather than assumed:

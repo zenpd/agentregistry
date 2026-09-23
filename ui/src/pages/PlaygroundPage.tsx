@@ -56,7 +56,7 @@ export default function PlaygroundPage() {
         {selected && integration && (
           <>
             <ReuseBanner reuse={integration.reuse} />
-            <TryItPanel agentId={selected} tryIt={integration.tryIt} />
+            <TryItPanel agentId={selected} tryIt={integration.tryIt} endpointAdvice={integration.contract.endpointAdvice} />
             <div className="text-xs text-gray-500">
               Contract, access requests and consumers are on the agent’s{' '}
               <Link to={`/agents/${selected}?tab=integrate`} className="text-teal-700 hover:underline">

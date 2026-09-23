@@ -183,6 +183,18 @@ function ContractSection({ agentId, data, onSaved }: { agentId: string; data: In
         <dd>
           {c.apiEndpoint ? <code className="font-mono text-xs text-gray-800 break-all">{c.apiEndpoint}</code> : <span className="text-gray-400 text-xs">Not recorded</span>}
           {c.endpointKind !== 'app' && c.apiEndpoint && <div className="text-xs text-amber-700 mt-0.5">{ENDPOINT_WARNING[c.endpointKind]}</div>}
+          {c.endpointAdvice && (
+            <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="endpoint-advice">
+              <div className="font-medium">
+                {c.endpointAdvice.looksLike === 'frontend' ? 'This does not look like an API endpoint.' : 'This is a tracing endpoint, not an API.'}
+              </div>
+              <p className="mt-0.5">{c.endpointAdvice.message}</p>
+              <div className="mt-1.5 font-medium">Where to get the right one:</div>
+              <ul className="list-disc pl-4 mt-0.5 space-y-0.5">
+                {c.endpointAdvice.where.map(w => <li key={w}>{w}</li>)}
+              </ul>
+            </div>
+          )}
         </dd>
         <dt className="text-xs font-semibold uppercase text-gray-400 pt-0.5">Capabilities</dt>
         <dd><Chips items={c.capabilities} empty="None listed" tone="teal" /></dd>
@@ -350,7 +362,7 @@ export default function IntegrateTab({ agent, agentId, onChanged }: TabProps) {
       <ContractSection agentId={agentId} data={data} onSaved={changed} />
 
       <Section title="Try it" hint="Call this agent with your own input before asking for access.">
-        <TryItPanel agentId={agentId} tryIt={data.tryIt} />
+        <TryItPanel agentId={agentId} tryIt={data.tryIt} endpointAdvice={data.contract.endpointAdvice} />
       </Section>
 
       <AccessSection agentId={agentId} data={data} deprecated={agent.stage === 'Deprecated'} me={me} onChanged={changed} />

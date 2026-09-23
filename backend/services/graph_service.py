@@ -22,7 +22,8 @@ Edges are typed: CALLS, CONSUMED_BY, ACCESSES, USES_KB, USES_MCP.
 """
 from __future__ import annotations
 
-from collections import deque
+from collections import defaultdict, deque
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -78,14 +79,40 @@ async def _worst_gate_map(db: AsyncSession) -> dict[str, str]:
     return worst
 
 
-async def _token_cost_map(db: AsyncSession) -> dict[str, float]:
-    from sqlalchemy import func
+async def _token_cost_map(db: AsyncSession) -> dict[str, float | None]:
+    """Last-30-days token cost per agent, from the same engine as the
+    Tokenomics tab (services/usage_repo + governance/costing) — not a sum of
+    the stored cost_cents column, which is rounded to the nearest whole cent
+    *per day* (a $0.006 day stores as 0) and has no date filter, so it both
+    understates real spend and keeps counting an agent's very first month
+    into what a node tooltip labels "/mo" forever. An agent absent from the
+    map has no priced usage in the window — the caller must show that as
+    unknown, not $0."""
+    from services.usage_repo import load_aliases, load_prices
+    from governance.costing import effective_rows, price_rows
 
-    result = await db.execute(
-        select(AgentTokenUsage.agent_id, func.sum(AgentTokenUsage.cost_cents))
-        .group_by(AgentTokenUsage.agent_id)
-    )
-    return {agent_id: (cents or 0) / 100 for agent_id, cents in result.all()}
+    since = datetime.now(timezone.utc).date() - timedelta(days=29)
+    result = await db.execute(select(AgentTokenUsage).where(AgentTokenUsage.bucket >= since))
+    raw_by_agent: dict[str, list[dict]] = defaultdict(list)
+    for u in result.scalars().all():
+        bucket = u.bucket.date() if isinstance(u.bucket, datetime) else u.bucket
+        raw_by_agent[u.agent_id].append({
+            "day": bucket, "model": u.model_name, "input_tokens": u.input_tokens or 0,
+            "output_tokens": u.output_tokens or 0, "cached_tokens": u.cached_tokens or 0,
+            "source": u.source or "seed",
+        })
+    prices, aliases = await load_prices(db), await load_aliases(db)
+    out: dict[str, float | None] = {}
+    for agent_id, raw in raw_by_agent.items():
+        rows, _source = effective_rows(raw)
+        if not rows:
+            continue
+        priced, _unpriced = price_rows(rows, prices, aliases)
+        if not any(r["priced"] for r in priced):
+            out[agent_id] = None  # every call this window is on an unpriced model
+        else:
+            out[agent_id] = sum(r["cost_cents"] for r in priced) / 100
+    return out
 
 
 async def build_graph(db: AsyncSession, org_id: str | None = None) -> dict[str, Any]:
@@ -132,7 +159,10 @@ async def build_graph(db: AsyncSession, org_id: str | None = None) -> dict[str, 
                 "model_name": agent.model_name,
                 "value_amount": agent.value_amount or 0,
                 "hours_saved_monthly": agent.hours_saved_monthly or 0,
-                "token_cost": round(token_cost.get(agent.id, 0.0), 2),
+                # 4 decimal places, matching the Tokenomics tab (governance/costing.py) —
+                # 2 would round a genuinely low-volume agent's real cost straight to $0.00
+                # or $0.01, right back into the "looks like zero" problem this replaced.
+                "token_cost": None if token_cost.get(agent.id) is None else round(token_cost[agent.id], 4),
                 "at_risk": bool(agent.at_risk),
                 "risk_level": agent.risk_level,
                 "worst_gate": gates.get(agent.id),
@@ -237,6 +267,42 @@ def _build_stats(nodes: list[dict[str, Any]], edges: list[dict[str, Any]], agent
         "orphan_agent_ids": orphans,
         "production_agents": sum(1 for n in agent_nodes if n["attrs"].get("entry") == "production"),
     }
+
+
+# ── Concentration risk ───────────────────────────────────────────────────────
+
+# How many agents must share a resource before it counts as concentrated.
+# Numerically equal to discovery/observed_deps.py's CONCENTRATION_THRESHOLD,
+# but NOT the same test: this one counts every agent on the resource, while
+# that one counts the OTHER agents besides the one whose tab you are on. So a
+# resource shared by exactly 3 agents is listed here and is NOT yet flagged
+# "concentrated" on those three agents' own Dependencies tabs, which need a
+# 4th. The two answer different questions — portfolio-wide sharing versus
+# "who else is on this with me" — so they are deliberately not unified.
+CONCENTRATION_THRESHOLD = 3
+_RESOURCE_EDGE_TYPES = frozenset({"ACCESSES", "USES_KB", "USES_MCP"})
+
+
+async def concentration_risk(db: AsyncSession, org_id: str | None = None,
+                             threshold: int = CONCENTRATION_THRESHOLD) -> list[dict[str, Any]]:
+    """Every declared system, database, knowledge base and MCP server, and
+    how many agents point at it — read from this module's one graph builder,
+    like everything else here, instead of a separate ad-hoc tally that only
+    ever looked at enterprise_systems and databases and so could never
+    surface a concentrated MCP server or knowledge base."""
+    graph = await build_graph(db, org_id)
+    names = {n["id"]: n["name"] for n in graph["nodes"]}
+    kinds = {n["id"]: n["kind"] for n in graph["nodes"]}
+    users: dict[str, set[str]] = defaultdict(set)
+    for edge in graph["edges"]:
+        if edge["type"] in _RESOURCE_EDGE_TYPES:
+            users[edge["to"]].add(edge["from"])
+    rows = [
+        {"name": names.get(node_id, node_id), "count": len(agents), "kind": kinds.get(node_id)}
+        for node_id, agents in users.items() if len(agents) >= threshold
+    ]
+    rows.sort(key=lambda r: (-r["count"], r["name"].lower()))
+    return rows
 
 
 # ── Adjacency views for impact / blast-radius analysis ───────────────────────

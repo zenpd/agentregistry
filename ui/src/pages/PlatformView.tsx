@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react'
-import { getAgents, getConcentrationRisk, getGraph, type Agent } from '../services/api'
-import NetworkGraph from '../components/NetworkGraph'
+import { useState, useEffect, useMemo } from 'react'
+import { getAgents, getConcentrationRisk, getGraphV2, type Agent } from '../services/api'
+import TraceNetworkGraph, { type TraceNode, type TraceEdge } from '../components/TraceNetworkGraph'
 
 export default function PlatformView() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [concentrationRisk, setConcentrationRisk] = useState<{ name: string; count: number }[]>([])
-  const [graph, setGraph] = useState<{ nodes: { id: string; name: string; type: string }[]; edges: { from: string; to: string }[] } | null>(null)
+  const [graph, setGraph] = useState<{ nodes: TraceNode[]; edges: TraceEdge[] } | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -17,11 +18,37 @@ export default function PlatformView() {
       const [agentsRes, riskRes, graphRes] = await Promise.all([
         getAgents(1, 100),
         getConcentrationRisk(),
-        getGraph(),
+        getGraphV2(),
       ])
       setAgents(agentsRes.data.data)
       setConcentrationRisk(riskRes.data)
-      setGraph(graphRes.data)
+      // Agent-to-agent handoffs only (the CALLS edge type) — the systems,
+      // databases, knowledge bases and MCP servers each agent uses are
+      // already covered by the cards and matrix below, and by /dependencies.
+      // The old build here read the legacy /graph/ endpoint, which never
+      // walked agent.calls at all, so every row it drew mislabeled a
+      // system/database/MCP server as an agent "receiving a handoff."
+      const v2 = graphRes.data
+      const agentNodes = v2.nodes.filter(n => n.kind.startsWith('group:'))
+      const callEdges = v2.edges.filter(e => e.type === 'CALLS')
+      // A CALLS edge can target an agent id that isn't registered — someone
+      // typed a name into another agent's "calls" field that doesn't match
+      // any real agent — which the graph builder represents as an
+      // `external` node. Carry those along too so the table/graph show that
+      // agent's actual name instead of falling back to its raw "ext:…" id.
+      const calledIds = new Set(callEdges.map(e => e.to))
+      const externalNodes = v2.nodes.filter(n => n.kind === 'external' && calledIds.has(n.id))
+      setGraph({
+        // count/errorCount are uniform (1/0): this is the declared "calls"
+        // relationship, not a traced call volume, so there is no real
+        // busier-vs-quieter signal to size nodes by — every agent is drawn
+        // the same size rather than implying a distinction that isn't there.
+        nodes: [
+          ...agentNodes.map(n => ({ id: n.id, name: n.name, kind: 'agent', count: 1, errorCount: 0 })),
+          ...externalNodes.map(n => ({ id: n.id, name: n.name, kind: 'external', count: 1, errorCount: 0 })),
+        ],
+        edges: callEdges.map(e => ({ from: e.from, to: e.to, kind: 'calls' as const })),
+      })
       setError(null)
     } catch (e: any) {
       setError(e.response?.data?.detail || e.message || 'Failed to fetch')
@@ -29,6 +56,25 @@ export default function PlatformView() {
       setLoading(false)
     }
   }
+
+  const maxConcentration = Math.max(1, ...concentrationRisk.map(r => r.count))
+
+  const selectedNode = useMemo(
+    () => (graph && selectedId ? graph.nodes.find(n => n.id === selectedId) ?? null : null),
+    [graph, selectedId],
+  )
+  const selectedAgent = useMemo(
+    () => (selectedId ? agents.find(a => a.id === selectedId) ?? null : null),
+    [agents, selectedId],
+  )
+  const calls = useMemo(
+    () => (graph && selectedId ? graph.edges.filter(e => e.from === selectedId).map(e => e.to) : []),
+    [graph, selectedId],
+  )
+  const calledBy = useMemo(
+    () => (graph && selectedId ? graph.edges.filter(e => e.to === selectedId).map(e => e.from) : []),
+    [graph, selectedId],
+  )
 
   // Aggregate systems, databases, MCP servers, knowledge bases
   const systems: Record<string, number> = {}
@@ -62,6 +108,10 @@ export default function PlatformView() {
       {concentrationRisk.length > 0 && (
         <div className="bg-white rounded-lg border p-4">
           <h2 className="font-semibold mb-3">Concentration Risk</h2>
+          <p className="text-xs text-gray-400 mb-3">
+            Systems, databases, knowledge bases and MCP servers shared by 3 or more agents — bar length is relative
+            to the most-shared resource below, not an absolute scale.
+          </p>
           <div className="space-y-2">
             {concentrationRisk.map(risk => (
               <div key={risk.name} className="flex items-center gap-3">
@@ -70,7 +120,7 @@ export default function PlatformView() {
                   <div className="w-full bg-gray-200 rounded-full h-2">
                     <div
                       className="bg-red-500 h-2 rounded-full"
-                      style={{ width: `${Math.min(100, risk.count * 20)}%` }}
+                      style={{ width: `${Math.max(15, Math.round((risk.count / maxConcentration) * 100))}%` }}
                     />
                   </div>
                 </div>
@@ -81,13 +131,57 @@ export default function PlatformView() {
         </div>
       )}
 
-      {/* Cross-AI Call Network SVG Graph */}
+      {/* Cross-AI Call Network */}
       {graph && graph.nodes.length > 0 && (
         <div className="bg-white rounded-lg border p-4">
           <h2 className="font-semibold mb-3">Cross-AI Call Network</h2>
-          <div className="flex justify-center">
-            <NetworkGraph nodes={graph.nodes} edges={graph.edges} width={500} height={400} />
+          <p className="text-xs text-gray-400 mb-3">
+            Agent-to-agent handoffs only — every registered agent is plotted, most have none. The systems,
+            databases and MCP servers each agent uses are in the cards above and the matrix below. Drag, scroll to
+            zoom, click a node for its detail.
+          </p>
+          <div className="relative rounded-lg border border-gray-100 overflow-hidden">
+            <TraceNetworkGraph
+              nodes={graph.nodes}
+              edges={graph.edges}
+              height={420}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
           </div>
+          {selectedNode && (
+            <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-gray-800">{selectedNode.name}</span>
+                {selectedNode.kind === 'external' ? (
+                  <span className="rounded-full bg-violet-50 px-2 py-0.5 text-violet-700 ring-1 ring-violet-200">
+                    Not registered
+                  </span>
+                ) : selectedAgent ? (
+                  <span className="text-gray-400">{selectedAgent.aiType} · {selectedAgent.stage}</span>
+                ) : null}
+              </div>
+              <div className="mt-1.5 grid grid-cols-2 gap-2 text-gray-500">
+                <div>
+                  <div className="text-[10px] uppercase text-gray-400">Calls</div>
+                  {calls.length ? calls.map(n => (
+                    <div key={n}>→ {graph.nodes.find(x => x.id === n)?.name || n}</div>
+                  )) : <div>—</div>}
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase text-gray-400">Called by</div>
+                  {calledBy.length ? calledBy.map(n => (
+                    <div key={n}>← {graph.nodes.find(x => x.id === n)?.name || n}</div>
+                  )) : <div>—</div>}
+                </div>
+              </div>
+              {selectedNode.kind === 'external' && (
+                <p className="mt-1.5 text-gray-400">
+                  Referenced by another agent's declared "calls" but not itself registered — a shadow-AI candidate.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Edge Table */}
           {graph.edges.length > 0 && (

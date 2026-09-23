@@ -15,7 +15,16 @@ export default function BarChart({ data, width = 400, height = 200 }: BarChartPr
   const chartH = data.length * (barH + gap)
 
   return (
-    <svg width={width} height={Math.max(chartH, height)} viewBox={`0 0 ${width} ${Math.max(chartH, height)}`}>
+    // width is the drawing's coordinate space; the SVG itself scales to its
+    // container, so a narrow column shrinks the chart instead of pushing the
+    // page sideways.
+    <svg
+      width="100%"
+      height={Math.max(chartH, height)}
+      viewBox={`0 0 ${width} ${Math.max(chartH, height)}`}
+      preserveAspectRatio="xMinYMin meet"
+      className="max-w-full"
+    >
       {data.map((d, i) => {
         const y = i * (barH + gap)
         const w = (d.value / max) * (width - 120)

@@ -305,8 +305,15 @@ async def risks_summary(_=Depends(require_read)):
     accepted) plus live FINANCIAL ones: byCategory for the pie,
     heatmap for the category x severity grid."""
     async with get_db_session() as db:
+        # Both halves of this summary skip findings whose agent no longer
+        # exists, for the same reason portfolio_financial does: no Risk tab
+        # can show them, so counting them here would make the portfolio
+        # disagree with the sum of its parts.
+        live_agents = select(Agent.id).scalar_subquery()
         stored = (await db.execute(
-            select(AgentRisk.category, AgentRisk.severity).where(AgentRisk.status.in_(lifecycle.ACTIVE_STATUSES))
+            select(AgentRisk.category, AgentRisk.severity).where(
+                AgentRisk.status.in_(lifecycle.ACTIVE_STATUSES), AgentRisk.agent_id.in_(live_agents),
+            )
         )).all()
         financial = await portfolio_financial(db)
     return lifecycle.portfolio_summary(

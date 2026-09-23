@@ -25,16 +25,22 @@ const CATEGORIES: { label: string; key: string; has: (a: RegistryAgent) => boole
 ]
 
 function CostPerCall({ agent }: { agent: RegistryAgent }) {
-  const { costPerCallCents, source, partialPricing } = agent.card
-  if (costPerCallCents == null) return <span className="text-gray-400" title="No usage recorded">— /call</span>
+  const { costPerCallCents, source, pricing } = agent.card
+  if (costPerCallCents == null) {
+    return (
+      <span className="text-gray-400" title={pricing === 'missing'
+        ? 'The model this agent runs on has no price recorded, so cost per call is unknown.'
+        : 'No usage recorded yet.'}>— /call</span>
+    )
+  }
   const title = [
     'Average token cost per call over the last 30 days, as on the Tokenomics tab.',
     source === 'seed' ? 'Demo data: no real traces ingested yet.' : '',
-    partialPricing ? 'Some calls used a model with no price, so this is a lower bound.' : '',
+    pricing === 'partial' ? 'Some calls used a model with no price, so this is a lower bound.' : '',
   ].filter(Boolean).join(' ')
   return (
     <span title={title}>
-      <span className="font-mono">{partialPricing && '≥'}{fmtCostPerCall(costPerCallCents)}</span>/call
+      <span className="font-mono">{pricing === 'partial' && '≥'}{fmtCostPerCall(costPerCallCents)}</span>/call
       {source === 'seed' && <span className="ml-1 text-[10px] uppercase text-gray-400">demo</span>}
     </span>
   )
@@ -240,7 +246,11 @@ export default function AgentsPage() {
               <div className="flex justify-between gap-2 border-t border-gray-100 pt-1.5">
                 <CostPerCall agent={a} />
                 <span title="Teams and systems consuming this agent">{a.card.consumerCount} consumer{a.card.consumerCount === 1 ? '' : 's'}</span>
-                <span className="font-mono" title="Declared value per month">${(a.valueAmount / 1000).toFixed(0)}K/mo</span>
+                {a.valueAmount ? (
+                  <span className="font-mono" title="Declared value per month">${(a.valueAmount / 1000).toFixed(0)}K/mo</span>
+                ) : (
+                  <span className="text-gray-400" title="No monthly value declared on the agent record">Not declared</span>
+                )}
               </div>
             </div>
           </div>

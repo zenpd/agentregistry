@@ -63,11 +63,23 @@ def _window(rows: list[dict], today: date, days: int) -> list[dict]:
     return [r for r in rows if start <= r["day"] <= today]
 
 
+def _cost_known(rows: list[dict]) -> bool:
+    """Whether a cost can be stated for these rows. No rows means no calls,
+    which really did cost nothing; rows that all ran on a model with no price
+    mean the cost is unknown, and a $0 there would be a lie."""
+    return not rows or any(r.get("priced", True) for r in rows)
+
+
 def _totals(rows: list[dict], has_data: bool) -> dict:
-    """Cost is None without any usage data, so it never reads as a real $0."""
+    """Cost is None without usage data, and also when nothing is priced, so
+    it never reads as a real $0."""
     out = {_camel(k): sum(r.get(k, 0) or 0 for r in rows) for k in _TOTAL_KEYS}
-    out["costCents"] = _cents(sum(r.get("cost_cents", 0.0) for r in rows)) if has_data else None
+    out["costCents"] = _cents(sum(r.get("cost_cents", 0.0) for r in rows)) if has_data and _cost_known(rows) else None
     return out
+
+
+def _cost_per_call(rows: list[dict]) -> float | None:
+    return _cents(cost_per_call_cents(rows)) if _cost_known(rows) else None
 
 
 def _iso_utc(value: str | None) -> str | None:
@@ -95,7 +107,7 @@ def _budget_view(budget: AgentBudget | None, rows: list[dict], today: date, has_
         "projectedOverBudget": False,
         "note": BUDGET_NOTE,
     }
-    if has_data:
+    if has_data and _cost_known(rows):
         mtd = month_to_date_cents(rows, today, reset)
         projected = projected_period_end_cents(rows, today, reset)
         status = budget_status(mtd, cents, alert)
@@ -209,7 +221,7 @@ async def agent_tokenomics(agent_id: str, days: int = Query(30, ge=7, le=90), _=
         "totals": _totals(window, has_data),
         "monthToDateCents": budget_view["monthToDateCents"],
         "projectedPeriodEndCents": budget_view["projectedPeriodEndCents"],
-        "costPerCallCents": _cents(cost_per_call_cents(window)),
+        "costPerCallCents": _cost_per_call(window),
         "budget": budget_view,
         "daily": [
             {**{_camel(k): d[k] for k in ("date", *_TOTAL_KEYS)}, "costCents": d["cost_cents"], "spike": d["date"] in spikes}
@@ -335,7 +347,7 @@ async def token_summary(agent_id: str, _=Depends(require_read)):
     rows = usage["rows"]
     has_data = usage["source"] != "none"
     totals = _totals(rows, has_data)
-    per_call = cost_per_call_cents(rows)
+    per_call = _cost_per_call(rows)
     return {
         "agentId": agent_id,
         "inputTokens": totals["inputTokens"],
@@ -373,11 +385,11 @@ async def agent_cost(agent_id: str, _=Depends(require_read)):
     today = _today()
     window = _window(usage["rows"], today, 30)
     has_data = usage["source"] != "none"
-    per_call = cost_per_call_cents(window)
+    per_call = _cost_per_call(window)
     mtd = _budget_view(budget, usage["rows"], today, has_data)["monthToDateCents"]
     return {
         "agentId": agent_id,
-        "monthlyCost": round(sum(r["cost_cents"] for r in window) / 100, 4) if has_data else None,
+        "monthlyCost": round(sum(r["cost_cents"] for r in window) / 100, 4) if has_data and _cost_known(window) else None,
         "costPerInvocation": round(per_call / 100, 6) if per_call is not None else None,
         "monthToDate": round(mtd / 100, 4) if mtd is not None else None,
         "periodDays": 30,

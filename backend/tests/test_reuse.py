@@ -146,6 +146,54 @@ def test_contract_gaps_list_what_a_consumer_would_have_to_ask_for():
                                 "sla": "99%", "rate_limit": "10/s", "owner_contact": "a@b.c"}) == []
 
 
+@pytest.mark.parametrize("endpoint", [
+    "https://payment-orchestrator-fe.example.com/analytics",
+    "https://digital-onboarding-fe.example.com/dashboard",
+    "https://app.example.com/",
+    "https://www.example.com/login",
+])
+def test_a_web_page_is_flagged_with_where_to_find_the_api(endpoint):
+    advice = reuse.endpoint_advice(endpoint)
+    assert advice["looksLike"] == "frontend"
+    assert "/api/" in advice["message"]
+    assert any("openapi.json" in w for w in advice["where"])
+
+
+def test_a_tracing_url_says_it_belongs_in_the_phoenix_field():
+    advice = reuse.endpoint_advice("https://zaf-phoenix.example.com/")
+    assert advice["looksLike"] == "tracing" and "Phoenix project field" in advice["message"]
+
+
+@pytest.mark.parametrize("endpoint", [
+    "https://payment-orchestrator-fe.example.com/api/v1/payments",
+    "https://onboarding-be.example.com/api/v1/onboard/start",
+    "/agents/v1/invoice-reconciliation",
+    "https://agent.example.com/v2/run",
+])
+def test_an_api_endpoint_is_left_alone(endpoint):
+    assert reuse.endpoint_advice(endpoint) is None
+
+
+def test_no_advice_when_there_is_nothing_recorded():
+    assert reuse.endpoint_advice("") is None
+    assert reuse.endpoint_advice("Not yet built") is None
+
+
+def test_a_real_backend_host_is_not_told_to_become_one():
+    # payment-orchestrator-test-1e343e93's actual recorded endpoint: a real
+    # -be host whose path happens to be one of the generic UI words. Without
+    # a host check, this used to trip the frontend-page heuristic and then
+    # tell the owner to "use the same host with -be instead of -fe" — advice
+    # that makes no sense for a host that already says -be.
+    assert reuse.endpoint_advice(
+        "https://payment-orchestrator-be.bravesky-d9f9eeb7.eastus2.azurecontainerapps.io/analytics") is None
+    assert reuse.endpoint_advice("https://onboarding-backend.example.com/overview") is None
+    # A -fe host still gets flagged even when a -be host would otherwise be
+    # excused by the same path word, and even when it's paired with a -be
+    # segment somewhere later in the host (frontend markers win outright).
+    assert reuse.endpoint_advice("https://checkout-fe.example.com/reports") is not None
+
+
 def test_example_payload_is_keyed_by_the_declared_inputs():
     assert reuse.example_payload(["Vendor invoice", "PO number"]) == {"vendor_invoice": "", "po_number": ""}
     assert reuse.example_payload([]) == {"input": ""}

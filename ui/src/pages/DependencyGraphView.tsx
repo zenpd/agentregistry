@@ -144,7 +144,7 @@ export default function DependencyGraphView() {
             `Stage: ${attrs.stage ?? ''}`,
             attrs.model_name ? `Model: ${attrs.model_name}` : '',
             `Value: $${attrs.value_amount ?? 0}/mo · ${attrs.hours_saved_monthly ?? 0} h/mo`,
-            `Tokens: $${attrs.token_cost ?? 0}/mo`,
+            attrs.token_cost != null ? `Tokens: $${attrs.token_cost}/mo (30d)` : 'Tokens: unknown (no priced usage in the last 30d)',
             attrs.at_risk ? '⚠ FLAGGED AT RISK' : '',
             attrs.worst_gate ? `Governance: ${attrs.worst_gate}` : '',
             isProduction ? 'right-click for a hierarchical view of what it feeds' : '',
@@ -439,12 +439,12 @@ export default function DependencyGraphView() {
     <div className="space-y-3">
       <div className="grid grid-cols-4 gap-2">
         {([
-          ['Agents + deps', graph.stats.nodes],
-          ['Dependencies', graph.stats.edges],
-          ['Production entry points', graph.stats.production_agents],
-          ['Agent→Agent calls', graph.stats.cross_agent_edges],
-        ] as [string, number][]).map(([label, value]) => (
-          <div key={label} className="rounded-lg border bg-white p-2 text-center">
+          ['Agents + deps', graph.stats.nodes, 'Every node in this graph: agents plus the systems, databases, knowledge bases, MCP servers and consumers they use.'],
+          ['Dependencies', graph.stats.edges, 'Every typed edge: agent→agent calls plus every declared system/database/KB/MCP access.'],
+          ['Production entry points', graph.stats.production_agents, 'Agents in the Production stage — not the narrower "outage root" definition (Production and reachable by a caller or consumer) shown on the canvas as a thick green ring.'],
+          ['Agent→Agent calls', graph.stats.cross_agent_edges, 'Direct agent-to-agent handoffs only.'],
+        ] as [string, number, string][]).map(([label, value, hint]) => (
+          <div key={label} className="rounded-lg border bg-white p-2 text-center" title={hint}>
             <div className="text-lg font-bold text-slate-800">{value}</div>
             <div className="text-[10px] uppercase text-slate-500">{label}</div>
           </div>
@@ -555,7 +555,7 @@ export default function DependencyGraphView() {
                 <div className="text-xs text-slate-500">
                   ${Math.round(selected.attrs.value_amount ?? 0).toLocaleString()}/mo value ·{' '}
                   {selected.attrs.hours_saved_monthly ?? 0} h/mo saved ·{' '}
-                  ${selected.attrs.token_cost ?? 0} tokens/mo
+                  {selected.attrs.token_cost != null ? `$${selected.attrs.token_cost} tokens/mo (30d)` : 'tokens unknown (30d)'}
                 </div>
               )}
               <div>

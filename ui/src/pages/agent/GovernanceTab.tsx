@@ -1,3 +1,4 @@
+import Disclosure from '../../components/Disclosure'
 import { useCallback, useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -24,7 +25,7 @@ import {
   type StageReadiness,
   type Tick,
 } from '../../services/ops/governance'
-import { Loading, SectionLabel, SourceBadge, STAGE_PILL, fmtNumber, type TabProps } from './shared'
+import { Loading, FieldLabel, SectionLabel, SourceBadge, STAGE_PILL, fmtNumber, type TabProps } from './shared'
 
 const STATUS_PILL: Record<GateStatus, string> = {
   'Not Submitted': 'bg-gray-100 text-gray-600 ring-gray-200',
@@ -227,17 +228,14 @@ function HistoryPanel({ history }: { history: GovernanceState['history'] }) {
 function EnforcementBanner({ state }: { state: GovernanceState }) {
   const warn = state.enforcement === 'warn'
   return (
-    <div className={`rounded-xl px-4 py-3 text-xs ring-1 ${warn ? 'bg-sky-50 text-sky-800 ring-sky-200' : 'bg-amber-50 text-amber-800 ring-amber-200'}`}>
-      <p className="font-semibold">
-        {warn ? 'Stage rules run in warn mode' : 'Stage rules run in block mode'}
-      </p>
-      <p className="mt-0.5">
+    <Disclosure summary={<>Stage rules: <span className="font-semibold">{warn ? 'warn' : 'block'} mode</span> · approvals valid {state.validityDays} days</>}>
+      <p>
         {warn
           ? 'Gaps are reported as warnings; a stage change still goes ahead. Set GOVERNANCE_ENFORCEMENT=block to require the rules (an admin can then override with a reason).'
           : 'A stage change that breaks an entry rule is refused unless an admin gives an override reason.'}
         {' '}Approvals stay valid for {state.validityDays} days (risk tier {state.riskTier}). Every decision here is made by a person; the registry never approves, pauses or stops an agent.
       </p>
-    </div>
+    </Disclosure>
   )
 }
 
@@ -532,13 +530,13 @@ function GateCard({ gate, agentId, onDone }: { gate: GateReview; agentId: string
       )}
       {gate.notes && (
         <div>
-          <SectionLabel>Review notes</SectionLabel>
+          <FieldLabel>Review notes</FieldLabel>
           <Markdown text={gate.notes} />
         </div>
       )}
       {gate.evidence.length > 0 && (
         <div>
-          <SectionLabel>Evidence</SectionLabel>
+          <FieldLabel>Evidence</FieldLabel>
           <ul className="mt-0.5 space-y-0.5">
             {gate.evidence.map((ev, i) => (
               <li key={i} className="text-xs">
@@ -721,7 +719,7 @@ function EditForm({ gate, busy, onCancel, onSubmit }: {
         <textarea className="input text-xs" rows={2} placeholder="Conditions" value={conditions} onChange={e => setConditions(e.target.value)} />
       )}
       <div className="space-y-1">
-        <SectionLabel>Evidence links</SectionLabel>
+        <FieldLabel>Evidence links</FieldLabel>
         {evidence.map((ev, i) => (
           <div key={i} className="flex gap-1.5">
             <input className="input text-xs !w-2/5" placeholder="Label" value={ev.label} onChange={e => setRow(i, { label: e.target.value })} />

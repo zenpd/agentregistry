@@ -56,8 +56,8 @@ export default function RiskPie({ data, size = 180 }: Props) {
           </path>
         ))}
         <circle cx={cx} cy={cy} r={r * 0.45} fill="#ffffff" />
-        <text x={cx} y={cy - 4} textAnchor="middle" fontSize={20} fontWeight={700} fill="#111827" fontFamily="Inter">{total}</text>
-        <text x={cx} y={cy + 14} textAnchor="middle" fontSize={9} fill="#9ca3af" fontFamily="Inter">findings</text>
+        <text x={cx} y={cy - 4} textAnchor="middle" fontSize={20} fontWeight={700} fill="#111827" fontFamily="inherit">{total}</text>
+        <text x={cx} y={cy + 14} textAnchor="middle" fontSize={9} fill="#9ca3af" fontFamily="inherit">findings</text>
       </svg>
       <div className="space-y-1.5">
         {data.map(d => (

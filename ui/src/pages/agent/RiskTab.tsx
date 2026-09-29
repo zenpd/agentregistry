@@ -114,7 +114,7 @@ function ErrorLine({ text }: { text: string | null }) {
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
-export default function RiskTab({ agentId }: TabProps) {
+export default function RiskTab({ agentId, onChanged }: TabProps) {
   const [data, setData] = useState<AgentRisksResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active')
@@ -137,6 +137,10 @@ export default function RiskTab({ agentId }: TabProps) {
     setError(null)
     load()
   }, [load])
+
+  // A finding added, resolved or re-rated can flip the reuse checklist on the
+  // agent header, so the page reloads too, not only this tab.
+  const changed = useCallback(async () => { await load(); onChanged() }, [load, onChanged])
 
   if (error && !data) {
     return (
@@ -195,7 +199,7 @@ export default function RiskTab({ agentId }: TabProps) {
         </div>
 
         {showAdd && (
-          <AddRiskForm agentId={agentId} today={data.today} onDone={async () => { setShowAdd(false); await load() }} />
+          <AddRiskForm agentId={agentId} today={data.today} onDone={async () => { setShowAdd(false); await changed() }} />
         )}
 
         {listed.length === 0 ? (
@@ -203,7 +207,7 @@ export default function RiskTab({ agentId }: TabProps) {
         ) : (
           <div className="space-y-2">
             {listed.map(f => (
-              <FindingRow key={f.id} finding={f} agentId={agentId} data={data} onChanged={load} />
+              <FindingRow key={f.id} finding={f} agentId={agentId} data={data} onChanged={changed} />
             ))}
           </div>
         )}

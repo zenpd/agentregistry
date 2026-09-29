@@ -6,6 +6,7 @@ import OnboardingModal from '../components/OnboardingModal'
 import EditAgentModal from '../components/EditAgentModal'
 import DeleteAgentDialog from '../components/DeleteAgentDialog'
 import { fmtCostPerCall } from './agent/shared'
+import { ReuseProgress } from '../components/ReuseChecklist'
 
 const STAGE_PILL: Record<string, string> = {
   Ideation: 'status-pending',
@@ -85,7 +86,9 @@ export default function AgentsPage() {
     return () => clearTimeout(timer)
   }, [search, stageFilter])
 
-  const depts = [...new Set(agents.map(a => a.dept).filter(Boolean))].sort()
+  // id -> name; the filter matches on the id, the menu shows the name.
+  const depts = [...new Map(agents.filter(a => a.dept).map(a => [a.dept!, a.deptName || a.dept!])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]))
   const types = taxonomy?.aiTypes || [...new Set(agents.map(a => a.aiType).filter(Boolean))].sort()
   const category = CATEGORIES.find(c => c.key === catFilter)
 
@@ -134,7 +137,7 @@ export default function AgentsPage() {
         </select>
         <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} className="input w-auto">
           <option value="">All departments</option>
-          {depts.map(d => <option key={d} value={d}>{d}</option>)}
+          {depts.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
       </div>
 
@@ -193,11 +196,7 @@ export default function AgentsPage() {
               <span className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-emerald-700" data-testid="certified-badge">
                 <BadgeCheck size={13} /> Certified for reuse
               </span>
-            ) : a.stage === 'Production' && (
-              <span className="mt-1 text-xs text-amber-700" title={a.reuse.unmet.map(u => u.message).join('\n')}>
-                Not certified: {a.reuse.unmet[0]?.message}
-              </span>
-            )}
+            ) : a.stage !== 'Deprecated' && <ReuseProgress reuse={a.reuse} />}
             <p className="text-sm text-gray-500 mt-2 line-clamp-2">{a.description || 'No description yet.'}</p>
 
             {a.capabilities?.length > 0 && (

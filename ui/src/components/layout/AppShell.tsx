@@ -1,22 +1,43 @@
-import { NavLink } from 'react-router-dom'
-import { Sparkles, Settings, Bot, ShieldCheck, LayoutGrid, Cpu, GitBranch } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { NavLink, useLocation } from 'react-router-dom'
+import { Sparkles, Settings, Bot, ShieldCheck, LayoutGrid, Cpu, GitBranch, Briefcase, Inbox } from 'lucide-react'
+import { APPROVALS_CHANGED, getApprovals } from '../../services/ops/approvals'
 
 // Trimmed to what's still distinct now that agent-level detail (diagram,
-// governance, risk, economics) lives on each agent's own page: Business,
-// Tokenomics, Security and Dashboard were folded into the Executive
-// dashboard's KPIs / revenue-vs-expenditure / risk pie+heatmap sections.
+// governance, risk, economics) lives on each agent's own page: Tokenomics,
+// Security and Dashboard were folded into the Executive dashboard's KPIs /
+// revenue-vs-expenditure / risk pie+heatmap sections. Business Impact stays
+// its own page: it answers a BU owner's question (my unit's agents and
+// outcomes), not the portfolio-wide one Executive answers.
 const NAV = [
   { to: '/', label: 'Executive', icon: LayoutGrid },
   { to: '/agents', label: 'AI Registry', icon: Bot },
+  { to: '/approvals', label: 'Approvals', icon: Inbox },
   { to: '/governance', label: 'Governance', icon: ShieldCheck },
+  { to: '/business', label: 'Business Impact', icon: Briefcase },
   { to: '/platform', label: 'Platform', icon: Cpu },
   { to: '/dependencies', label: 'Dependencies', icon: GitBranch },
   { to: '/playground', label: 'Playground', icon: Sparkles },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
+// How many decisions are waiting, for the Approvals badge. Refreshed on every
+// page change and right after a decision is made on the Approvals page.
+function usePendingApprovals(): number | null {
+  const { pathname } = useLocation()
+  const [count, setCount] = useState<number | null>(null)
+  useEffect(() => {
+    let live = true
+    const load = () => getApprovals().then(r => { if (live) setCount(r.data.counts.total) }).catch(() => { if (live) setCount(null) })
+    load()
+    window.addEventListener(APPROVALS_CHANGED, load)
+    return () => { live = false; window.removeEventListener(APPROVALS_CHANGED, load) }
+  }, [pathname])
+  return count
+}
+
 export default function AppShell({ children }: { children: ReactNode }) {
+  const pending = usePendingApprovals()
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Sidebar */}
@@ -41,6 +62,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
             >
               <Icon size={18} />
               {label}
+              {to === '/approvals' && pending != null && pending > 0 && (
+                <span className="ml-auto rounded-full bg-zen-600 px-2 py-0.5 text-[11px] font-bold text-white" data-testid="approvals-badge"
+                  title={`${pending} waiting for a decision`}>{pending}</span>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -49,8 +74,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       {/* Main */}
       <div className="pl-[240px]">
-        <header className="h-[60px] bg-white shadow-header flex items-center px-6">
-          <h1 className="text-sm font-semibold text-gray-700">Enterprise AI Control Tower</h1>
+        <header className="relative h-[60px] bg-white shadow-header flex items-center justify-between px-6">
+          <div className="leading-tight">
+            <div className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[.12em] text-zen-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-zen-500 animate-pulse-dot" aria-hidden />
+              Enterprise AI Operations
+            </div>
+            <div className="text-[17px] font-extrabold gradient-text">AI Control Tower</div>
+          </div>
+          <span className="hidden md:inline-flex items-center gap-1.5 rounded-full border border-zen-200 bg-zen-50 px-3 py-1 text-xs font-semibold text-zen-700">
+            Agents · copilots · models · generative features
+          </span>
+          {/* Thin brand line under the bar. */}
+          <span className="absolute inset-x-0 bottom-0 h-[2px] bg-gradient-zen opacity-60" aria-hidden />
         </header>
         <main className="p-6">{children}</main>
       </div>

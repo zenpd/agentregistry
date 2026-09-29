@@ -66,9 +66,11 @@ export interface Agent {
   ownerContact?: string
   stage: string
   dept?: string
-  // Resolved department name (e.g. "Finance"), set only by GET /agents/{id};
-  // falls back to the raw dept id below when unset (list rows, older callers).
+  // Resolved department name (e.g. "Finance"); null when the agent has no
+  // department or the id no longer resolves.
   deptName?: string | null
+  // Set only by GET /agents/{id}; list rows carry it on RegistryAgent.
+  reuse?: ReuseStatus
   version?: string
   valueAmount: number
   valueType?: string
@@ -104,11 +106,24 @@ export interface ReuseUnmet {
   message: string
 }
 
+// One certification criterion, met or not; tab is the agent-page tab where
+// it is resolved.
+export interface ReuseCheck {
+  key: 'stage' | 'arb' | 'security' | 'dp' | 'risk'
+  label: string
+  met: boolean
+  detail: string
+  tab: 'governance' | 'risk'
+  status?: string
+  conditions?: boolean
+}
+
 // Derived on the server from stage, governance gates and the Risk tab.
 export interface ReuseStatus {
   certified: boolean
   unmet: ReuseUnmet[]
   withConditions: string[]
+  checks: ReuseCheck[]
 }
 
 export interface RegistryCard {
@@ -324,14 +339,23 @@ export interface AgentEconomics {
   agentId: string
   stage: string
   revenueCents: number
-  tokenCostCents: number
+  // null when there is no usage data, so the token cost is unknown.
+  tokenCostCents: number | null
   estimatedInfraCostCents: number
   expenditureCents: number
   netCents: number
+  // Per month: declared value, and token + infra cost with where each came from.
+  valueCents?: number
+  totalCostCents?: number
+  infraCostCents?: number
+  tokenSource?: string
+  infraSource?: string
+  costComplete?: boolean
 }
 
 
 export interface PortfolioEconomics {
+  // Declared value of every agent, all stages, per month.
   totalRevenueCents: number
   totalExpenditureCents: number
   totalNetCents: number
@@ -534,6 +558,8 @@ export interface Taxonomy {
   reviewStatuses: string[]
   riskLevels: string[]
   aiTypes: string[]
+  // Persona roles a user can be given (recorded; enforced only with RBAC on).
+  userRoles?: string[]
 }
 
 export interface User {
@@ -570,6 +596,8 @@ export interface GraphNodeV2 {
   kind: string
   attrs: {
     dept?: string
+    // Department name for display; dept is the id.
+    dept_name?: string
     stage?: string
     entry?: 'production' | 'pipeline'
     model_name?: string

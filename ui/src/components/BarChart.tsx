@@ -1,46 +1,32 @@
-import { useState } from 'react'
-
 interface BarChartProps {
-  data: { label: string; value: number; color?: string }[]
-  width?: number
-  height?: number
+  data: { label: string; value: number }[]
+  // How a value reads at the end of its bar, e.g. fmtMoney. Defaults to a count.
+  format?: (value: number) => string
+  // One measure per category is one series, so every bar shares one hue; the
+  // label, not the colour, says which category it is.
+  color?: string
+  // Accessible name for the chart as a whole.
+  label?: string
 }
 
-const COLORS = ['#3DDBD9', '#8C7CF0', '#F0A85A', '#57C785', '#6EA8FE', '#E06B85']
-
-export default function BarChart({ data, width = 400, height = 200 }: BarChartProps) {
-  const max = Math.max(...data.map(d => d.value), 1)
-  const barH = 24
-  const gap = 8
-  const chartH = data.length * (barH + gap)
-
+// Horizontal bars, largest first: label | bar | value in one row, so a long
+// label never collides with its bar. Plain HTML, so it uses the app's font.
+export default function BarChart({ data, format = n => n.toLocaleString(), color = '#6366f1', label }: BarChartProps) {
+  const rows = [...data].sort((a, b) => b.value - a.value)
+  const max = Math.max(...rows.map(d => d.value), 1)
   return (
-    // width is the drawing's coordinate space; the SVG itself scales to its
-    // container, so a narrow column shrinks the chart instead of pushing the
-    // page sideways.
-    <svg
-      width="100%"
-      height={Math.max(chartH, height)}
-      viewBox={`0 0 ${width} ${Math.max(chartH, height)}`}
-      preserveAspectRatio="xMinYMin meet"
-      className="max-w-full"
-    >
-      {data.map((d, i) => {
-        const y = i * (barH + gap)
-        const w = (d.value / max) * (width - 120)
-        const color = d.color || COLORS[i % COLORS.length]
-        return (
-          <g key={d.label}>
-            <text x={width - 124} y={y + 17} textAnchor="end" fill="#6b7280" fontSize={12} fontFamily="Inter">
-              {d.label}
-            </text>
-            <rect x={0} y={y} width={w} height={barH} rx={4} fill={color} opacity={0.85} />
-            <text x={w + 8} y={y + 17} fill="#111827" fontSize={11} fontFamily="JetBrains Mono">
-              {d.value.toLocaleString()}
-            </text>
-          </g>
-        )
-      })}
-    </svg>
+    <ul className="space-y-2" aria-label={label}>
+      {rows.map(d => (
+        <li key={d.label} className="grid grid-cols-[minmax(0,38%)_1fr_4.5rem] items-center gap-3" title={`${d.label}: ${format(d.value)}`}>
+          <span className="truncate text-[13px] text-gray-600">{d.label}</span>
+          <span className="h-4 rounded-r bg-gray-100">
+            {d.value > 0 && (
+              <span className="block h-full rounded-r" style={{ width: `${(d.value / max) * 100}%`, background: color }} />
+            )}
+          </span>
+          <span className="text-right font-mono text-[12px] tabular-nums text-gray-900">{format(d.value)}</span>
+        </li>
+      ))}
+    </ul>
   )
 }

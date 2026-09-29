@@ -156,28 +156,57 @@ def _unmet(code: str, message: str, gate: str | None = None) -> dict:
     return {"code": code, "gate": gate, "message": message}
 
 
+# How a gate that is not approved reads to someone deciding whether to reuse.
+_GATE_PHRASE = {
+    "Not Submitted": "not submitted for review yet",
+    "In Review": "in review, awaiting the reviewer's decision",
+    "Changes Requested": "changes requested by the reviewer",
+}
+
+
+def _check(key: str, label: str, met: bool, detail: str, tab: str, **extra: Any) -> dict:
+    return {"key": key, "label": label, "met": met, "detail": detail, "tab": tab, **extra}
+
+
 def certification(stage: str | None, reviews: Mapping[str, Mapping[str, Any]],
                   risk_counts: Mapping[str, int], now: datetime) -> dict:
-    """{certified, unmet, withConditions}. reviews: gate -> {status,
+    """{certified, unmet, withConditions, checks}. reviews: gate -> {status,
     expires_at}. risk_counts: severity -> count of active findings, as the
-    Risk tab scores them (stored findings plus live financial ones)."""
-    unmet = []
-    if stage != CERTIFIED_STAGE:
+    Risk tab scores them (stored findings plus live financial ones).
+
+    checks lists every criterion, met or not, with the agent-page tab where
+    it is resolved, so a page can show the whole checklist in one place
+    instead of only the failures on the tab that happens to compute them."""
+    unmet, checks = [], []
+    in_production = stage == CERTIFIED_STAGE
+    if not in_production:
         unmet.append(_unmet("stage", f"Stage is {stage or 'not set'}; only Production agents are certified"))
+    checks.append(_check("stage", "Production stage", in_production,
+                         "In Production" if in_production else f"Currently {stage or 'not set'}",
+                         "governance"))
     with_conditions = []
     for gate, label in GATES.items():
         review = reviews.get(gate) or {}
         status = review.get("status") or "Not Submitted"
         if status not in APPROVED_STATUSES:
-            unmet.append(_unmet("gate_not_approved", f"{label} is {status}", gate))
+            phrase = _GATE_PHRASE.get(status, status)
+            unmet.append(_unmet("gate_not_approved", f"{label}: {phrase}", gate))
+            checks.append(_check(gate, label, False, phrase[:1].upper() + phrase[1:], "governance", status=status))
         elif gate_expiry_state(review, now) == "expired":
             unmet.append(_unmet("gate_expired", f"{label} approval has expired", gate))
-        elif status == "Approved with Conditions":
-            with_conditions.append(gate)
+            checks.append(_check(gate, label, False, "Approval has expired", "governance", status=status))
+        else:
+            conditional = status == "Approved with Conditions"
+            if conditional:
+                with_conditions.append(gate)
+            checks.append(_check(gate, label, True, "Approved with conditions" if conditional else "Approved",
+                                 "governance", status=status, conditions=conditional))
     blocking = sum(int(risk_counts.get(s) or 0) for s in BLOCKING_SEVERITIES)
     if blocking:
         unmet.append(_unmet("open_high_risk", f"{blocking} open HIGH or CRITICAL risk finding(s)"))
-    return {"certified": not unmet, "unmet": unmet, "withConditions": with_conditions}
+    checks.append(_check("risk", "No HIGH or CRITICAL risk", not blocking,
+                         f"{blocking} open HIGH or CRITICAL finding(s)" if blocking else "None open", "risk"))
+    return {"certified": not unmet, "unmet": unmet, "withConditions": with_conditions, "checks": checks}
 
 
 # ── Contract (consume) ───────────────────────────────────────────────────────
@@ -202,16 +231,51 @@ _FRONTEND_HOST_MARKERS = ("-fe.", "-frontend", "frontend.", "-ui.", "www.")
 # a real backend can legitimately serve one. Skip the advice when the host
 # itself already says backend, so a real -be host isn't told to become one.
 _BACKEND_HOST_MARKERS = ("-be.", "-backend", "backend.", "-api.")
-_FIND_THE_API = [
-    "Open the app's backend OpenAPI: the same host with -be instead of -fe, then /openapi.json (or /docs in a browser).",
-    "Or open the app, press F12 → Network, do the action, and copy the /api/… request it makes.",
-    "Or ask the owner — that is what the owner contact field is for.",
-]
+# The naming convention a web front end and its API usually follow. Only these
+# swaps are guessed; any other web host gets no suggestion, since there is
+# nothing safe to guess from.
+_FRONTEND_TO_BACKEND = (("-fe.", "-be."), ("-frontend.", "-backend."), ("frontend.", "backend."))
+def _find_the_api(sibling: str | None) -> list[str]:
+    """Where to get the real endpoint. With a known -be host, Try it has
+    already done the first step, so it says so instead of sending someone to
+    do it by hand."""
+    first = (f"Use Try it below: it already calls {sibling}. Press Load API operations to list the real paths "
+             "from its openapi.json, then save the one that answers."
+             if sibling else
+             "Open the app's backend OpenAPI at /openapi.json (or /docs in a browser); for a -fe host that is "
+             "usually the same name with -be.")
+    return [first,
+            "Or open the app, press F12 → Network, do the action, and copy the /api/… request it makes.",
+            "Or ask the owner — that is what the owner contact field is for."]
+
+
+def origin(url: str) -> str:
+    """scheme://host[:port] of an absolute URL."""
+    parsed = urlparse(url)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def backend_sibling(endpoint: str | None) -> str | None:
+    """The origin of the -be host paired with a recorded -fe web host
+    (https://app-fe.x.io/dashboard -> https://app-be.x.io), else None.
+    Relative paths and hosts without a front-end marker have no sibling."""
+    value = (endpoint or "").strip()
+    if not value.lower().startswith(("http://", "https://")):
+        return None
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+    for fe, be in _FRONTEND_TO_BACKEND:
+        if fe in host:
+            netloc = host.replace(fe, be, 1) + (f":{parsed.port}" if parsed.port else "")
+            return f"{parsed.scheme.lower()}://{netloc}"
+    return None
 
 
 def endpoint_advice(endpoint: str | None) -> dict | None:
-    """{looksLike, message, where} when the recorded endpoint looks like
-    something other than the agent's own API, else None."""
+    """{looksLike, message, where, suggestedBase} when the recorded endpoint
+    looks like something other than the agent's own API, else None.
+    suggestedBase is the -be host a -fe web page's API most likely lives on;
+    Try it calls it by default."""
     value = (endpoint or "").strip()
     kind = endpoint_kind(value)
     if kind == "observability":
@@ -219,7 +283,8 @@ def endpoint_advice(endpoint: str | None) -> dict | None:
             "looksLike": "tracing",
             "message": "This is a tracing/observability URL (Phoenix), not the agent's own API. "
                        "Tracing belongs in the Phoenix project field instead.",
-            "where": _FIND_THE_API,
+            "where": _find_the_api(None),
+            "suggestedBase": None,
         }
     if kind != "app":
         return None
@@ -232,11 +297,14 @@ def endpoint_advice(endpoint: str | None) -> dict | None:
     looks_like_frontend_host = any(marker in host for marker in _FRONTEND_HOST_MARKERS)
     looks_like_backend_host = any(marker in host for marker in _BACKEND_HOST_MARKERS)
     if looks_like_frontend_host or (first_segment in _UI_PATHS and not looks_like_backend_host):
+        sibling = backend_sibling(value)
         return {
             "looksLike": "frontend",
             "message": "This looks like the app's web page, not its API — a team calling it would get HTML back. "
-                       "The API is usually the same host under /api/….",
-            "where": _FIND_THE_API,
+                       + (f"Its API is most likely on {sibling} under /api/…; Try it calls that host by default."
+                          if sibling else "The API is usually the same host under /api/…."),
+            "where": _find_the_api(sibling),
+            "suggestedBase": sibling,
         }
     return None
 
@@ -317,6 +385,46 @@ def resolve_try_url(endpoint: str | None, gateway_base: str | None) -> str:
     return value
 
 
+MAX_PATH_CHARS = 500
+
+
+def try_target(endpoint: str | None, gateway_base: str | None) -> dict:
+    """Where Try it sends a call: {url, base, path, backendDefault, pathEditable}.
+
+    url is the recorded endpoint. base is the origin a caller-chosen path is
+    joined to: the -be sibling when the recorded endpoint is a -fe web page
+    (the page cannot answer an API call, so the backend is the useful
+    default), else the recorded endpoint's own origin. Raises TryItBlocked
+    when the endpoint cannot be called at all."""
+    url = resolve_try_url(endpoint, gateway_base)
+    # A gateway-relative endpoint shares its host with every other agent
+    # behind the gateway, so only the registered path may be called there.
+    editable = not (endpoint or "").strip().startswith("/")
+    advice = endpoint_advice(endpoint)
+    sibling = advice.get("suggestedBase") if advice else None
+    if sibling:
+        return {"url": url, "base": sibling, "path": "/", "backendDefault": True, "pathEditable": True}
+    parsed = urlparse(url)
+    path = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
+    return {"url": url, "base": origin(url), "path": path, "backendDefault": False, "pathEditable": editable}
+
+
+def join_try_path(base: str, path: str) -> str:
+    """base + path, refusing any path that could leave base's host: the
+    caller picks the path, never the host."""
+    value = path or ""
+    if not value.startswith("/") or value.startswith("//"):
+        raise TryItBlocked("The path must start with a single /")
+    if len(value) > MAX_PATH_CHARS:
+        raise TryItBlocked(f"The path is longer than {MAX_PATH_CHARS} characters")
+    if "\\" in value or any(ch.isspace() or ord(ch) < 32 for ch in value):
+        raise TryItBlocked("The path contains spaces, control characters or backslashes")
+    url = base.rstrip("/") + value
+    if origin(url).lower() != base.rstrip("/").lower():
+        raise TryItBlocked("The path cannot change the host")
+    return url
+
+
 def check_addresses(addresses: Iterable[str], allow_loopback: bool) -> None:
     """Refuses cloud metadata, link-local, multicast and reserved addresses,
     and loopback outside development. Private ranges stay allowed: internal
@@ -332,3 +440,111 @@ def check_addresses(addresses: Iterable[str], allow_loopback: bool) -> None:
             continue
         if ip.is_link_local or ip.is_multicast or ip.is_unspecified or ip.is_reserved:
             raise TryItBlocked(f"The endpoint resolves to {ip}, a link-local or reserved address")
+
+
+# ── API operations (from the target's own openapi.json) ─────────────────────
+
+TRY_METHODS = ("get", "post")
+_ALL_METHODS = ("get", "post", "put", "patch", "delete")
+MAX_OPERATIONS = 200
+_MAX_EXAMPLE_DEPTH = 4
+
+
+def _resolve_ref(spec: Mapping[str, Any], schema: Any) -> Any:
+    ref = schema.get("$ref") if isinstance(schema, Mapping) else None
+    if not isinstance(ref, str) or not ref.startswith("#/"):
+        return schema
+    node: Any = spec
+    for part in ref[2:].split("/"):
+        node = node.get(part) if isinstance(node, Mapping) else None
+    return node if isinstance(node, Mapping) else {}
+
+
+def _schema_type(schema: Mapping[str, Any]) -> str | None:
+    """The one non-null type; OpenAPI 3.1 allows a list ["string", "null"]."""
+    kind = schema.get("type")
+    if isinstance(kind, list):
+        kind = next((k for k in kind if k != "null"), None)
+    return kind if isinstance(kind, str) else None
+
+
+def _is_null_schema(schema: Mapping[str, Any]) -> bool:
+    """{"type": "null"} or {"type": ["null"]}: the empty half of an Optional."""
+    return "type" in schema and _schema_type(schema) in (None, "null")
+
+
+def schema_example(spec: Mapping[str, Any], schema: Any, depth: int = 0) -> Any:
+    """A starting value for a JSON schema: its example or default when
+    given, else an empty value of the right shape. Tolerates whatever a
+    third-party document contains: anything unexpected yields None."""
+    schema = _resolve_ref(spec, schema)
+    if not isinstance(schema, Mapping) or depth > _MAX_EXAMPLE_DEPTH:
+        return None
+    for key in ("example", "default"):
+        if key in schema:
+            return schema[key]
+    for key in ("examples", "enum"):
+        if isinstance(schema.get(key), list) and schema[key]:
+            return schema[key][0]
+    parts = [_resolve_ref(spec, o) for o in schema.get("allOf") or [] if isinstance(o, Mapping)]
+    if parts:
+        merged: dict = {}
+        for part in parts:
+            value = schema_example(spec, part, depth + 1)
+            if isinstance(value, dict):
+                merged.update(value)
+        if merged:
+            return merged
+    for key in ("anyOf", "oneOf"):
+        options = [r for r in (_resolve_ref(spec, o) for o in schema.get(key) or [])
+                   if isinstance(r, Mapping) and not _is_null_schema(r)]
+        if options:
+            return schema_example(spec, options[0], depth + 1)
+    kind = _schema_type(schema)
+    properties = schema.get("properties")
+    if kind == "object" or isinstance(properties, Mapping):
+        if not isinstance(properties, Mapping):
+            return {}
+        return {str(name): schema_example(spec, sub, depth + 1) for name, sub in properties.items()}
+    if kind == "array":
+        item = schema_example(spec, schema.get("items"), depth + 1)
+        return [] if item is None else [item]
+    return {"string": "", "integer": 0, "number": 0, "boolean": False}.get(kind or "")
+
+
+def _json_request_schema(spec: Mapping[str, Any], op: Mapping[str, Any]) -> Any:
+    """The JSON request-body schema of an operation, following a $ref to
+    components/requestBodies; None when there is none."""
+    body = _resolve_ref(spec, op.get("requestBody"))
+    content = body.get("content") if isinstance(body, Mapping) else None
+    json_body = content.get("application/json") if isinstance(content, Mapping) else None
+    return json_body.get("schema") if isinstance(json_body, Mapping) else None
+
+
+def openapi_operations(spec: Any) -> dict:
+    """{title, operations, otherMethods} from an OpenAPI document. Only GET
+    and POST are listed — the two Try it can send; otherMethods counts the
+    rest so the list never silently looks complete when it is not."""
+    if not isinstance(spec, Mapping) or not isinstance(spec.get("paths"), Mapping):
+        raise ValueError("Not an OpenAPI document (no paths)")
+    operations, other = [], 0
+    for path, item in spec["paths"].items():
+        if not isinstance(item, Mapping) or not str(path).startswith("/"):
+            continue
+        for method in _ALL_METHODS:
+            op = item.get(method)
+            if not isinstance(op, Mapping):
+                continue
+            if method not in TRY_METHODS:
+                other += 1
+                continue
+            schema = _json_request_schema(spec, op) if method == "post" else None
+            body = schema_example(spec, schema) if schema is not None else None
+            operations.append({
+                "method": method.upper(), "path": str(path),
+                "summary": str(op.get("summary") or op.get("operationId") or "")[:160],
+                "hasPathParams": "{" in str(path), "exampleBody": body,
+            })
+    info = spec.get("info") if isinstance(spec.get("info"), Mapping) else {}
+    return {"title": info.get("title"), "operations": operations[:MAX_OPERATIONS],
+            "truncated": len(operations) > MAX_OPERATIONS, "otherMethods": other}

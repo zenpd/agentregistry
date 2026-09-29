@@ -29,7 +29,7 @@ import {
   Loading,
   SEVERITIES,
   SEVERITY_PILL,
-  SectionLabel,
+  FieldLabel, SectionLabel,
   SourceBadge,
   fmtCents,
   fmtNumber,
@@ -152,10 +152,10 @@ function Markdown({ text }: { text: string }) {
 
 function Tile({ label, to, children }: { label: string; to?: string; children: ReactNode }) {
   return (
-    <div className="rounded-lg border border-gray-100 bg-gray-50/60 p-3 space-y-1.5 min-w-0">
+    <div className="rounded-xl bg-white p-3.5 space-y-1.5 min-w-0 ring-1 ring-slate-200/80 shadow-sm">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] uppercase tracking-wide text-gray-400">{label}</span>
-        {to && <Link to={to} className="text-[10px] text-teal-600 hover:underline">Open</Link>}
+        <span className="text-[10.5px] font-semibold uppercase tracking-[.04em] text-slate-500">{label}</span>
+        {to && <Link to={to} className="text-[11px] font-semibold text-zen-600 hover:text-zen-700 hover:underline">Open →</Link>}
       </div>
       {children}
     </div>
@@ -289,7 +289,7 @@ function KpiStrip({ overview, error, onRetry, agentId }: {
 function Fact({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
   return (
     <div className={wide ? 'col-span-2 md:col-span-3' : ''}>
-      <SectionLabel>{label}</SectionLabel>
+      <FieldLabel>{label}</FieldLabel>
       <div className="text-sm text-gray-900">{children}</div>
     </div>
   )
@@ -353,7 +353,7 @@ function DeclaredDependencies({ agent, agentId, graph }: { agent: Agent; agentId
         <div className="grid grid-cols-2 gap-4">
           {groups.map(g => (
             <div key={g.key}>
-              <SectionLabel>{g.label}</SectionLabel>
+              <FieldLabel>{g.label}</FieldLabel>
               <div className="flex flex-wrap gap-1 mt-1">
                 {(agent[g.key] || []).map(s => (
                   <span key={s} className={`text-xs ring-1 px-2 py-0.5 rounded-full ${g.className}`}>{s}</span>
@@ -818,7 +818,7 @@ function ContextPanel({ agentId, ctx, summary, error, onRetry, onChanged }: {
       <Suggestions insight={insight} busy={busy} onAction={act} />
 
       <div>
-        <SectionLabel>context.md</SectionLabel>
+        <FieldLabel>context.md</FieldLabel>
         <div className="mt-1 rounded-lg border border-gray-100 bg-white p-4 max-h-[36rem] overflow-y-auto">
           <Markdown text={ctx.content} />
         </div>
@@ -877,13 +877,13 @@ export default function OverviewTab({ agent, agentId, onChanged, graph }: TabPro
         <div className="space-y-3">
           {agent.description && (
             <div>
-              <SectionLabel>Description</SectionLabel>
+              <FieldLabel>Description</FieldLabel>
               <p className="text-sm text-gray-700">{agent.description}</p>
             </div>
           )}
           {agent.businessOutcome && (
             <div>
-              <SectionLabel>Business Outcome</SectionLabel>
+              <FieldLabel>Business Outcome</FieldLabel>
               <p className="text-sm text-gray-700">{agent.businessOutcome}</p>
             </div>
           )}

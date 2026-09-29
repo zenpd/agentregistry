@@ -140,7 +140,7 @@ export default function DependencyGraphView() {
           baseColor: { background: fill, border: isProduction ? '#17b26a' : '#d97706', borderWidth: isProduction ? 5 : 2 },
           font: { color: '#ffffff', size: 13 },
           title: [
-            `Dept: ${attrs.dept ?? ''}`,
+            `Dept: ${attrs.dept_name ?? attrs.dept ?? ''}`,
             `Stage: ${attrs.stage ?? ''}`,
             attrs.model_name ? `Model: ${attrs.model_name}` : '',
             `Value: $${attrs.value_amount ?? 0}/mo · ${attrs.hours_saved_monthly ?? 0} h/mo`,
@@ -437,9 +437,13 @@ export default function DependencyGraphView() {
 
   return (
     <div className="space-y-3">
+      <div>
+        <h1 className="text-2xl font-bold">Dependency Graph</h1>
+        <p className="text-gray-500 mt-0.5">Everything each agent depends on and feeds, as declared by its owner. Click a node for details; hover the totals for what they count.</p>
+      </div>
       <div className="grid grid-cols-4 gap-2">
         {([
-          ['Agents + deps', graph.stats.nodes, 'Every node in this graph: agents plus the systems, databases, knowledge bases, MCP servers and consumers they use.'],
+          ['Agents + resources', graph.stats.nodes, 'Every node in this graph: agents plus the systems, databases, knowledge bases, MCP servers and consumers they use.'],
           ['Dependencies', graph.stats.edges, 'Every typed edge: agent→agent calls plus every declared system/database/KB/MCP access.'],
           ['Production entry points', graph.stats.production_agents, 'Agents in the Production stage — not the narrower "outage root" definition (Production and reachable by a caller or consumer) shown on the canvas as a thick green ring.'],
           ['Agent→Agent calls', graph.stats.cross_agent_edges, 'Direct agent-to-agent handoffs only.'],
@@ -541,7 +545,7 @@ export default function DependencyGraphView() {
                 <h3 className="font-semibold text-slate-800">{selected.name}</h3>
                 <div className="text-xs text-slate-500">
                   {selected.kind.startsWith('group:')
-                    ? `${selected.attrs.stage ?? ''} · ${selected.attrs.dept ?? ''}`
+                    ? `${selected.attrs.stage ?? ''} · ${selected.attrs.dept_name ?? selected.attrs.dept ?? ''}`
                     : selected.kind}
                 </div>
               </div>

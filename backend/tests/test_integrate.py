@@ -192,9 +192,11 @@ async def test_contract_edit_cleans_lists_rejects_tracing_urls_and_is_audited(cl
 # ── Access requests ──────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_access_request_approval_puts_the_team_in_the_dependency_graph(client, db):
+async def test_access_request_approval_puts_the_team_in_the_dependency_graph(client, db, monkeypatch):
     from services.graph_service import build_graph
+    from shared.config import get_settings
 
+    monkeypatch.setattr(get_settings(), "allow_self_approval", False)  # the two-person rule
     as_user("u2")
     rid = (await client.post("/api/v1/agents/prod/access-requests",
                              json={"team": "Treasury Ops", "purpose": "Reconcile treasury invoices daily"})).json()["id"]
@@ -477,3 +479,147 @@ async def test_try_it_is_rate_limited_per_user_and_agent(client, fake_agent):
     assert (await client.post("/api/v1/agents/prod/try", json={"body": {}})).status_code == 429
     as_user("u2")
     assert (await client.post("/api/v1/agents/prod/try", json={"body": {}})).status_code == 200
+
+
+# ── -be default and API operations ───────────────────────────────────────────
+
+async def _add_web_page_agent(db, dept_id=None):
+    from db.models import Agent, GovernanceReview
+    async with db() as s:
+        s.add(Agent(id="webpage", org_id="org-default", slug="webpage", owner="Ops", name="Onboarding Portal",
+                    lifecycle_stage="Ideation", description="Opens retail bank accounts.", dept_id=dept_id,
+                    api_endpoint="https://onboarding-fe.example.com/dashboard"))
+        s.add(GovernanceReview(id="webpage-arb", agent_id="webpage", gate="arb", status="In Review"))
+
+
+OPENAPI = {
+    "info": {"title": "Onboarding API"},
+    "paths": {
+        "/health": {"get": {"summary": "Health"}},
+        "/api/v1/onboard/start": {"post": {"summary": "Start", "requestBody": {"content": {"application/json": {
+            "schema": {"type": "object", "properties": {"customer_name": {"type": "string"}}}}}}}},
+        "/api/v1/onboard/{id}": {"delete": {"summary": "Cancel"}},
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_a_web_page_endpoint_is_tried_on_its_be_host_by_default(client, db, fake_agent):
+    await _add_web_page_agent(db)
+    data = await _integration(client, "webpage")
+    assert data["contract"]["endpointAdvice"]["suggestedBase"] == "https://onboarding-be.example.com"
+    assert data["tryIt"]["base"] == "https://onboarding-be.example.com" and data["tryIt"]["backendDefault"] is True
+
+    result = (await client.post("/api/v1/agents/webpage/try",
+                                json={"path": "/api/v1/onboard/start", "body": {"customer_name": "A"}})).json()
+    assert result["url"] == "https://onboarding-be.example.com/api/v1/onboard/start" and result["ok"] is True
+    # No path still calls exactly what is recorded.
+    await client.post("/api/v1/agents/webpage/try", json={"method": "GET"})
+    assert [str(c.url) for c in fake_agent["calls"]] == [
+        "https://onboarding-be.example.com/api/v1/onboard/start", "https://onboarding-fe.example.com/dashboard",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_chosen_path_never_changes_the_host(client, fake_agent):
+    for path in ("//evil.example.com/x", "https://evil.example.com/", "no-slash"):
+        refused = await client.post("/api/v1/agents/prod/try", json={"path": path, "body": {}})
+        assert refused.status_code == 422, path
+    assert fake_agent["calls"] == []
+    ok = (await client.post("/api/v1/agents/prod/try", json={"path": "/v2/run", "body": {}})).json()
+    assert ok["url"] == "https://agent.example.com/v2/run"
+
+
+@pytest.mark.asyncio
+async def test_gateway_agents_only_call_their_registered_path(client, fake_agent, monkeypatch):
+    from shared.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "agent_gateway_base_url", "https://gw.example.com")
+    refused = await client.post("/api/v1/agents/relative/try", json={"path": "/agents/v1/other", "body": {}})
+    assert refused.status_code == 422 and "gateway" in refused.json()["detail"]
+    assert (await client.get("/api/v1/agents/relative/api-operations")).status_code == 422
+    ok = (await client.post("/api/v1/agents/relative/try", json={"body": {}})).json()
+    assert ok["url"] == "https://gw.example.com/agents/v1/support-triage"
+    assert [str(c.url) for c in fake_agent["calls"]] == ["https://gw.example.com/agents/v1/support-triage"]
+
+
+@pytest.mark.asyncio
+async def test_api_operations_come_from_the_be_hosts_openapi(client, db, fake_agent):
+    await _add_web_page_agent(db)
+    fake_agent["respond"] = lambda req: (httpx.Response(200, json=OPENAPI) if req.url.path == "/openapi.json"
+                                         else httpx.Response(404))
+    found = (await client.get("/api/v1/agents/webpage/api-operations")).json()
+    assert found["ok"] is True and found["specUrl"] == "https://onboarding-be.example.com/openapi.json"
+    assert [(o["method"], o["path"]) for o in found["operations"]] == [("GET", "/health"),
+                                                                     ("POST", "/api/v1/onboard/start")]
+    assert found["operations"][1]["exampleBody"] == {"customer_name": ""} and found["otherMethods"] == 1
+
+    fake_agent["respond"] = lambda req: httpx.Response(404, text="Not Found")
+    missing = (await client.get("/api/v1/agents/webpage/api-operations")).json()
+    assert missing["ok"] is False and "404" in missing["error"] and missing["operations"] == []
+
+
+@pytest.mark.asyncio
+async def test_api_operations_refuse_metadata_addresses(client, db, fake_agent):
+    await _add_web_page_agent(db)
+    fake_agent["addresses"] = ["169.254.169.254"]
+    refused = await client.get("/api/v1/agents/webpage/api-operations")
+    assert refused.status_code == 422 and fake_agent["calls"] == []
+
+
+@pytest.mark.asyncio
+async def test_agent_detail_carries_the_full_certification_checklist(client, db):
+    await _add_web_page_agent(db, dept_id="dept-finance")
+    detail = (await client.get("/api/v1/agents/webpage")).json()
+    checks = {c["key"]: c for c in detail["reuse"]["checks"]}
+    assert detail["reuse"]["certified"] is False and len(checks) == 5
+    assert not checks["stage"]["met"] and checks["arb"]["detail"].startswith("In review")
+    assert checks["security"]["detail"] == "Not submitted for review yet" and checks["risk"]["met"]
+    prod = (await client.get("/api/v1/agents/prod")).json()["reuse"]
+    assert prod["certified"] and all(c["met"] for c in prod["checks"])
+    listing = (await client.get("/api/v1/agents/?limit=100")).json()["data"]
+    assert {a["id"]: a["deptName"] for a in listing}["webpage"] == "Finance"
+
+
+@pytest.mark.asyncio
+async def test_try_it_audit_leaves_out_the_callers_query_string(client, db, fake_agent):
+    from db.models import AuditLog
+
+    await client.post("/api/v1/agents/prod/try", json={"method": "GET", "path": "/v2/lookup?email=jane@example.com"})
+    assert str(fake_agent["calls"][0].url) == "https://agent.example.com/v2/lookup?email=jane@example.com"
+    async with db() as s:
+        audit = (await s.execute(select(AuditLog).where(AuditLog.action == "try_it"))).scalar_one()
+    assert audit.changes["url"] == "https://agent.example.com/v2/lookup" and "jane" not in str(audit.changes)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply,expected", [
+    (lambda req: httpx.Response(301, headers={"location": "https://login.example.com/"}), "redirects to https://login"),
+    (lambda req: httpx.Response(200, text="<html>app</html>"), "could not be read as an OpenAPI document"),
+    (lambda req: httpx.Response(200, json={"detail": "ok"}), "no paths"),
+    (lambda req: httpx.Response(200, content=b"[" * 200_000), "could not be read"),
+])
+async def test_an_unreadable_api_list_is_reported_not_a_500(client, db, fake_agent, reply, expected):
+    await _add_web_page_agent(db)
+    fake_agent["respond"] = reply
+    res = await client.get("/api/v1/agents/webpage/api-operations")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is False and expected in body["error"] and body["operations"] == []
+
+
+@pytest.mark.asyncio
+async def test_self_approval_in_testing_mode_is_allowed_and_marked(client, db, monkeypatch):
+    from db.models import AuditLog
+    from shared.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "allow_self_approval", True)
+    as_user("u2")
+    rid = (await client.post("/api/v1/agents/prod/access-requests",
+                             json={"team": "Solo Tester", "purpose": "Testing the flow on my own"})).json()["id"]
+    assert (await _integration(client))["selfApprovalAllowed"] is True
+    ok = await client.post(f"/api/v1/agents/prod/access-requests/{rid}/decision", json={"decision": "approve"})
+    assert ok.status_code == 200 and ok.json()["status"] == "approved"
+    async with db() as s:
+        audit = (await s.execute(select(AuditLog).where(AuditLog.action == "access_approve"))).scalar_one()
+    assert audit.changes["self_approved"] is True

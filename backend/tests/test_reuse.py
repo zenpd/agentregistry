@@ -111,7 +111,24 @@ def test_deprecated_agents_and_the_agent_itself_are_never_suggested():
 
 def test_production_approved_and_no_high_risk_is_certified():
     cert = reuse.certification("Production", APPROVED, {**NO_RISK, "MEDIUM": 3}, NOW)
-    assert cert == {"certified": True, "unmet": [], "withConditions": []}
+    assert cert["certified"] is True and cert["unmet"] == [] and cert["withConditions"] == []
+    assert all(c["met"] for c in cert["checks"])
+
+
+def test_every_check_is_listed_met_or_not_with_the_tab_that_resolves_it():
+    reviews = {**APPROVED, "arb": {"status": "In Review"}, "security": {"status": "Not Submitted"}}
+    cert = reuse.certification("Ideation", reviews, {**NO_RISK, "HIGH": 2}, NOW)
+    checks = {c["key"]: c for c in cert["checks"]}
+    assert list(checks) == ["stage", "arb", "security", "dp", "risk"]
+    assert [checks[k]["met"] for k in checks] == [False, False, False, True, False]
+    assert checks["arb"]["detail"] == "In review, awaiting the reviewer's decision"
+    assert checks["security"]["detail"] == "Not submitted for review yet"
+    assert checks["dp"]["detail"] == "Approved"
+    assert checks["risk"]["detail"].startswith("2 open") and checks["risk"]["tab"] == "risk"
+    assert {checks[k]["tab"] for k in ("stage", "arb", "security", "dp")} == {"governance"}
+    # The unmet list is the failing checks, in the same order.
+    assert len(cert["unmet"]) == sum(not c["met"] for c in cert["checks"])
+    assert cert["unmet"][1]["message"] == "Architecture Review Board: in review, awaiting the reviewer's decision"
 
 
 def test_every_unmet_criterion_is_reported():
@@ -134,6 +151,8 @@ def test_approval_with_conditions_certifies_but_says_so():
     reviews = {**APPROVED, "dp": {"status": "Approved with Conditions", "expires_at": None}}
     cert = reuse.certification("Production", reviews, NO_RISK, NOW)
     assert cert["certified"] and cert["withConditions"] == ["dp"]
+    [dp] = [c for c in cert["checks"] if c["key"] == "dp"]
+    assert dp["met"] and dp["conditions"] and dp["detail"] == "Approved with conditions"
 
 
 # ── contract ─────────────────────────────────────────────────────────────────
@@ -192,6 +211,138 @@ def test_a_real_backend_host_is_not_told_to_become_one():
     # excused by the same path word, and even when it's paired with a -be
     # segment somewhere later in the host (frontend markers win outright).
     assert reuse.endpoint_advice("https://checkout-fe.example.com/reports") is not None
+
+
+@pytest.mark.parametrize("endpoint,sibling", [
+    ("https://digital-onboarding-fe.x.azurecontainerapps.io/dashboard",
+     "https://digital-onboarding-be.x.azurecontainerapps.io"),
+    ("https://ZenARC-FE.example.com/", "https://zenarc-be.example.com"),
+    ("http://shop-fe.internal:8080/home", "http://shop-be.internal:8080"),
+    ("https://shop-frontend.example.com/", "https://shop-backend.example.com"),
+    ("https://frontend.shop.example.com/", "https://backend.shop.example.com"),
+])
+def test_a_fe_host_pairs_with_its_be_host(endpoint, sibling):
+    assert reuse.backend_sibling(endpoint) == sibling
+    advice = reuse.endpoint_advice(endpoint)
+    assert advice["suggestedBase"] == sibling and sibling in advice["message"]
+
+
+def test_advice_points_to_try_it_when_the_be_host_is_known():
+    known = reuse.endpoint_advice("https://shop-fe.example.com/dashboard")["where"][0]
+    assert "https://shop-be.example.com" in known and "Load API operations" in known
+    unknown = reuse.endpoint_advice("https://www.example.com/login")["where"][0]
+    assert "Load API operations" not in unknown and "/openapi.json" in unknown
+
+
+@pytest.mark.parametrize("endpoint", [
+    "https://www.example.com/login", "https://app.example.com/", "https://onboarding-be.example.com/dashboard",
+    "/dashboard", "", None,
+])
+def test_no_be_host_is_guessed_without_a_fe_marker(endpoint):
+    assert reuse.backend_sibling(endpoint) is None
+
+
+def test_try_it_defaults_a_web_page_to_its_be_host():
+    target = reuse.try_target("https://onboarding-fe.example.com/dashboard", "")
+    assert target == {"url": "https://onboarding-fe.example.com/dashboard", "base": "https://onboarding-be.example.com",
+                      "path": "/", "backendDefault": True, "pathEditable": True}
+
+
+def test_try_it_keeps_a_real_api_endpoint_as_recorded():
+    target = reuse.try_target("https://pay-be.example.com/analytics?region=eu", "")
+    assert target["base"] == "https://pay-be.example.com" and target["path"] == "/analytics?region=eu"
+    assert not target["backendDefault"] and target["pathEditable"]
+    # Behind the shared agent gateway only the registered path may be called.
+    gateway = reuse.try_target("/agents/v1/inv", "https://gw.example.com")
+    assert gateway["url"] == "https://gw.example.com/agents/v1/inv" and not gateway["pathEditable"]
+
+
+def test_a_chosen_path_stays_on_the_target_host():
+    base = "https://onboarding-be.example.com"
+    assert reuse.join_try_path(base, "/api/v1/onboard/start") == base + "/api/v1/onboard/start"
+    assert reuse.join_try_path(base + "/", "/@evil.com?q=1") == base + "/@evil.com?q=1"
+
+
+@pytest.mark.parametrize("path", ["api/v1/x", "//evil.com/x", "https://evil.com/x", "/a b", "/a\\b", "/a\tb", ""])
+def test_a_path_that_could_leave_the_host_is_refused(path):
+    with pytest.raises(reuse.TryItBlocked):
+        reuse.join_try_path("https://onboarding-be.example.com", path)
+
+
+SPEC = {
+    "info": {"title": "Digital Banking Onboarding API"},
+    "paths": {
+        "/health": {"get": {"summary": "Health"}},
+        "/api/v1/onboard/start": {"post": {
+            "summary": "Start onboarding",
+            "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Start"}}}},
+        }},
+        "/api/v1/onboard/{session_id}": {"get": {"operationId": "get_session"}, "delete": {"summary": "Cancel"}},
+    },
+    "components": {"schemas": {
+        "Start": {"type": "object", "properties": {
+            "customer_name": {"type": "string"},
+            "product": {"type": "string", "enum": ["savings", "current"]},
+            "age": {"anyOf": [{"type": "null"}, {"type": "integer"}]},
+            "documents": {"type": "array", "items": {"$ref": "#/components/schemas/Doc"}},
+            "channel": {"type": "string", "default": "web"},
+        }},
+        "Doc": {"type": "object", "properties": {"kind": {"type": "string", "example": "passport"}}},
+    }},
+}
+
+
+def test_openapi_lists_the_get_and_post_operations_with_a_starting_body():
+    found = reuse.openapi_operations(SPEC)
+    assert found["title"] == "Digital Banking Onboarding API"
+    assert [(o["method"], o["path"]) for o in found["operations"]] == [
+        ("GET", "/health"), ("POST", "/api/v1/onboard/start"), ("GET", "/api/v1/onboard/{session_id}"),
+    ]
+    start = found["operations"][1]
+    assert start["summary"] == "Start onboarding" and not start["hasPathParams"]
+    assert start["exampleBody"] == {"customer_name": "", "product": "savings", "age": 0,
+                                    "documents": [{"kind": "passport"}], "channel": "web"}
+    assert found["operations"][2]["hasPathParams"] and found["operations"][2]["summary"] == "get_session"
+    # DELETE can't be sent from Try it; it is counted, not silently dropped.
+    assert found["otherMethods"] == 1 and found["truncated"] is False
+
+
+def _post_body(schema, **extra):
+    spec = {"paths": {"/a": {"post": {"requestBody": {"content": {"application/json": {"schema": schema}}}}}}, **extra}
+    return reuse.openapi_operations(spec)["operations"][0]["exampleBody"]
+
+
+@pytest.mark.parametrize("schema,expected", [
+    # OpenAPI 3.1: a type list, and examples as a list.
+    ({"type": "object", "properties": {"n": {"type": ["string", "null"]}}}, {"n": ""}),
+    ({"type": "object", "properties": {"x": {"type": "string", "examples": ["hello"]}}}, {"x": "hello"}),
+    # allOf composes: every part's fields, not only the first part's.
+    ({"allOf": [{"type": "object", "properties": {"a": {"type": "string"}}},
+                {"type": "object", "properties": {"b": {"type": "integer"}}}]}, {"a": "", "b": 0}),
+    ({"anyOf": [{"type": ["null"]}, {"type": "boolean"}]}, False),
+    # Malformed or unusual shapes give an empty start, never an error.
+    ({"anyOf": [True]}, None),
+    ({"type": "object", "properties": ["x"]}, {}),
+    ({"type": 5}, None),
+])
+def test_starting_body_handles_31_composition_and_malformed_schemas(schema, expected):
+    assert _post_body(schema) == expected
+
+
+def test_a_shared_request_body_is_followed():
+    spec = {"paths": {"/a": {"post": {"requestBody": {"$ref": "#/components/requestBodies/B"}}},
+                      "/b": {"post": {"requestBody": ["not", "a", "body"]}}},
+            "components": {"requestBodies": {"B": {"content": {"application/json": {
+                "schema": {"type": "object", "properties": {"x": {"type": "string"}}}}}}}}}
+    ops = reuse.openapi_operations(spec)["operations"]
+    assert [o["exampleBody"] for o in ops] == [{"x": ""}, None]
+
+
+def test_a_document_without_paths_is_not_an_openapi_spec():
+    with pytest.raises(ValueError):
+        reuse.openapi_operations({"hello": "world"})
+    with pytest.raises(ValueError):
+        reuse.openapi_operations(["not", "a", "dict"])
 
 
 def test_example_payload_is_keyed_by_the_declared_inputs():

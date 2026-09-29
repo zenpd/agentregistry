@@ -95,6 +95,20 @@ async def test_legend_counts_match_nodes(graph_db):
 
 
 @pytest.mark.asyncio
+async def test_departments_read_by_name_while_the_id_stays_the_key(graph_db):
+    from db.models import Department
+    async with get_db_session() as db:
+        db.add(Department(id="dept-cx", org_id="org-default", name="Customer Support"))
+    async with get_db_session() as db:
+        graph = await build_graph(db)
+    labels = {item["kind"]: item["label"] for item in graph["legend"]}
+    assert labels["group:dept-cx"] == "Customer Support"   # not "Cx"
+    assert labels["group:dept-finance"] == "Finance"       # no department row: readable fallback
+    churn = next(n for n in graph["nodes"] if n["id"] == "churn-predictor")
+    assert churn["attrs"]["dept"] == "dept-cx" and churn["attrs"]["dept_name"] == "Customer Support"
+
+
+@pytest.mark.asyncio
 async def test_blast_radius_walks_callers_and_consumers(graph_db):
     import asyncio
     async with get_db_session() as db:

@@ -6,7 +6,7 @@ import importlib
 import logging
 import os
 
-_MODULES = ["overview", "diagram", "governance", "tokenomics", "economics", "risk", "jobs", "integrate"]
+_MODULES = ["overview", "diagram", "governance", "tokenomics", "economics", "risk", "jobs", "integrate", "approvals"]
 
 # Parallel development: AR_TOLERANT_ROUTER_IMPORT=1 lets a dev server start
 # while another module is mid-edit. Never set in production.

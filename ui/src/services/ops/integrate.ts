@@ -24,6 +24,8 @@ export interface EndpointAdvice {
   looksLike: 'frontend' | 'tracing'
   message: string
   where: string[]
+  // The -be host paired with a recorded -fe web page; Try it calls it by default.
+  suggestedBase: string | null
 }
 
 export interface Contract {
@@ -45,9 +47,44 @@ export interface Integration {
   gaps: string[]
   reuse: ReuseStatus
   reuseCheck: { checked: { id: string; name: string; score: number; certified: boolean }[]; justification: string | null }
-  tryIt: { available: boolean; reason: string | null; url: string | null; examplePayload: Record<string, string> }
+  tryIt: TryItTarget & { examplePayload: Record<string, string> }
   accessRequests: AccessRequest[]
+  // Testing mode (ALLOW_SELF_APPROVAL): the requester may approve their own request.
+  selfApprovalAllowed: boolean
   consumers: { approvedTeams: string[]; declared: string[] }
+}
+
+// Where Try it sends a call. url is the recorded endpoint; a chosen path is
+// joined to base, which is the -be host when backendDefault is set.
+export interface TryItTarget {
+  available: boolean
+  reason: string | null
+  url: string | null
+  base: string | null
+  path: string | null
+  backendDefault: boolean
+  pathEditable: boolean
+}
+
+export interface ApiOperation {
+  method: 'GET' | 'POST'
+  path: string
+  summary: string
+  hasPathParams: boolean
+  exampleBody: unknown
+}
+
+// The Try it target host's own /openapi.json, read by the registry server.
+export interface ApiOperations {
+  ok: boolean
+  error?: string | null
+  hint?: string | null
+  base: string
+  specUrl: string
+  title: string | null
+  operations: ApiOperation[]
+  truncated: boolean
+  otherMethods: number
 }
 
 export interface ContractUpdate {
@@ -70,6 +107,8 @@ export interface TryItResult {
   truncated?: boolean
   location?: string | null
   error?: string
+  // What to do about the error; only sent with one.
+  hint?: string
   latencyMs?: number
 }
 
@@ -86,5 +125,9 @@ export const decideAccess = (agentId: string, requestId: string, decision: Acces
   api.post<{ id: string; status: AccessStatus }>(
     `${agentPath(agentId)}/access-requests/${encodeURIComponent(requestId)}/decision`, { decision, note })
 
-export const tryAgent = (agentId: string, method: 'POST' | 'GET', body: unknown) =>
-  api.post<TryItResult>(`${agentPath(agentId)}/try`, { method, body })
+// path: a path on tryIt.base; omitted, the recorded endpoint is called.
+export const tryAgent = (agentId: string, method: 'POST' | 'GET', body: unknown, path?: string) =>
+  api.post<TryItResult>(`${agentPath(agentId)}/try`, { method, body, path })
+
+export const getApiOperations = (agentId: string) =>
+  api.get<ApiOperations>(`${agentPath(agentId)}/api-operations`)

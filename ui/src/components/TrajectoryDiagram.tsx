@@ -356,7 +356,7 @@ export default function TrajectoryDiagram({ nodes, edges, height = 440, selected
                 fill={i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent'}
               />
               <text x={12} y={laneTop[i] + 16}
-                fill={l.color} fontSize={10} fontFamily="Inter" fontWeight={600} opacity={0.85}>
+                fill={l.color} fontSize={10} fontFamily="inherit" fontWeight={600} opacity={0.85}>
                 {l.label}
               </text>
             </g>

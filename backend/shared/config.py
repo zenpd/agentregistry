@@ -96,6 +96,15 @@ class Settings(BaseSettings):
     agent_gateway_base_url: str = ""
     try_it_timeout_seconds: float = 20.0
     try_it_calls_per_minute: int = 10
+    # TESTING ONLY: lets whoever raised an access request approve it too, so a
+    # single-user setup can exercise the whole flow. Every such approval is
+    # marked self_approved in the audit log. Set ALLOW_SELF_APPROVAL=false
+    # before going live, which restores the two-person rule.
+    allow_self_approval: bool = True
+    # Loading an agent's openapi.json waits longer than a Try it call: it is
+    # usually the first request to a host that scales to zero when idle
+    # (Azure Container Apps cold starts measured at ~33s).
+    api_discovery_timeout_seconds: float = 45.0
     # API rate limits. One agent page costs roughly ten requests, so this is
     # per signed-in user, not per IP — behind a proxy every user shares one IP.
     api_rate_limit_per_minute: int = 300

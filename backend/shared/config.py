@@ -96,6 +96,10 @@ class Settings(BaseSettings):
     agent_gateway_base_url: str = ""
     try_it_timeout_seconds: float = 20.0
     try_it_calls_per_minute: int = 10
+    # Loading an agent's openapi.json waits longer than a Try it call: it is
+    # usually the first request to a host that scales to zero when idle
+    # (Azure Container Apps cold starts measured at ~33s).
+    api_discovery_timeout_seconds: float = 45.0
     # API rate limits. One agent page costs roughly ten requests, so this is
     # per signed-in user, not per IP — behind a proxy every user shares one IP.
     api_rate_limit_per_minute: int = 300

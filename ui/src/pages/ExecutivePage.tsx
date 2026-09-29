@@ -6,6 +6,7 @@ import {
 import BarChart from '../components/BarChart'
 import RiskPie from '../components/RiskPie'
 import RiskHeatmap from '../components/RiskHeatmap'
+import { fmtMoney } from './agent/shared'
 
 const STAGE_COLORS: Record<string, string> = {
   Ideation: '#6E7B8F',
@@ -31,12 +32,6 @@ const CATEGORY_COLORS: Record<string, string> = {
   FINANCIAL: '#3DDBD9',
   COMPLIANCE: '#6366f1',
   REPUTATIONAL: '#f472b6',
-}
-
-function fmtMoney(n: number): string {
-  if (Math.abs(n) >= 1000000) return '$' + (n / 1000000).toFixed(1) + 'M'
-  if (Math.abs(n) >= 1000) return '$' + Math.round(n / 1000) + 'K'
-  return '$' + Math.round(n)
 }
 
 export default function ExecutivePage() {

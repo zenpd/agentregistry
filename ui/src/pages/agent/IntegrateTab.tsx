@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, AlertTriangle, Pencil } from 'lucide-react'
-import { getMe, type ReuseStatus } from '../../services/api'
+import { Pencil } from 'lucide-react'
+import { getMe } from '../../services/api'
 import {
   decideAccess, getIntegration, requestAccess, updateContract,
   type AccessDecision, type AccessRequest, type AccessStatus, type Integration,
@@ -9,9 +9,6 @@ import {
 import TryItPanel from '../../components/TryItPanel'
 import { errorMessage, Loading, type TabProps } from './shared'
 
-const GATE_LABEL: Record<string, string> = {
-  arb: 'Architecture Review Board', security: 'Security Review', dp: 'Data Protection Review',
-}
 const ACCESS_PILL: Record<AccessStatus, string> = {
   pending: 'status-review', approved: 'status-complete', rejected: 'status-rejected', revoked: 'status-pending',
 }
@@ -56,37 +53,6 @@ function Chips({ items, empty, tone = 'gray' }: { items: string[]; empty: string
   return (
     <div className="flex flex-wrap gap-1.5">
       {items.map(i => <span key={i} className={`text-xs px-2 py-0.5 rounded ring-1 ${cls}`}>{i}</span>)}
-    </div>
-  )
-}
-
-export function ReuseBanner({ reuse }: { reuse: ReuseStatus }) {
-  if (reuse.certified) {
-    return (
-      <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3" data-testid="reuse-banner">
-        <CheckCircle2 size={18} className="text-emerald-600 mt-0.5 shrink-0" />
-        <div className="text-sm">
-          <div className="font-semibold text-emerald-800">Certified for reuse</div>
-          <div className="text-emerald-700 text-xs mt-0.5">
-            In Production, every governance gate approved, and no HIGH or CRITICAL risk open.
-            {reuse.withConditions.length > 0 && (
-              <> Approved with conditions: {reuse.withConditions.map(g => GATE_LABEL[g] || g).join(', ')}. Check
-              the Governance tab before relying on it.</>
-            )}
-          </div>
-        </div>
-      </div>
-    )
-  }
-  return (
-    <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3" data-testid="reuse-banner">
-      <AlertTriangle size={18} className="text-amber-600 mt-0.5 shrink-0" />
-      <div className="text-sm">
-        <div className="font-semibold text-amber-800">Not certified for reuse</div>
-        <ul className="text-amber-800 text-xs mt-1 list-disc pl-4 space-y-0.5">
-          {reuse.unmet.map((u, i) => <li key={i}>{u.message}</li>)}
-        </ul>
-      </div>
     </div>
   )
 }
@@ -321,7 +287,7 @@ function AccessSection({ agentId, data, deprecated, me, onChanged }: {
         </form>
       )}
       {!deprecated && !data.reuse.certified && (
-        <p className="text-xs text-amber-700">This agent is not certified for reuse yet (see above). You can still ask; the owner decides.</p>
+        <p className="text-xs text-amber-700">This agent is not certified for reuse yet — the checklist at the top of the page shows why. You can still ask; the owner decides.</p>
       )}
       {error && <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">{error}</div>}
       {data.accessRequests.length === 0
@@ -357,12 +323,10 @@ export default function IntegrateTab({ agent, agentId, onChanged }: TabProps) {
 
   return (
     <div className="space-y-4" data-testid="integrate-tab">
-      <ReuseBanner reuse={data.reuse} />
-
       <ContractSection agentId={agentId} data={data} onSaved={changed} />
 
       <Section title="Try it" hint="Call this agent with your own input before asking for access.">
-        <TryItPanel agentId={agentId} tryIt={data.tryIt} endpointAdvice={data.contract.endpointAdvice} />
+        <TryItPanel agentId={agentId} tryIt={data.tryIt} endpointAdvice={data.contract.endpointAdvice} onEndpointSaved={changed} />
       </Section>
 
       <AccessSection agentId={agentId} data={data} deprecated={agent.stage === 'Deprecated'} me={me} onChanged={changed} />

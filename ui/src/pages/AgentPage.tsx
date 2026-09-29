@@ -9,6 +9,7 @@ import TokenomicsTab from './agent/TokenomicsTab'
 import RevenueTab from './agent/RevenueTab'
 import RiskTab from './agent/RiskTab'
 import IntegrateTab from './agent/IntegrateTab'
+import ReuseChecklist from '../components/ReuseChecklist'
 
 const TABS = ['overview', 'diagram', 'governance', 'tokenomics', 'revenue', 'risk', 'integrate'] as const
 type Tab = typeof TABS[number]
@@ -70,6 +71,10 @@ export default function AgentPage() {
           </div>
           <span className={STAGE_PILL[agent.stage] || 'status-pending'}>{agent.stage}</span>
         </div>
+
+        {agent.reuse && agent.stage !== 'Deprecated' && (
+          <div className="mb-4"><ReuseChecklist reuse={agent.reuse} agentId={id} /></div>
+        )}
 
         <div className="flex gap-1 border-b border-gray-100 mb-4 overflow-x-auto" role="tablist">
           {TABS.map(t => (

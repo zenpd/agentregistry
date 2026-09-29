@@ -39,6 +39,7 @@ router = APIRouter(prefix="/api/v1", tags=["Agent Ops — Integrate"])
 ORG_ID = "org-default"
 MAX_REQUEST_BYTES = 32_000
 MAX_RESPONSE_BYTES = 64_000
+MAX_SPEC_BYTES = 2_000_000
 OPEN_STATUSES = ("pending", "approved")
 
 
@@ -65,6 +66,9 @@ class DecisionIn(BaseModel):
 class TryIn(BaseModel):
     method: Literal["POST", "GET"] = "POST"
     body: Any = None
+    # A path on the Try it target host (the -be sibling of a -fe web page,
+    # else the endpoint's own host). None calls the recorded endpoint.
+    path: Optional[str] = Field(None, max_length=reuse.MAX_PATH_CHARS)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -94,14 +98,17 @@ async def _user_label(db, user_id: str) -> str:
     return f"{user.name} <{user.email}>" if user else user_id
 
 
+_NO_TARGET = {"url": None, "base": None, "path": None, "backendDefault": False, "pathEditable": False}
+
+
 def _try_it_state(agent: Agent) -> dict:
     if agent.lifecycle_stage in reuse.NOT_REUSABLE_STAGES:
-        return {"available": False, "reason": "The agent is deprecated", "url": None}
+        return {"available": False, "reason": "The agent is deprecated", **_NO_TARGET}
     try:
-        url = reuse.resolve_try_url(agent.api_endpoint, get_settings().agent_gateway_base_url)
+        target = reuse.try_target(agent.api_endpoint, get_settings().agent_gateway_base_url)
     except reuse.TryItBlocked as exc:
-        return {"available": False, "reason": str(exc), "url": None}
-    return {"available": True, "reason": None, "url": url}
+        return {"available": False, "reason": str(exc), **_NO_TARGET}
+    return {"available": True, "reason": None, **target}
 
 
 def _audit(agent_id: str, actor: str, action: str, changes: dict) -> AuditLog:
@@ -264,14 +271,14 @@ def _http_client(timeout: float) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=timeout, follow_redirects=False)
 
 
-async def _read_capped(resp: httpx.Response) -> tuple[bytes, bool]:
-    """Stops reading at MAX_RESPONSE_BYTES, so a huge reply never sits in memory."""
+async def _read_capped(resp: httpx.Response, limit: int = MAX_RESPONSE_BYTES) -> tuple[bytes, bool]:
+    """Stops reading at limit bytes, so a huge reply never sits in memory."""
     chunks, size = [], 0
     async for chunk in resp.aiter_bytes():
         chunks.append(chunk)
         size += len(chunk)
-        if size > MAX_RESPONSE_BYTES:
-            return b"".join(chunks)[:MAX_RESPONSE_BYTES], True
+        if size > limit:
+            return b"".join(chunks)[:limit], True
     return b"".join(chunks), False
 
 
@@ -298,6 +305,14 @@ async def try_agent(agent_id: str, body: TryIn, user=Depends(require_update)):
     if not state["available"]:
         raise HTTPException(status_code=422, detail=state["reason"])
     url = state["url"]
+    if body.path is not None:
+        if not state["pathEditable"]:
+            raise HTTPException(status_code=422, detail="This agent is reached through the agent gateway, so only "
+                                                        "its registered endpoint can be called")
+        try:
+            url = reuse.join_try_path(state["base"], body.path)
+        except reuse.TryItBlocked as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
     payload = None if body.method == "GET" else json.dumps(body.body if body.body is not None else {})
     if payload is not None and len(payload.encode()) > MAX_REQUEST_BYTES:
         raise HTTPException(status_code=413, detail=f"Request body is over {MAX_REQUEST_BYTES // 1000} KB")
@@ -347,3 +362,54 @@ async def try_agent(agent_id: str, body: TryIn, user=Depends(require_update)):
             "ok": result.get("ok"), "error": result.get("error"), "latencyMs": result.get("latencyMs"),
         }))
     return result
+
+
+@router.get("/agents/{agent_id}/api-operations")
+async def api_operations(agent_id: str, user=Depends(require_update)):
+    """The GET and POST operations the Try it target host publishes in its
+    own /openapi.json, so a consumer picks a real API path instead of
+    guessing one. Same address checks and rate limit as Try it."""
+    settings = get_settings()
+    actor = user.get("user_id", "unknown")
+    async with get_db_session() as db:
+        agent = await _agent_or_404(db, agent_id)
+    state = _try_it_state(agent)
+    if not state["available"]:
+        raise HTTPException(status_code=422, detail=state["reason"])
+    if not state["pathEditable"]:
+        raise HTTPException(status_code=422, detail="This agent is reached through the agent gateway, so its "
+                                                    "operations cannot be listed from here")
+    if not _within_rate_limit(actor, agent_id, settings.try_it_calls_per_minute):
+        raise HTTPException(status_code=429, detail=f"At most {settings.try_it_calls_per_minute} Try it calls "
+                                                    "per minute per agent")
+    spec_url = reuse.join_try_path(state["base"], "/openapi.json")
+    parsed = urlparse(spec_url)
+    result: dict[str, Any] = {"base": state["base"], "specUrl": spec_url, "ok": False,
+                              "title": None, "operations": [], "truncated": False, "otherMethods": 0}
+    try:
+        reuse.check_addresses(await _resolve(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)),
+                              settings.app_env == "development")
+    except reuse.TryItBlocked as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except OSError as exc:
+        return {**result, "error": f"Could not resolve {parsed.hostname}: {exc.strerror or exc}"}
+    try:
+        async with _http_client(settings.api_discovery_timeout_seconds) as client:
+            async with client.stream("GET", spec_url, headers={"Accept": "application/json",
+                                                               "X-Registry-Try-It": "true"}) as resp:
+                raw, truncated = await _read_capped(resp, MAX_SPEC_BYTES)
+    except httpx.TimeoutException:
+        return {**result, "error": f"No response within {settings.api_discovery_timeout_seconds:g} seconds. "
+                                   "If the app scales to zero when idle, try again in a moment."}
+    except httpx.HTTPError as exc:
+        return {**result, "error": f"Could not reach {state['base']}: {type(exc).__name__}: {exc}"}
+    if not resp.is_success:
+        return {**result, "error": f"{spec_url} answered {resp.status_code}, so this host does not publish an "
+                                   "OpenAPI document there. Ask the owner for the API path."}
+    if truncated:
+        return {**result, "error": f"The OpenAPI document is over {MAX_SPEC_BYTES // 1_000_000} MB"}
+    try:
+        found = reuse.openapi_operations(json.loads(raw.decode("utf-8", errors="replace")))
+    except ValueError as exc:
+        return {**result, "error": f"{spec_url} is not an OpenAPI document ({exc})"}
+    return {**result, **found, "ok": True, "error": None}

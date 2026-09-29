@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Send, AlertTriangle } from 'lucide-react'
-import { tryAgent, type EndpointAdvice, type Integration, type TryItResult } from '../services/ops/integrate'
+import { Send, AlertTriangle, ListTree, Server } from 'lucide-react'
+import {
+  getApiOperations, tryAgent, updateContract,
+  type ApiOperations, type EndpointAdvice, type Integration, type TryItResult,
+} from '../services/ops/integrate'
 import { errorMessage } from '../pages/agent/shared'
 
 function pretty(body: unknown): string {
@@ -9,21 +12,22 @@ function pretty(body: unknown): string {
 }
 
 // What the response means, in the terms of "is this the right endpoint?".
-function explain(result: TryItResult, method: string): string | null {
+function explain(result: TryItResult, method: string, canPickPath: boolean): string | null {
   const html = (result.contentType || '').includes('text/html')
+  const pick = canPickPath ? ' Use “Load API operations” to pick a path the app really serves.' : ''
   if (result.status === 404) {
-    return html
-      ? 'Nothing is served at this path, and the host answers with a web page — this is probably the app\u2019s site, not its API.'
-      : 'The host answered, but nothing is served at this path. Check the path against the app\u2019s API list (its /openapi.json).'
+    return (html
+      ? 'Nothing is served at this path, and the host answers with a web page — this is probably the app’s site, not its API.'
+      : 'The host answered, but nothing is served at this path.') + pick
   }
   if (result.status === 405) {
-    return `The path exists but does not accept ${method}. Try the other method, or check the app\u2019s API list for the right one.`
+    return `The path exists but does not accept ${method}. Try the other method.` + pick
   }
   if (result.status === 401 || result.status === 403) {
     return 'The agent requires credentials. Request access below, then ask the owner how to authenticate.'
   }
   if (html && result.ok) {
-    return 'This returned a web page, not data — the address serves the app\u2019s UI rather than its API.'
+    return 'This returned a web page, not data — the address serves the app’s UI rather than its API.' + pick
   }
   if (result.status && result.status >= 500) {
     return 'The agent itself errored. The path looks right; the owner needs to look at their logs.'
@@ -31,25 +35,39 @@ function explain(result: TryItResult, method: string): string | null {
   return null
 }
 
+type Target = 'api' | 'recorded'
+
+// Paths that prove the host is up but are not what a consumer calls, so a
+// 200 from them is no reason to make them the contract endpoint.
+const PROBE_PATH = /^\/(api\/v\d+\/)?(health|healthz|ready|readyz|live|livez|ping|status|version|openapi\.json|docs)\/?$/i
+
 // Calls one registered agent's own endpoint through the registry server.
-export default function TryItPanel({ agentId, tryIt, endpointAdvice }: {
+// When the recorded endpoint is a -fe web page, the call goes to the paired
+// -be host by default (tryIt.backendDefault): a web page cannot answer an API
+// call, so defaulting to it only produces a 404 or a page of HTML.
+export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointSaved }: {
   agentId: string
   tryIt: Integration['tryIt']
-  // Same advice the Contract section shows in full, one level up — surfaced
-  // here too because this is where someone actually acts on it: without
-  // this, the only warning sits above the fold and a person can go straight
-  // to Send, wait out a call against a web page or a dead cold-started
-  // container, and never connect the failure to the warning they skipped.
+  // Same advice the Contract section shows in full, repeated here because
+  // this is where someone acts on it.
   endpointAdvice?: EndpointAdvice | null
+  // Set where the viewer may edit the contract (the Integrate tab): offers to
+  // save a path that just answered with data as the contract endpoint.
+  onEndpointSaved?: () => void
 }) {
   const example = JSON.stringify(tryIt.examplePayload, null, 2)
+  const [target, setTarget] = useState<Target>('api')
+  const [path, setPath] = useState(tryIt.path || '/')
   const [method, setMethod] = useState<'POST' | 'GET'>('POST')
   const [body, setBody] = useState(example)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<TryItResult | null>(null)
-  const isHtml = (result?.contentType || '').includes('text/html')
-  const hint = result ? explain(result, result.method) : null
+  const [ops, setOps] = useState<ApiOperations | null>(null)
+  const [opsBusy, setOpsBusy] = useState(false)
+  const [opsError, setOpsError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState<string | null>(null)
 
   // Keyed on content, so a reload of the same agent keeps what was typed.
   useEffect(() => {
@@ -58,12 +76,55 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice }: {
     setError(null)
   }, [agentId, example])
 
+  // A different agent, or a contract edit that moved the target, starts over.
+  // The API list belongs to the host, so it survives a path-only change such
+  // as saving a picked operation as the endpoint.
+  useEffect(() => {
+    setTarget('api')
+    setPath(tryIt.path || '/')
+  }, [agentId, tryIt.base, tryIt.path])
+  useEffect(() => {
+    setOps(null)
+    setOpsError(null)
+  }, [agentId, tryIt.base])
+
   if (!tryIt.available) {
     return (
       <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600" data-testid="try-it-unavailable">
         <span className="font-medium text-gray-700">Try it is not available for this agent.</span> {tryIt.reason}
       </div>
     )
+  }
+
+  const onApi = tryIt.pathEditable && target === 'api'
+  const isHtml = (result?.contentType || '').includes('text/html')
+  const hint = result ? explain(result, result.method, tryIt.pathEditable) : null
+  // A path that just answered with data, and is not what the contract says yet.
+  const savable = !!onEndpointSaved && !!result?.ok && !isHtml && result.url !== tryIt.url && onApi
+    && !PROBE_PATH.test(new URL(result.url).pathname)
+
+  async function loadOperations() {
+    setOpsBusy(true)
+    setOpsError(null)
+    try {
+      const res = (await getApiOperations(agentId)).data
+      setOps(res)
+      if (!res.ok) setOpsError(res.error || 'Could not read the API list')
+    } catch (e) {
+      setOpsError(errorMessage(e, 'Could not read the API list'))
+    } finally {
+      setOpsBusy(false)
+    }
+  }
+
+  function pickOperation(key: string) {
+    const op = ops?.operations.find(o => `${o.method} ${o.path}` === key)
+    if (!op) return
+    setMethod(op.method)
+    setPath(op.path)
+    if (op.method === 'POST' && op.exampleBody != null) setBody(JSON.stringify(op.exampleBody, null, 2))
+    setResult(null)
+    setError(null)
   }
 
   async function send() {
@@ -78,8 +139,9 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice }: {
     }
     setBusy(true)
     setError(null)
+    setSaved(null)
     try {
-      setResult((await tryAgent(agentId, method, parsed)).data)
+      setResult((await tryAgent(agentId, method, parsed, onApi ? path : undefined)).data)
     } catch (e) {
       setResult(null)
       setError(errorMessage(e, 'The call could not be made'))
@@ -88,9 +150,49 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice }: {
     }
   }
 
+  async function saveEndpoint() {
+    if (!result) return
+    setSaving(true)
+    setError(null)
+    try {
+      await updateContract(agentId, { api_endpoint: result.url })
+      setSaved(result.url)
+      onEndpointSaved?.()
+    } catch (e) {
+      setError(errorMessage(e, 'Could not save the endpoint'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const templated = onApi && path.includes('{')
+
   return (
     <div className="space-y-3" data-testid="try-it">
-      {endpointAdvice && (
+      {tryIt.backendDefault && endpointAdvice?.suggestedBase ? (
+        <div className="flex gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900" data-testid="try-it-backend-default">
+          <Server size={14} className="shrink-0 mt-0.5 text-sky-600" />
+          <span className="flex-1">
+            {target === 'api' ? (
+              <>
+                <span className="font-medium">Calling the backend host by default.</span> The recorded endpoint is the
+                app’s web page, so calls go to <code className="font-mono">{endpointAdvice.suggestedBase}</code> instead.
+                Load its API operations to pick a real path.{' '}
+                <button type="button" className="underline hover:no-underline" onClick={() => { setTarget('recorded'); setResult(null) }}>
+                  Call the recorded page instead
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="font-medium">Calling the recorded endpoint,</span> the app’s web page — expect HTML, not data.{' '}
+                <button type="button" className="underline hover:no-underline" onClick={() => { setTarget('api'); setResult(null) }}>
+                  Back to the backend host
+                </button>
+              </>
+            )}
+          </span>
+        </div>
+      ) : endpointAdvice && (
         <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="try-it-endpoint-advice">
           <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-600" />
           <span>
@@ -102,13 +204,60 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice }: {
           </span>
         </div>
       )}
+
+      {onApi && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <button type="button" onClick={loadOperations} disabled={opsBusy} className="btn-secondary btn-sm flex items-center gap-1.5" data-testid="load-operations">
+            <ListTree size={14} /> {opsBusy ? 'Reading openapi.json…' : ops?.ok ? 'Reload API operations' : 'Load API operations'}
+          </button>
+          {opsBusy && <span className="text-gray-400">An app that scales to zero can take ~30 s to wake up.</span>}
+          {ops?.ok && ops.operations.length > 0 && (
+            <select
+              className="input w-auto flex-1 min-w-[240px] py-1.5 font-mono text-xs"
+              value={ops.operations.some(o => o.method === method && o.path === path) ? `${method} ${path}` : ''}
+              onChange={e => pickOperation(e.target.value)}
+              aria-label="API operation"
+              data-testid="operation-picker"
+            >
+              <option value="">Pick one of {ops.operations.length} operations{ops.title ? ` from ${ops.title}` : ''}…</option>
+              {ops.operations.map(o => (
+                <option key={`${o.method} ${o.path}`} value={`${o.method} ${o.path}`}>
+                  {o.method.padEnd(4)} {o.path}{o.summary ? ` — ${o.summary}` : ''}
+                </option>
+              ))}
+            </select>
+          )}
+          {ops?.ok && ops.operations.length === 0 && <span className="text-gray-500">The API list has no GET or POST operations.</span>}
+          {ops?.ok && ops.otherMethods > 0 && (
+            <span className="w-full text-gray-400">{ops.otherMethods} PUT/PATCH/DELETE operation{ops.otherMethods === 1 ? '' : 's'} not listed — Try it sends GET and POST only.</span>
+          )}
+        </div>
+      )}
+      {opsError && <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800" data-testid="operations-error">{opsError}</div>}
+
       <div className="flex items-center gap-2 text-xs">
         <select className="input w-auto py-1.5" value={method} onChange={e => setMethod(e.target.value as 'POST' | 'GET')} aria-label="HTTP method">
           <option value="POST">POST</option>
           <option value="GET">GET</option>
         </select>
-        <code className="flex-1 truncate rounded-lg bg-gray-50 px-3 py-2 font-mono text-gray-700" title={tryIt.url || ''}>{tryIt.url}</code>
+        {onApi ? (
+          <div className="flex flex-1 min-w-0 items-center rounded-lg bg-gray-50 ring-1 ring-gray-200 focus-within:ring-teal-400">
+            <code className="shrink-0 max-w-[45%] truncate pl-3 font-mono text-gray-500" title={tryIt.base || ''}>{tryIt.base}</code>
+            <input
+              className="flex-1 min-w-0 bg-transparent px-1 py-2 font-mono text-gray-800 outline-none"
+              value={path}
+              onChange={e => setPath(e.target.value)}
+              aria-label="Path"
+              placeholder="/api/…"
+              spellCheck={false}
+              data-testid="try-it-path"
+            />
+          </div>
+        ) : (
+          <code className="flex-1 truncate rounded-lg bg-gray-50 px-3 py-2 font-mono text-gray-700" title={tryIt.url || ''}>{tryIt.url}</code>
+        )}
       </div>
+      {templated && <p className="text-xs text-amber-700">Replace the {'{…}'} part of the path with a real value before sending.</p>}
 
       {method === 'POST' && (
         <textarea
@@ -142,12 +291,24 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice }: {
               : <span className="status-failed">No response</span>}
             {result.latencyMs != null && <span className="text-gray-500">{result.latencyMs} ms</span>}
             {result.contentType && <span className="text-gray-400 truncate">{result.contentType}</span>}
+            <span className="ml-auto font-mono text-gray-400 truncate max-w-full" title={result.url}>{result.url}</span>
           </div>
           {result.error && <div className="px-3 py-2 text-xs text-rose-700">{result.error}</div>}
           {result.location && (
             <div className="px-3 py-2 text-xs text-amber-700">Redirect to {result.location} was not followed.</div>
           )}
           {hint && <div className="px-3 py-2 text-xs text-amber-800 bg-amber-50 border-t border-amber-100">{hint}</div>}
+          {savable && saved !== result.url && (
+            <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs bg-emerald-50 border-t border-emerald-100 text-emerald-900" data-testid="save-endpoint">
+              <span className="flex-1">This path answered with data. Make it the contract endpoint, so consumers call it instead of the web page?</span>
+              <button type="button" className="btn-success btn-sm" onClick={saveEndpoint} disabled={saving}>
+                {saving ? 'Saving…' : 'Save as contract endpoint'}
+              </button>
+            </div>
+          )}
+          {saved === result.url && (
+            <div className="px-3 py-2 text-xs bg-emerald-50 border-t border-emerald-100 text-emerald-800">Saved. The contract endpoint is now {saved}.</div>
+          )}
           {result.body != null && pretty(result.body) !== '' && (
             isHtml ? (
               <details className="px-3 py-2 text-xs text-gray-600">

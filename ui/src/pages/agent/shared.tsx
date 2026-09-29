@@ -69,6 +69,13 @@ export function fmtDollars(n: number | null | undefined): string {
   return '$' + n.toFixed(2)
 }
 
+// Whole-dollar business value: $950, $42K, $1.3M.
+export function fmtMoney(n: number): string {
+  if (Math.abs(n) >= 1000000) return '$' + (n / 1000000).toFixed(1) + 'M'
+  if (Math.abs(n) >= 1000) return '$' + Math.round(n / 1000) + 'K'
+  return '$' + Math.round(n)
+}
+
 export function fmtNumber(n: number | null | undefined): string {
   if (n == null) return '—'
   return n.toLocaleString()

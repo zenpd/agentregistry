@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { getAgents, type RegistryAgent } from '../services/api'
 import { getIntegration, type Integration } from '../services/ops/integrate'
 import TryItPanel from '../components/TryItPanel'
-import { ReuseBanner } from './agent/IntegrateTab'
+import ReuseChecklist from '../components/ReuseChecklist'
 import { errorMessage } from './agent/shared'
 
 export default function PlaygroundPage() {
@@ -55,7 +55,7 @@ export default function PlaygroundPage() {
 
         {selected && integration && (
           <>
-            <ReuseBanner reuse={integration.reuse} />
+            <ReuseChecklist reuse={integration.reuse} agentId={selected} />
             <TryItPanel agentId={selected} tryIt={integration.tryIt} endpointAdvice={integration.contract.endpointAdvice} />
             <div className="text-xs text-gray-500">
               Contract, access requests and consumers are on the agent’s{' '}

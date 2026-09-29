@@ -291,11 +291,12 @@ async def list_agents(
         if not certified:
             certs = await reuse_repo.certifications(db, page_agents)
         costs = await reuse_repo.cost_per_call(db, [a.id for a in page_agents])
+        dept_names = dict((await db.execute(select(Department.id, Department.name))).all())
 
         return {
             "data": [
                 {
-                    **_agent_to_dict(a),
+                    **_agent_to_dict(a, dept_name=dept_names.get(a.dept_id)),
                     "reuse": certs[a.id],
                     "card": {**costs[a.id], "consumerCount": len(a.consumers or [])},
                     "matchedTerms": matches[a.id]["matched"] if a.id in matches else [],
@@ -374,7 +375,10 @@ async def get_agent(agent_id: str, _=Depends(require_read)):
         if agent.dept_id:
             dept = await db.get(Department, agent.dept_id)
             dept_name = dept.name if dept else None
-        return _agent_to_dict(agent, dept_name=dept_name)
+        # Reuse status rides along so the agent page can show the full
+        # certification checklist above every tab, not only on Integrate.
+        reuse_status = (await reuse_repo.certifications(db, [agent]))[agent.id]
+        return {**_agent_to_dict(agent, dept_name=dept_name), "reuse": reuse_status}
 
 
 @agents_router.post("/")

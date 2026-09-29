@@ -1,13 +1,16 @@
 import { NavLink } from 'react-router-dom'
-import { Sparkles, Settings, Bot, ShieldCheck, LayoutGrid, Cpu, GitBranch } from 'lucide-react'
+import { Sparkles, Settings, Bot, ShieldCheck, LayoutGrid, Cpu, GitBranch, Briefcase } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 // Trimmed to what's still distinct now that agent-level detail (diagram,
-// governance, risk, economics) lives on each agent's own page: Business,
-// Tokenomics, Security and Dashboard were folded into the Executive
-// dashboard's KPIs / revenue-vs-expenditure / risk pie+heatmap sections.
+// governance, risk, economics) lives on each agent's own page: Tokenomics,
+// Security and Dashboard were folded into the Executive dashboard's KPIs /
+// revenue-vs-expenditure / risk pie+heatmap sections. Business Impact stays
+// its own page: it answers a BU owner's question (my unit's agents and
+// outcomes), not the portfolio-wide one Executive answers.
 const NAV = [
   { to: '/', label: 'Executive', icon: LayoutGrid },
+  { to: '/business', label: 'Business Impact', icon: Briefcase },
   { to: '/agents', label: 'AI Registry', icon: Bot },
   { to: '/governance', label: 'Governance', icon: ShieldCheck },
   { to: '/platform', label: 'Platform', icon: Cpu },

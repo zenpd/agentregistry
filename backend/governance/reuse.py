@@ -189,6 +189,58 @@ _ENDPOINT_GAP = {
 }
 
 
+# A recorded endpoint can be a valid URL and still be the wrong thing: the
+# app's web page, or its tracing backend. Advisory only — an app really can
+# serve its API from /analytics, so this warns and says where to look
+# instead of refusing the value.
+_UI_PATHS = frozenset({
+    "", "dashboard", "analytics", "home", "login", "ui", "app", "portal", "console",
+    "index", "index.html", "reports", "report", "admin", "overview",
+})
+_FRONTEND_HOST_MARKERS = ("-fe.", "-frontend", "frontend.", "-ui.", "www.")
+# A generic-looking path (/analytics, /overview, ...) is only weak evidence —
+# a real backend can legitimately serve one. Skip the advice when the host
+# itself already says backend, so a real -be host isn't told to become one.
+_BACKEND_HOST_MARKERS = ("-be.", "-backend", "backend.", "-api.")
+_FIND_THE_API = [
+    "Open the app's backend OpenAPI: the same host with -be instead of -fe, then /openapi.json (or /docs in a browser).",
+    "Or open the app, press F12 → Network, do the action, and copy the /api/… request it makes.",
+    "Or ask the owner — that is what the owner contact field is for.",
+]
+
+
+def endpoint_advice(endpoint: str | None) -> dict | None:
+    """{looksLike, message, where} when the recorded endpoint looks like
+    something other than the agent's own API, else None."""
+    value = (endpoint or "").strip()
+    kind = endpoint_kind(value)
+    if kind == "observability":
+        return {
+            "looksLike": "tracing",
+            "message": "This is a tracing/observability URL (Phoenix), not the agent's own API. "
+                       "Tracing belongs in the Phoenix project field instead.",
+            "where": _FIND_THE_API,
+        }
+    if kind != "app":
+        return None
+    parsed = urlparse(value if not value.startswith("/") else f"https://placeholder{value}")
+    host = (parsed.hostname or "").lower()
+    path = (parsed.path or "").strip("/").lower()
+    if path.startswith("api") or "/api/" in value.lower():
+        return None
+    first_segment = path.split("/")[0]
+    looks_like_frontend_host = any(marker in host for marker in _FRONTEND_HOST_MARKERS)
+    looks_like_backend_host = any(marker in host for marker in _BACKEND_HOST_MARKERS)
+    if looks_like_frontend_host or (first_segment in _UI_PATHS and not looks_like_backend_host):
+        return {
+            "looksLike": "frontend",
+            "message": "This looks like the app's web page, not its API — a team calling it would get HTML back. "
+                       "The API is usually the same host under /api/….",
+            "where": _FIND_THE_API,
+        }
+    return None
+
+
 def contract_gaps(agent: Mapping[str, Any]) -> list[str]:
     """What a consuming team would still have to ask the owner for."""
     gaps = []

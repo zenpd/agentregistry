@@ -26,6 +26,9 @@ export const CAT_COLORS: Record<string, string> = {
   sys: '#3DDBD9',
   db: '#F0A85A',
   kb: '#57C785',
+  // An agent id referenced by another agent's "calls" list that isn't
+  // itself registered — a shadow-AI candidate, same meaning as elsewhere.
+  external: '#6b7280',
   // Lineage-diagram node kinds (AgentPage's Diagram tab, reconstructed from
   // real Phoenix traces via discovery/observed_deps.classify_span — the
   // same resolver the declared-vs-observed comparison on that tab uses).

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime
+from typing import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,28 +31,49 @@ def _day(bucket: datetime | date) -> date:
     return bucket.date() if isinstance(bucket, datetime) else bucket
 
 
+def _row_dict(u: AgentTokenUsage) -> dict:
+    return {
+        "day": _day(u.bucket),
+        "model": u.model_name,
+        "input_tokens": u.input_tokens or 0,
+        "output_tokens": u.output_tokens or 0,
+        "cached_tokens": u.cached_tokens or 0,
+        "calls": u.invocation_count or 0,
+        "runs": u.run_count or 0,
+        "errors": u.error_count or 0,
+        "latency_avg_ms": u.latency_avg_ms,
+        "source": u.source or "seed",
+        "ingested_at": u.ingested_at,
+    }
+
+
 async def load_usage_rows(db: AsyncSession, agent_id: str, since: date | None = None) -> list[dict]:
     query = select(AgentTokenUsage).where(AgentTokenUsage.agent_id == agent_id)
     result = await db.execute(query)
     rows = []
     for u in result.scalars().all():
-        day = _day(u.bucket)
-        if since and day < since:
+        if since and _day(u.bucket) < since:
             continue
-        rows.append({
-            "day": day,
-            "model": u.model_name,
-            "input_tokens": u.input_tokens or 0,
-            "output_tokens": u.output_tokens or 0,
-            "cached_tokens": u.cached_tokens or 0,
-            "calls": u.invocation_count or 0,
-            "runs": u.run_count or 0,
-            "errors": u.error_count or 0,
-            "latency_avg_ms": u.latency_avg_ms,
-            "source": u.source or "seed",
-            "ingested_at": u.ingested_at,
-        })
+        rows.append(_row_dict(u))
     return rows
+
+
+async def load_usage_rows_bulk(db: AsyncSession, agent_ids: Sequence[str],
+                               since: date | None = None) -> dict[str, list[dict]]:
+    """Like load_usage_rows, but one query for every agent instead of one
+    query per agent — for callers that need several agents' usage at once
+    (e.g. a registry-card cost-per-call figure for a whole page of agents),
+    where a per-agent loop would otherwise be an N+1 query."""
+    ids = list(dict.fromkeys(agent_ids))
+    if not ids:
+        return {}
+    query = select(AgentTokenUsage).where(AgentTokenUsage.agent_id.in_(ids))
+    if since:
+        query = query.where(AgentTokenUsage.bucket >= since)
+    out: dict[str, list[dict]] = defaultdict(list)
+    for u in (await db.execute(query)).scalars().all():
+        out[u.agent_id].append(_row_dict(u))
+    return out
 
 
 async def priced_usage(db: AsyncSession, agent_id: str, since: date | None = None) -> dict:

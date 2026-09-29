@@ -66,6 +66,9 @@ export interface Agent {
   ownerContact?: string
   stage: string
   dept?: string
+  // Resolved department name (e.g. "Finance"), set only by GET /agents/{id};
+  // falls back to the raw dept id below when unset (list rows, older callers).
+  deptName?: string | null
   version?: string
   valueAmount: number
   valueType?: string
@@ -111,7 +114,8 @@ export interface ReuseStatus {
 export interface RegistryCard {
   costPerCallCents: number | null
   source: 'phoenix' | 'seed' | 'none'
-  partialPricing: boolean
+  // 'missing': nothing the agent ran on has a price, so cost is unknown.
+  pricing: 'ok' | 'partial' | 'missing'
   consumerCount: number
 }
 
@@ -571,7 +575,9 @@ export interface GraphNodeV2 {
     model_name?: string
     value_amount?: number
     hours_saved_monthly?: number
-    token_cost?: number
+    // null: no priced usage in the last 30 days (unpriced model, or none at
+    // all) — distinct from a real $0, which never happens for this field.
+    token_cost?: number | null
     at_risk?: boolean
     risk_level?: string
     worst_gate?: string

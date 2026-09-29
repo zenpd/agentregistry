@@ -71,12 +71,13 @@ async def client(db):
     from api.auth import require_create, require_delete, require_read, require_update
     from api.routers.ops import integrate
     from api.routers.ops.risk import router as risk_router
+    from api.routers.ops.tokenomics import router as tokenomics_router
     from api.routers.registry import agents_router
 
     integrate._recent_calls.clear()
     user.update(user_id="u1")
     app = FastAPI()
-    for r in (integrate.router, risk_router, agents_router):
+    for r in (integrate.router, risk_router, tokenomics_router, agents_router):
         app.include_router(r)
     for dep in (require_read, require_update, require_create, require_delete):
         app.dependency_overrides[dep] = lambda: dict(user)
@@ -258,6 +259,60 @@ async def test_deleting_an_agent_removes_its_access_requests(client, db):
         assert (await s.execute(select(AgentAccessRequest))).scalars().all() == []
 
 
+@pytest.mark.asyncio
+async def test_cost_is_reported_unknown_not_zero_when_no_model_price_exists(client, db):
+    """An agent whose traces ran on a model with no price has an unknown
+    cost, not a $0 one. A false zero would make it look like the cheapest
+    agent in the portfolio."""
+    from db.models import AgentTokenUsage
+
+    async with db() as s:
+        s.add(AgentTokenUsage(agent_id="dev", bucket=datetime.now(timezone.utc), model_name="fixture-model",
+                              invocation_count=100, input_tokens=5000, output_tokens=1000, source="phoenix"))
+    card = next(a for a in (await client.get("/api/v1/agents/?limit=100")).json()["data"]
+                if a["id"] == "dev")["card"]
+    assert card["pricing"] == "missing" and card["costPerCallCents"] is None
+
+    tokenomics = (await client.get("/api/v1/agents/dev/tokenomics?days=30")).json()
+    assert tokenomics["totals"]["calls"] == 100, "the calls themselves are still counted"
+    assert tokenomics["unpricedModels"] == ["fixture-model"]
+    assert tokenomics["totals"]["costCents"] is None
+    assert tokenomics["costPerCallCents"] is None
+    assert tokenomics["budget"]["monthToDateCents"] is None
+    assert tokenomics["projectedPeriodEndCents"] is None
+
+
+@pytest.mark.asyncio
+async def test_portfolio_risk_ignores_findings_whose_agent_is_gone(client, db):
+    """A finding left behind by a deleted agent appears on no Risk tab, so
+    counting it in the portfolio makes the total disagree with the sum of
+    its parts."""
+    from db.models import CostAnomaly
+
+    async with db() as s:
+        s.add(CostAnomaly(id="C-ORPHAN", agent_id="deleted-long-ago", anomaly_type="undeclared_model",
+                          severity="LOW", details={}))
+    listing = (await client.get("/api/v1/agents/?limit=100")).json()["data"]
+    per_agent = 0
+    for a in listing:
+        per_agent += (await client.get(f"/api/v1/agents/{a['id']}/risks")).json()["score"]["total"]
+    portfolio = (await client.get("/api/v1/governance/risks/summary")).json()
+    assert portfolio["totalFindings"] == per_agent
+
+
+@pytest.mark.asyncio
+async def test_no_calls_in_the_window_costs_zero_not_unknown(client, db):
+    """No calls really did cost nothing — that is a $0, not an unknown."""
+    from db.models import AgentTokenUsage
+
+    async with db() as s:
+        s.add(AgentTokenUsage(agent_id="relative", bucket=datetime.now(timezone.utc) - timedelta(days=120),
+                              model_name="fixture-model", invocation_count=5, source="phoenix"))
+    tokenomics = (await client.get("/api/v1/agents/relative/tokenomics?days=30")).json()
+    assert tokenomics["totals"]["calls"] == 0
+    assert tokenomics["totals"]["costCents"] == 0
+
+
 # ── Edit and delete from the registry tiles ──────────────────────────────────
 
 @pytest.mark.asyncio
@@ -306,6 +361,25 @@ async def test_delete_removes_everything_the_agent_owned(client, db):
         assert audit.entity_id == "risky"
     # Everything its Risk tab showed leaves the portfolio with it.
     assert (await client.get("/api/v1/governance/risks/summary")).json()["totalFindings"] == before - own
+
+
+@pytest.mark.asyncio
+async def test_portfolio_ignores_findings_whose_agent_is_gone(client, db):
+    """A finding left behind by an agent that no longer exists must not count.
+    The delete path cleans these up, but a row that survives one anyway (an
+    older delete, a restore, a direct write) would otherwise make the portfolio
+    total disagree with the sum of the per-agent Risk tabs, which no longer
+    have anywhere to show it."""
+    from db.models import AgentRisk
+
+    before = (await client.get("/api/v1/governance/risks/summary")).json()["totalFindings"]
+    async with db() as s:
+        s.add(AgentRisk(
+            id="orphan-risk", agent_id="an-agent-that-was-deleted", category="COMPLIANCE", severity="HIGH",
+            title="Left behind", description="Its agent is gone.", source="auto", status="open",
+        ))
+    after = (await client.get("/api/v1/governance/risks/summary")).json()["totalFindings"]
+    assert after == before, "an orphaned finding must not inflate the portfolio total"
 
 
 # ── Try it ───────────────────────────────────────────────────────────────────

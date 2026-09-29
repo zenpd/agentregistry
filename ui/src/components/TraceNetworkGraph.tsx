@@ -55,6 +55,10 @@ const EDGE_COLOR_BY_TARGET: Record<string, string> = {
   mcp_server: '#a21caf', // EDGE_COLORS.USES_MCP
   retriever: '#15803d',  // EDGE_COLORS.USES_KB
   guardrail: '#e11d48',
+  // A call into an unregistered agent is still a call, so it keeps the violet
+  // CALLS hue rather than falling through to the unclassified fallback — the
+  // node at the end of it is what marks it as a shadow-AI candidate.
+  external: '#7c3aed',
 }
 const EDGE_FALLBACK_COLOR = '#475569'
 
@@ -82,6 +86,10 @@ const LINEAGE_STYLE: Record<string, { bg: string; border: string; font: string; 
   // Dependencies page uses for systems and databases.
   retriever: { bg: '#dcfce7', border: '#15803d', font: '#14532d', shape: 'database' },
   guardrail: { bg: '#ffe4e6', border: '#e11d48', font: '#881337', shape: 'box' },
+  // An agent id another agent's declared "calls" list references that isn't
+  // itself registered — same muted, unfilled look the Dependencies page uses
+  // for the same idea (a shadow-AI candidate, not a confirmed agent).
+  external: { bg: '#f8f7ff', border: '#c4b5fd', font: '#6d28d9', shape: 'circle' },
 }
 const DEFAULT_STYLE = { bg: '#f1f5f9', border: '#475569', font: '#334155', shape: 'box' }
 
@@ -113,25 +121,53 @@ export default function TraceNetworkGraph({ nodes, edges, height = 440, selected
   // every non-hub node to nearly the same tiny dot.
   const maxSqrt = useMemo(() => Math.sqrt(Math.max(1, ...nodes.map(n => n.count))), [nodes])
 
+  // When every node carries the same count there is no busier-vs-quieter
+  // signal to draw — which is the normal case for a caller plotting declared
+  // relationships rather than measured traffic (PlatformView). Weighting them
+  // all at 1.0 would then size every node at the TOP of the scale and pack the
+  // canvas; a neutral mid-scale says "no volume signal here" honestly.
+  const uniformCounts = useMemo(() => {
+    if (nodes.length < 2) return false
+    const counts = nodes.map(n => Math.max(1, n.count))
+    return Math.min(...counts) === Math.max(...counts)
+  }, [nodes])
+
   const built = useMemo(() => {
     const ds = new DataSet<any>()
     for (const n of nodes) {
-      // These shapes size themselves to their label, so `size` is ignored.
-      // Call volume comes through as padding AND type size: padding alone gets
-      // swamped by name length, which would leave a one-off step with a long
-      // name looking busier than the hub everything routes through.
-      const weight = Math.sqrt(Math.max(1, n.count)) / maxSqrt
+      // circle/ellipse/box/database (the shapes here — see styleFor) size
+      // themselves to fit their label, so a plain `size` option is ignored;
+      // margin/font below are the only volume-driven levers vis-network
+      // exposes. Margin and font alone weren't enough: a label's raw
+      // character count swamped them (a one-off step with a 20-char name
+      // rendered bigger than a 290-call hub with a short one, the opposite
+      // of what the legend promises). widthConstraint.maximum caps how much
+      // a long label can widen the shape — vis-network wraps it (even
+      // mid-word) instead — and heightConstraint.minimum gives a busy node
+      // a real floor independent of its name, so volume dominates instead
+      // of just nudging the outcome. vis-network's own Database.resize()
+      // (retriever's shape) is the one exception: it squares itself off from
+      // dimensions.width alone and never reads dimensions.height, so
+      // heightConstraint.minimum is silently a no-op there — the floor has
+      // to go on width's own minimum instead for that shape to respond to it.
+      const weight = uniformCounts ? 0.5 : Math.sqrt(Math.max(1, n.count)) / maxSqrt
       const margin = 5 + Math.round(weight * 13)
       const fontSize = 11 + Math.round(weight * 8)
+      const heightFloor = 20 + Math.round(weight * 95)
       const rate = n.count > 0 ? n.errorCount / n.count : 0
       const style = styleFor(n.kind)
       const border = borderFor(n)
+      const widthConstraint = style.shape === 'database'
+        ? { minimum: heightFloor, maximum: Math.max(58, heightFloor) }
+        : { maximum: 58 }
       ds.add({
         id: n.id,
         kind: n.kind,
         label: n.name.length > 22 ? n.name.slice(0, 21) + '…' : n.name,
         shape: style.shape,
         margin: { top: margin, bottom: margin, left: margin + 2, right: margin + 2 },
+        widthConstraint,
+        heightConstraint: { minimum: heightFloor },
         color: { background: style.bg, border, highlight: { background: style.bg, border } },
         borderWidth: n.errorCount > 0 && n.count >= ERROR_MIN_CALLS ? 4 : 2,
         font: { color: style.font, size: fontSize, strokeWidth: 0 },
@@ -167,7 +203,7 @@ export default function TraceNetworkGraph({ nodes, edges, height = 440, selected
       })
     }
     return { nodes: ds, edges: eds }
-  }, [nodes, edges, maxSqrt])
+  }, [nodes, edges, maxSqrt, uniformCounts])
 
   useEffect(() => {
     if (!containerRef.current) return

@@ -18,9 +18,18 @@ export interface AccessRequest {
   createdAt: string | null
 }
 
+// Set when the recorded endpoint looks like a web page or a tracing URL
+// rather than the agent's own API; `where` says how to find the real one.
+export interface EndpointAdvice {
+  looksLike: 'frontend' | 'tracing'
+  message: string
+  where: string[]
+}
+
 export interface Contract {
   apiEndpoint: string | null
   endpointKind: 'missing' | 'observability' | 'app' | 'invalid'
+  endpointAdvice: EndpointAdvice | null
   capabilities: string[]
   inputs: string[]
   outputs: string[]

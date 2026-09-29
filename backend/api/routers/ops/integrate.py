@@ -126,6 +126,7 @@ async def integration(agent_id: str, _=Depends(require_read)):
         "agentId": agent.id,
         "contract": {
             "apiEndpoint": agent.api_endpoint, "endpointKind": endpoint_kind(agent.api_endpoint),
+            "endpointAdvice": reuse.endpoint_advice(agent.api_endpoint),
             "capabilities": agent.capabilities or [], "inputs": agent.inputs or [], "outputs": agent.outputs or [],
             "sla": agent.sla, "rateLimit": agent.rate_limit,
             "owner": agent.owner, "ownerContact": agent.owner_contact,
@@ -325,7 +326,11 @@ async def try_agent(agent_id: str, body: TryIn, user=Depends(require_update)):
                 async with client.stream(body.method, url, content=payload, headers=headers) as resp:
                     raw, truncated = await _read_capped(resp)
         except httpx.TimeoutException:
-            result.update(ok=False, error=f"No response within {settings.try_it_timeout_seconds:g} seconds")
+            result.update(ok=False, error=(
+                f"No response within {settings.try_it_timeout_seconds:g} seconds. If this app scales to zero "
+                "when idle (e.g. Azure Container Apps), the first call after idle can be slower than this — "
+                "try Send again."
+            ))
         except httpx.HTTPError as exc:
             result.update(ok=False, error=f"Could not reach the endpoint: {type(exc).__name__}: {exc}")
         else:

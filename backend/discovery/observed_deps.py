@@ -239,10 +239,16 @@ def classify_span(
     the span is LangGraph/OTel routing or bookkeeping plumbing (a supervisor
     dispatch step, a checkpoint/interrupt marker, the graph's own root run)
     that carries no information of its own — the caller folds it through to
-    its nearest resolved ancestor instead of dropping the edge. Shared by
-    the trace-reconstructed graph (``discovery/reconstruct.py``) and the
-    declared-vs-observed comparison above, so the two views of one agent's
-    dependencies can never disagree with each other.
+    its nearest resolved ancestor instead of dropping the edge. Used by the
+    trace-reconstructed graph (``discovery/reconstruct.py``), so a step's
+    *kind* (agent vs plain workflow step) there always agrees with
+    ``observed_from_spans`` above — but the two do not share a *count*: this
+    function folds a CHAIN span into the same node as its AGENT twin (see
+    module docstring on ``reconstruct.py``), so a step with both emits two
+    increments there, while ``observed_from_spans`` only ever counts the
+    AGENT-kind span. A step's occurrence count can legitimately differ
+    between the trace graph and the declared-vs-observed comparison for
+    that reason — only the kind classification is guaranteed to match.
 
     ``agent_names`` comes from :func:`agent_name_index` over the same sample.
     Without it a CHAIN span can only be reported as a ``step``, since the

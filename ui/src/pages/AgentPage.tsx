@@ -66,7 +66,7 @@ export default function AgentPage() {
         <div className="flex justify-between items-start mb-3">
           <div>
             <h1 className="text-xl font-bold text-gray-900">{agent.name}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{agent.aiType} · {agent.dept || 'No department'} · {agent.owner || 'No owner'}</p>
+            <p className="text-sm text-gray-500 mt-0.5">{agent.aiType} · {agent.deptName || agent.dept || 'No department'} · {agent.owner || 'No owner'}</p>
           </div>
           <span className={STAGE_PILL[agent.stage] || 'status-pending'}>{agent.stage}</span>
         </div>

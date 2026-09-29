@@ -27,6 +27,7 @@ from api.auth import (
 )
 from governance import reuse
 from services import reuse_repo
+from services.usage_repo import priced_usage
 from shared.config import get_settings
 
 # Tables that reference an agent without an ORM cascade.
@@ -369,7 +370,11 @@ async def get_agent(agent_id: str, _=Depends(require_read)):
         agent = result.scalar_one_or_none()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-        return _agent_to_dict(agent)
+        dept_name = None
+        if agent.dept_id:
+            dept = await db.get(Department, agent.dept_id)
+            dept_name = dept.name if dept else None
+        return _agent_to_dict(agent, dept_name=dept_name)
 
 
 @agents_router.post("/")
@@ -717,20 +722,23 @@ async def portfolio_cost(_=Depends(require_read)):
 
 @tokenomics_router.get("/agents/{agent_id}/tokens")
 async def agent_tokens(agent_id: str, _=Depends(require_read)):
+    """Older, pre-engine shape kept for compatibility. Recomputed from the
+    same governance/costing engine as /tokens/summary and /tokenomics —
+    it used to sum the stored cost_cents column, which is rounded to the
+    nearest whole cent *per day* and so understated real cost (e.g. 1 vs
+    the engine's 1.1454 for two days that individually round to $0 and
+    $0.01)."""
     async with get_db_session() as db:
-        result = await db.execute(
-            select(func.sum(AgentTokenUsage.input_tokens), func.sum(AgentTokenUsage.output_tokens),
-                   func.sum(AgentTokenUsage.cost_cents), func.sum(AgentTokenUsage.invocation_count))
-            .where(AgentTokenUsage.agent_id == agent_id)
-        )
-        input_t, output_t, cost, invocations = result.one()
-        return {
-            "agentId": agent_id,
-            "inputTokens": input_t or 0,
-            "outputTokens": output_t or 0,
-            "costCents": cost or 0,
-            "invocations": invocations or 0,
-        }
+        usage = await priced_usage(db, agent_id)
+    rows = usage["rows"]
+    cost_known = not rows or any(r.get("priced", True) for r in rows)
+    return {
+        "agentId": agent_id,
+        "inputTokens": sum(r.get("input_tokens", 0) for r in rows),
+        "outputTokens": sum(r.get("output_tokens", 0) for r in rows),
+        "costCents": round(sum(r.get("cost_cents", 0.0) for r in rows), 4) if cost_known else None,
+        "invocations": sum(r.get("calls", 0) for r in rows),
+    }
 
 
 @tokenomics_router.get("/models/prices")
@@ -825,14 +833,10 @@ async def full_graph(_=Depends(require_read)):
 
 @graph_router.get("/concentration-risk")
 async def concentration_risk(_=Depends(require_read)):
+    from services.graph_service import concentration_risk as _concentration_risk
+
     async with get_db_session() as db:
-        result = await db.execute(select(Agent))
-        agents = result.scalars().all()
-        sys_counts = {}
-        for agent in agents:
-            for sys in (agent.enterprise_systems or []) + (agent.databases or []):
-                sys_counts[sys] = sys_counts.get(sys, 0) + 1
-        return [{"name": k, "count": v} for k, v in sorted(sys_counts.items(), key=lambda x: -x[1]) if v >= 4]
+        return await _concentration_risk(db)
 
 
 # ── Value & Waste Router ─────────────────────────────────────────────────────
@@ -949,13 +953,13 @@ async def create_user(user: UserCreate, _=Depends(require_admin)):
 
 # ── Helper functions ─────────────────────────────────────────────────────────
 
-def _agent_to_dict(agent: Agent) -> dict:
+def _agent_to_dict(agent: Agent, dept_name: str | None = None) -> dict:
     return {
         "id": agent.id, "name": agent.name, "slug": agent.slug,
         "description": agent.description, "aiType": agent.ai_type,
         "owner": agent.owner, "ownerContact": agent.owner_contact,
         "stage": agent.lifecycle_stage, "version": agent.version,
-        "dept": agent.dept_id,
+        "dept": agent.dept_id, "deptName": dept_name,
         "valueAmount": agent.value_amount, "valueType": agent.value_type,
         "hoursSavedMonthly": agent.hours_saved_monthly,
         "businessOutcome": agent.business_outcome,

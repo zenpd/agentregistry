@@ -94,7 +94,10 @@ export default function PlatformView() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Platform & Dependencies</h1>
+      <div>
+        <h1 className="text-2xl font-bold">Platform & Dependencies</h1>
+        <p className="text-gray-500 mt-0.5">Every system, database, MCP server and knowledge base the AI fleet uses, where dependency is concentrated, and how agents call each other.</p>
+      </div>
 
       {/* Mini Cards Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -216,31 +219,54 @@ export default function PlatformView() {
 
           {/* Initiative -> Integration Matrix */}
           <div className="mt-4">
-            <h3 className="text-sm font-medium text-gray-600 mb-2">Initiative → Integration Dependency Matrix</h3>
-            <div className="overflow-x-auto">
-              <table className="text-xs border-collapse">
-                <thead>
-                  <tr>
-                    <th className="border p-1 bg-gray-50 text-left">Initiative</th>
-                    {Object.keys(systems).slice(0, 6).map(s => (
-                      <th key={s} className="border p-1 bg-gray-50 text-center" title={s}>{s.slice(0, 8)}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {agents.slice(0, 10).map(a => (
-                    <tr key={a.id}>
-                      <td className="border p-1 font-medium truncate max-w-[120px]">{a.name}</td>
-                      {Object.keys(systems).slice(0, 6).map(s => (
-                        <td key={s} className="border p-1 text-center">
-                          {a.enterpriseSystems?.includes(s) ? '●' : '—'}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <h3 className="text-sm font-medium text-gray-600">Initiative → Integration Dependency Matrix</h3>
+            {(() => {
+              const cols = [
+                ...Object.keys(systems).sort((a, b) => systems[b] - systems[a]).map(name => ({ name, kind: 'system' as const })),
+                ...Object.keys(databases).sort((a, b) => databases[b] - databases[a]).map(name => ({ name, kind: 'database' as const })),
+              ]
+              const uses = (a: Agent, c: { name: string; kind: 'system' | 'database' }) =>
+                (c.kind === 'system' ? a.enterpriseSystems : a.databases)?.includes(c.name)
+              const rows = agents.filter(a => cols.some(c => uses(a, c)))
+              const left = agents.length - rows.length
+              return (
+                <>
+                  <p className="text-xs text-gray-400 mb-2">
+                    Which enterprise systems (teal) and databases (violet) each agent integrates with.
+                    {left > 0 && ` ${left} agent${left === 1 ? '' : 's'} with no system or database integration ${left === 1 ? 'is' : 'are'} not listed.`}
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="text-xs border-collapse">
+                      <thead>
+                        <tr>
+                          <th className="border p-1.5 bg-gray-50 text-left align-bottom">Initiative</th>
+                          {cols.map(c => (
+                            <th key={c.kind + c.name} className="border p-1.5 bg-gray-50 text-center align-bottom font-medium text-gray-700 min-w-[64px] max-w-[88px] leading-tight"
+                              style={{ borderTop: `3px solid ${c.kind === 'system' ? '#3DDBD9' : '#8C7CF0'}` }}>
+                              {c.name}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map(a => (
+                          <tr key={a.id}>
+                            <td className="border p-1.5 font-medium whitespace-nowrap">{a.name}</td>
+                            {cols.map(c => (
+                              <td key={c.kind + c.name} className="border p-1 text-center">
+                                {uses(a, c)
+                                  ? <span style={{ color: c.kind === 'system' ? '#0e9f9d' : '#6d5ce0' }} title={`${a.name} uses ${c.name}`}>●</span>
+                                  : <span className="text-gray-300">—</span>}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )
+            })()}
           </div>
         </div>
       )}
@@ -252,19 +278,24 @@ function MiniCard({ title, items, color }: { title: string; items: Record<string
   const sorted = Object.entries(items).sort((a, b) => b[1] - a[1])
   return (
     <div className="bg-white rounded-lg border p-4">
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-center gap-2">
         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
         <h3 className="font-semibold text-sm">{title}</h3>
-        <span className="text-xs text-gray-400 ml-auto">{sorted.length}</span>
       </div>
-      <div className="space-y-1 max-h-32 overflow-y-auto">
-        {sorted.slice(0, 8).map(([name, count]) => (
-          <div key={name} className="flex justify-between text-xs">
-            <span className="truncate">{name}</span>
-            <span className="text-gray-400">{count}</span>
+      <div className="mt-1 mb-2 flex justify-between text-[11px] text-gray-400">
+        <span>{sorted.length} in use</span>
+        <span>agents using it</span>
+      </div>
+      {/* Six 20px rows plus gaps, so the scroll edge never cuts a row in half. */}
+      <div className="space-y-1 max-h-[140px] overflow-y-auto pr-1">
+        {sorted.map(([name, count]) => (
+          <div key={name} className="flex justify-between gap-2 text-xs leading-5">
+            <span className="truncate" title={name}>{name}</span>
+            <span className="text-gray-500 tabular-nums">{count}</span>
           </div>
         ))}
       </div>
+      {sorted.length > 6 && <div className="mt-1 text-[11px] text-gray-400">Scroll for all {sorted.length}</div>}
     </div>
   )
 }

@@ -7,6 +7,8 @@ import {
   type AccessDecision, type AccessRequest, type AccessStatus, type Integration,
 } from '../../services/ops/integrate'
 import TryItPanel from '../../components/TryItPanel'
+import Disclosure from '../../components/Disclosure'
+import ReuseChecklist from '../../components/ReuseChecklist'
 import { errorMessage, Loading, type TabProps } from './shared'
 
 const ACCESS_PILL: Record<AccessStatus, string> = {
@@ -30,11 +32,14 @@ function Section({ title, hint, action, children }: {
   title: string; hint?: string; action?: React.ReactNode; children: React.ReactNode
 }) {
   return (
-    <section className="rounded-xl border border-gray-100 p-4 space-y-3">
+    <section className="rounded-2xl border border-slate-200/80 bg-white p-5 space-y-3 shadow-sm">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-          {hint && <p className="text-xs text-gray-500 mt-0.5">{hint}</p>}
+        <div className="flex items-start gap-2.5">
+          <span className="mt-1 h-4 w-1 shrink-0 rounded-full bg-gradient-to-b from-zen-400 to-zen-700" aria-hidden />
+          <div>
+            <h3 className="text-[16px] font-extrabold text-slate-900">{title}</h3>
+            {hint && <p className="text-[13px] text-slate-500 mt-0.5">{hint}</p>}
+          </div>
         </div>
         {action}
       </div>
@@ -57,7 +62,7 @@ function Chips({ items, empty, tone = 'gray' }: { items: string[]; empty: string
   )
 }
 
-function ContractSection({ agentId, data, onSaved }: { agentId: string; data: Integration; onSaved: () => void }) {
+function ContractSection({ agentId, data, onSaved }: { agentId: string; data: Integration; onSaved: () => Promise<void> }) {
   const c = data.contract
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState({
@@ -83,8 +88,9 @@ function ContractSection({ agentId, data, onSaved }: { agentId: string; data: In
         api_endpoint: form.api_endpoint, capabilities: lines(form.capabilities), inputs: lines(form.inputs),
         outputs: lines(form.outputs), sla: form.sla, rate_limit: form.rate_limit, owner_contact: form.owner_contact,
       })
+      // Reload before closing, so the view never flashes the old values.
+      await onSaved()
       setEditing(false)
-      onSaved()
     } catch (e) {
       setError(errorMessage(e, 'Could not save the contract'))
     } finally {
@@ -150,16 +156,14 @@ function ContractSection({ agentId, data, onSaved }: { agentId: string; data: In
           {c.apiEndpoint ? <code className="font-mono text-xs text-gray-800 break-all">{c.apiEndpoint}</code> : <span className="text-gray-400 text-xs">Not recorded</span>}
           {c.endpointKind !== 'app' && c.apiEndpoint && <div className="text-xs text-amber-700 mt-0.5">{ENDPOINT_WARNING[c.endpointKind]}</div>}
           {c.endpointAdvice && (
-            <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="endpoint-advice">
-              <div className="font-medium">
-                {c.endpointAdvice.looksLike === 'frontend' ? 'This does not look like an API endpoint.' : 'This is a tracing endpoint, not an API.'}
-              </div>
-              <p className="mt-0.5">{c.endpointAdvice.message}</p>
+            <div className="mt-1"><Disclosure tone="warn" testId="endpoint-advice"
+              summary={c.endpointAdvice.looksLike === 'frontend' ? 'Looks like the app’s web page, not its API.' : 'This is a tracing URL, not the agent’s API.'}>
+              <p>{c.endpointAdvice.message}</p>
               <div className="mt-1.5 font-medium">Where to get the right one:</div>
               <ul className="list-disc pl-4 mt-0.5 space-y-0.5">
                 {c.endpointAdvice.where.map(w => <li key={w}>{w}</li>)}
               </ul>
-            </div>
+            </Disclosure></div>
           )}
         </dd>
         <dt className="text-xs font-semibold uppercase text-gray-400 pt-0.5">Capabilities</dt>
@@ -185,12 +189,15 @@ function ContractSection({ agentId, data, onSaved }: { agentId: string; data: In
   )
 }
 
-function RequestRow({ agentId, req, me, onDone }: { agentId: string; req: AccessRequest; me: string | null; onDone: () => void }) {
+function RequestRow({ agentId, req, me, selfAllowed, onDone }: {
+  agentId: string; req: AccessRequest; me: string | null; selfAllowed: boolean; onDone: () => void
+}) {
   const [pending, setPending] = useState<AccessDecision | null>(null)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const own = me != null && req.requesterId === me
+  const blocked = own && !selfAllowed
 
   async function decide(decision: AccessDecision) {
     setBusy(true)
@@ -216,8 +223,8 @@ function RequestRow({ agentId, req, me, onDone }: { agentId: string; req: Access
         <div className="ml-auto flex gap-1.5">
           {req.status === 'pending' && (
             <>
-              <button type="button" className="btn-success btn-sm" disabled={busy || own}
-                title={own ? 'You cannot approve your own request' : undefined} onClick={() => decide('approve')}>Approve</button>
+              <button type="button" className="btn-success btn-sm" disabled={busy || blocked}
+                title={blocked ? 'You cannot approve your own request' : undefined} onClick={() => decide('approve')}>Approve</button>
               <button type="button" className="btn-secondary btn-sm" disabled={busy} onClick={() => setPending('reject')}>Reject</button>
             </>
           )}
@@ -227,7 +234,9 @@ function RequestRow({ agentId, req, me, onDone }: { agentId: string; req: Access
         </div>
       </div>
       <p className="text-xs text-gray-600">{req.purpose}</p>
-      {own && req.status === 'pending' && <p className="text-xs text-gray-400">Awaiting a decision from someone other than you.</p>}
+      {own && req.status === 'pending' && !selfAllowed && (
+        <p className="text-xs text-gray-400">Awaiting a decision from someone other than you.</p>
+      )}
       {req.decidedBy && (
         <p className="text-xs text-gray-500">
           {req.status === 'approved' ? 'Approved' : req.status === 'rejected' ? 'Rejected' : 'Revoked'} by {req.decidedBy} · {fmtDate(req.decidedAt)}
@@ -286,14 +295,11 @@ function AccessSection({ agentId, data, deprecated, me, onChanged }: {
           </button>
         </form>
       )}
-      {!deprecated && !data.reuse.certified && (
-        <p className="text-xs text-amber-700">This agent is not certified for reuse yet — the checklist at the top of the page shows why. You can still ask; the owner decides.</p>
-      )}
       {error && <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">{error}</div>}
       {data.accessRequests.length === 0
         ? <p className="text-xs text-gray-400">No access requests yet.</p>
         : <ul className="divide-y divide-gray-100">{data.accessRequests.map(r =>
-            <RequestRow key={r.id} agentId={agentId} req={r} me={me} onDone={onChanged} />)}</ul>}
+            <RequestRow key={r.id} agentId={agentId} req={r} me={me} selfAllowed={data.selfApprovalAllowed} onDone={onChanged} />)}</ul>}
     </Section>
   )
 }
@@ -319,10 +325,12 @@ export default function IntegrateTab({ agent, agentId, onChanged }: TabProps) {
   if (!data) return <Loading text="Loading integration details…" />
 
   // Consumers appear on the agent header, Overview and graphs, so those reload too.
-  const changed = () => { load(); onChanged() }
+  const changed = async () => { onChanged(); await load() }
 
   return (
     <div className="space-y-4" data-testid="integrate-tab">
+      {agent.stage !== 'Deprecated' && <ReuseChecklist reuse={data.reuse} agentId={agentId} />}
+
       <ContractSection agentId={agentId} data={data} onSaved={changed} />
 
       <Section title="Try it" hint="Call this agent with your own input before asking for access.">

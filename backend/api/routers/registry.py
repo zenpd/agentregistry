@@ -219,11 +219,17 @@ class LoginRequest(BaseModel):
     password: str
 
 
+# The persona roles. Recorded on every user; enforced only when RBAC is on
+# (USE_Rbac in api/auth.py).
+USER_ROLES = ("Registry Admin", "Architect Steward", "Security Reviewer", "Product Owner", "Executive Viewer")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
 class UserCreate(BaseModel):
-    email: str
-    name: str
+    email: str = Field(..., max_length=255)
+    name: str = Field(..., max_length=255)
     role: str = "Executive Viewer"
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., min_length=8, max_length=128)
 
 
 # ── Auth Router ──────────────────────────────────────────────────────────────
@@ -231,7 +237,9 @@ class UserCreate(BaseModel):
 @auth_router.post("/login")
 async def login(req: LoginRequest):
     async with get_db_session() as db:
-        result = await db.execute(select(User).where(User.email == req.email, User.is_active == True))
+        # Emails are matched without regard to case: Bob@x.com and bob@x.com are one person.
+        result = await db.execute(select(User).where(func.lower(User.email) == req.email.strip().lower(),
+                                                     User.is_active == True))
         user = result.scalar_one_or_none()
         if not user or not verify_password(req.password, user.password_hash):
             raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -934,25 +942,47 @@ async def taxonomy(_=Depends(require_read)):
         "reviewStatuses": ["Not Submitted", "In Review", "Changes Requested", "Approved with Conditions", "Approved"],
         "riskLevels": ["LOW", "HIGH", "UNACCEPTABLE"],
         "aiTypes": ["Autonomous Agent", "Copilot / Assistant", "Predictive / ML Model", "Generative AI Feature", "Conversational AI / Chatbot", "Computer Vision Model"],
+        "userRoles": list(USER_ROLES),
     }
+
+
+@admin_router.get("/settings")
+async def runtime_settings(_=Depends(require_read)):
+    """Switches the UI has to reflect, e.g. the testing-only self-approval
+    mode, so Settings can say plainly that it is on."""
+    return {"selfApprovalAllowed": get_settings().allow_self_approval}
 
 
 @admin_router.get("/users")
 async def list_users(_=Depends(require_admin)):
     async with get_db_session() as db:
-        result = await db.execute(select(User))
+        result = await db.execute(select(User).order_by(User.name))
         return [_user_to_dict(u) for u in result.scalars().all()]
 
 
 @admin_router.post("/users")
-async def create_user(user: UserCreate, _=Depends(require_admin)):
+async def create_user(user: UserCreate, actor=Depends(require_admin)):
+    email = user.email.strip().lower()
+    name = " ".join(user.name.split())
+    if not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=422, detail="Enter a valid email address")
+    if not name:
+        raise HTTPException(status_code=422, detail="Enter the person's name")
+    if user.role not in USER_ROLES:
+        raise HTTPException(status_code=422, detail=f"Role must be one of: {', '.join(USER_ROLES)}")
     async with get_db_session() as db:
+        if (await db.execute(select(User).where(func.lower(User.email) == email))).scalar_one_or_none():
+            raise HTTPException(status_code=409, detail=f"A user with {email} already exists")
         db_user = User(
-            id=secrets.token_hex(8), org_id="org-default", email=user.email,
-            name=user.name, role=user.role, password_hash=hash_password(user.password)
+            id=secrets.token_hex(8), org_id="org-default", email=email,
+            name=name, role=user.role, password_hash=hash_password(user.password), is_active=True,
         )
         db.add(db_user)
-        return {"id": db_user.id, "status": "created"}
+        # Who added whom; never the password.
+        db.add(AuditLog(org_id="org-default", actor=actor.get("user_id", "unknown"), action="user_create",
+                        entity_type="user", entity_id=db_user.id,
+                        changes={"email": email, "name": name, "role": user.role}))
+        return {"id": db_user.id, "status": "created", "user": _user_to_dict(db_user)}
 
 
 # ── Helper functions ─────────────────────────────────────────────────────────

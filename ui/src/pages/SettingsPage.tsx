@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getPhoenixConfig, updatePhoenixConfig } from '../services/api'
+import UsersSection from '../components/UsersSection'
 
 export default function SettingsPage() {
   const [endpoint, setEndpoint] = useState('')
@@ -90,6 +91,8 @@ export default function SettingsPage() {
           </>
         )}
       </div>
+
+      <UsersSection />
 
       <div className="card p-6 text-sm text-gray-600 space-y-2">
         <p>Other configuration lives in environment variables (see <code className="font-mono text-zen-700">backend/.env.example</code>).</p>

@@ -48,7 +48,8 @@ export default function RiskHeatmap({ rows, severities }: Props) {
                       style={{
                         width: 56, height: 36,
                         backgroundColor: `rgba(${rgb}, ${intensity})`,
-                        color: count > 0 ? `rgb(${rgb})` : '#d1d5db',
+                        // Text stays neutral ink, never the data colour; white once the fill is dense.
+                        color: count === 0 ? '#d1d5db' : intensity > 0.55 ? '#ffffff' : '#1e293b',
                       }}
                       title={`${row.label} · ${s}: ${count}`}
                     >

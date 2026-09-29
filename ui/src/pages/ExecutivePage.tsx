@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import {
   getAgents, getRiskSummary, getPortfolioEconomics,
   type Agent, type PaginationInfo, type RiskSummary, type PortfolioEconomics,
@@ -6,7 +7,7 @@ import {
 import BarChart from '../components/BarChart'
 import RiskPie from '../components/RiskPie'
 import RiskHeatmap from '../components/RiskHeatmap'
-import { fmtMoney } from './agent/shared'
+import { fmtMoney, STAGE_PILL, TypeBadge } from './agent/shared'
 
 const STAGE_COLORS: Record<string, string> = {
   Ideation: '#6E7B8F',
@@ -14,15 +15,6 @@ const STAGE_COLORS: Record<string, string> = {
   Testing: '#F0A85A',
   Production: '#3DDBD9',
   Deprecated: '#E06B85',
-}
-
-const TYPE_COLORS: Record<string, string> = {
-  'Autonomous Agent': '#3DDBD9',
-  'Copilot / Assistant': '#8C7CF0',
-  'Predictive / ML Model': '#F0A85A',
-  'Generative AI Feature': '#F2A6D8',
-  'Conversational AI / Chatbot': '#6EA8FE',
-  'Computer Vision Model': '#57C785',
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -97,8 +89,13 @@ export default function ExecutivePage() {
           </div>
           <div className="grid grid-cols-3 gap-4 mb-4">
             <div>
-              <div className="text-xs text-gray-500 uppercase tracking-wide">Revenue (declared value)</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wide">Revenue (declared value / mo)</div>
               <div className="text-2xl font-bold text-emerald-600 mt-1">{fmtMoney(economics.totalRevenueCents / 100)}</div>
+              {/* Says why this differs from the Monthly Value KPI above (production only),
+                  split the same way that KPI and Business Impact count it. */}
+              <div className="text-xs text-gray-400 mt-0.5">
+                {fmtMoney(monthlyValue)} realized in production + {fmtMoney(economics.totalRevenueCents / 100 - monthlyValue)} projected
+              </div>
             </div>
             <div>
               <div className="text-xs text-gray-500 uppercase tracking-wide">Expenditure (token + infra)</div>
@@ -155,14 +152,20 @@ export default function ExecutivePage() {
                 <div className="text-xs text-gray-600 mb-2">{stage}</div>
                 <div className="space-y-1">
                   {stageAgents.slice(0, 3).map(a => (
-                    <div
+                    <Link
                       key={a.id}
-                      className="text-xs bg-white/70 rounded px-1 py-0.5 truncate cursor-pointer hover:bg-white"
-                      title={a.name}
+                      to={`/agents/${a.id}`}
+                      className="block text-xs bg-white/70 rounded px-1 py-0.5 truncate text-gray-700 hover:bg-white hover:text-gray-900"
+                      title={`${a.name} — open`}
                     >
                       {a.name}
-                    </div>
+                    </Link>
                   ))}
+                  {stageAgents.length > 3 && (
+                    <div className="text-[11px] text-gray-500" title={stageAgents.slice(3).map(a => a.name).join('\n')}>
+                      +{stageAgents.length - 3} more
+                    </div>
+                  )}
                 </div>
               </div>
             )
@@ -175,20 +178,25 @@ export default function ExecutivePage() {
         <div className="card p-5">
           <h2 className="font-semibold text-gray-900 mb-3">Portfolio Mix by AI Type</h2>
           <BarChart
+            label="Agents by AI type"
+            format={n => `${n} agent${n === 1 ? '' : 's'}`}
             data={Object.entries(
               agents.reduce((acc, a) => {
                 acc[a.aiType] = (acc[a.aiType] || 0) + 1
                 return acc
               }, {} as Record<string, number>)
-            ).map(([label, value]) => ({ label, value, color: TYPE_COLORS[label] || '#6E7B8F' }))}
+            ).map(([label, value]) => ({ label, value }))}
           />
         </div>
         <div className="card p-5">
-          <h2 className="font-semibold text-gray-900 mb-3">Value by Business Unit</h2>
+          <h2 className="font-semibold text-gray-900">Value by Business Unit</h2>
+          <p className="text-xs text-gray-400 mb-3">Declared value per month, realized + projected</p>
           <BarChart
+            label="Declared value per month by business unit"
+            format={fmtMoney}
             data={Object.entries(
               agents.reduce((acc, a) => {
-                const dept = a.dept || 'Unknown'
+                const dept = a.deptName || a.dept || 'Unassigned'
                 acc[dept] = (acc[dept] || 0) + (a.valueAmount || 0)
                 return acc
               }, {} as Record<string, number>)
@@ -214,18 +222,10 @@ export default function ExecutivePage() {
           <tbody>
             {[...agents].sort((a, b) => b.valueAmount - a.valueAmount).slice(0, 5).map(a => (
               <tr key={a.id} className="border-b last:border-0">
-                <td className="py-2 text-gray-900">{a.name}</td>
-                <td className="py-2">
-                  <span className="px-2 py-0.5 rounded-full text-xs" style={{ backgroundColor: (TYPE_COLORS[a.aiType] || '#6E7B8F') + '20', color: TYPE_COLORS[a.aiType] || '#6E7B8F' }}>
-                    {a.aiType}
-                  </span>
-                </td>
-                <td className="py-2 text-gray-600">{a.dept}</td>
-                <td className="py-2">
-                  <span className="px-2 py-0.5 rounded-full text-xs" style={{ backgroundColor: STAGE_COLORS[a.stage] + '20', color: STAGE_COLORS[a.stage] }}>
-                    {a.stage}
-                  </span>
-                </td>
+                <td className="py-2"><Link to={`/agents/${a.id}`} className="text-gray-900 hover:text-teal-700">{a.name}</Link></td>
+                <td className="py-2"><TypeBadge type={a.aiType} /></td>
+                <td className="py-2 text-gray-600">{a.deptName || a.dept || 'Unassigned'}</td>
+                <td className="py-2"><span className={STAGE_PILL[a.stage] || 'status-pending'}>{a.stage}</span></td>
                 <td className="py-2 text-right font-mono text-gray-900">{fmtMoney(a.valueAmount)}</td>
                 <td className="py-2 text-xs text-gray-500">{a.valueType || 'Not quantified'}</td>
               </tr>

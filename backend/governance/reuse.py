@@ -235,11 +235,18 @@ _BACKEND_HOST_MARKERS = ("-be.", "-backend", "backend.", "-api.")
 # swaps are guessed; any other web host gets no suggestion, since there is
 # nothing safe to guess from.
 _FRONTEND_TO_BACKEND = (("-fe.", "-be."), ("-frontend.", "-backend."), ("frontend.", "backend."))
-_FIND_THE_API = [
-    "Open the app's backend OpenAPI: the same host with -be instead of -fe, then /openapi.json (or /docs in a browser).",
-    "Or open the app, press F12 → Network, do the action, and copy the /api/… request it makes.",
-    "Or ask the owner — that is what the owner contact field is for.",
-]
+def _find_the_api(sibling: str | None) -> list[str]:
+    """Where to get the real endpoint. With a known -be host, Try it has
+    already done the first step, so it says so instead of sending someone to
+    do it by hand."""
+    first = (f"Use Try it below: it already calls {sibling}. Press Load API operations to list the real paths "
+             "from its openapi.json, then save the one that answers."
+             if sibling else
+             "Open the app's backend OpenAPI at /openapi.json (or /docs in a browser); for a -fe host that is "
+             "usually the same name with -be.")
+    return [first,
+            "Or open the app, press F12 → Network, do the action, and copy the /api/… request it makes.",
+            "Or ask the owner — that is what the owner contact field is for."]
 
 
 def origin(url: str) -> str:
@@ -276,7 +283,7 @@ def endpoint_advice(endpoint: str | None) -> dict | None:
             "looksLike": "tracing",
             "message": "This is a tracing/observability URL (Phoenix), not the agent's own API. "
                        "Tracing belongs in the Phoenix project field instead.",
-            "where": _FIND_THE_API,
+            "where": _find_the_api(None),
             "suggestedBase": None,
         }
     if kind != "app":
@@ -296,7 +303,7 @@ def endpoint_advice(endpoint: str | None) -> dict | None:
             "message": "This looks like the app's web page, not its API — a team calling it would get HTML back. "
                        + (f"Its API is most likely on {sibling} under /api/…; Try it calls that host by default."
                           if sibling else "The API is usually the same host under /api/…."),
-            "where": _FIND_THE_API,
+            "where": _find_the_api(sibling),
             "suggestedBase": sibling,
         }
     return None
@@ -453,28 +460,65 @@ def _resolve_ref(spec: Mapping[str, Any], schema: Any) -> Any:
     return node if isinstance(node, Mapping) else {}
 
 
+def _schema_type(schema: Mapping[str, Any]) -> str | None:
+    """The one non-null type; OpenAPI 3.1 allows a list ["string", "null"]."""
+    kind = schema.get("type")
+    if isinstance(kind, list):
+        kind = next((k for k in kind if k != "null"), None)
+    return kind if isinstance(kind, str) else None
+
+
+def _is_null_schema(schema: Mapping[str, Any]) -> bool:
+    """{"type": "null"} or {"type": ["null"]}: the empty half of an Optional."""
+    return "type" in schema and _schema_type(schema) in (None, "null")
+
+
 def schema_example(spec: Mapping[str, Any], schema: Any, depth: int = 0) -> Any:
     """A starting value for a JSON schema: its example or default when
-    given, else an empty value of the right shape."""
+    given, else an empty value of the right shape. Tolerates whatever a
+    third-party document contains: anything unexpected yields None."""
     schema = _resolve_ref(spec, schema)
     if not isinstance(schema, Mapping) or depth > _MAX_EXAMPLE_DEPTH:
         return None
     for key in ("example", "default"):
         if key in schema:
             return schema[key]
-    if isinstance(schema.get("enum"), list) and schema["enum"]:
-        return schema["enum"][0]
-    for key in ("allOf", "anyOf", "oneOf"):
-        options = [o for o in schema.get(key) or [] if _resolve_ref(spec, o).get("type") != "null"]
+    for key in ("examples", "enum"):
+        if isinstance(schema.get(key), list) and schema[key]:
+            return schema[key][0]
+    parts = [_resolve_ref(spec, o) for o in schema.get("allOf") or [] if isinstance(o, Mapping)]
+    if parts:
+        merged: dict = {}
+        for part in parts:
+            value = schema_example(spec, part, depth + 1)
+            if isinstance(value, dict):
+                merged.update(value)
+        if merged:
+            return merged
+    for key in ("anyOf", "oneOf"):
+        options = [r for r in (_resolve_ref(spec, o) for o in schema.get(key) or [])
+                   if isinstance(r, Mapping) and not _is_null_schema(r)]
         if options:
             return schema_example(spec, options[0], depth + 1)
-    kind = schema.get("type")
-    if kind == "object" or "properties" in schema:
-        return {name: schema_example(spec, sub, depth + 1) for name, sub in (schema.get("properties") or {}).items()}
+    kind = _schema_type(schema)
+    properties = schema.get("properties")
+    if kind == "object" or isinstance(properties, Mapping):
+        if not isinstance(properties, Mapping):
+            return {}
+        return {str(name): schema_example(spec, sub, depth + 1) for name, sub in properties.items()}
     if kind == "array":
         item = schema_example(spec, schema.get("items"), depth + 1)
         return [] if item is None else [item]
-    return {"string": "", "integer": 0, "number": 0, "boolean": False}.get(kind)
+    return {"string": "", "integer": 0, "number": 0, "boolean": False}.get(kind or "")
+
+
+def _json_request_schema(spec: Mapping[str, Any], op: Mapping[str, Any]) -> Any:
+    """The JSON request-body schema of an operation, following a $ref to
+    components/requestBodies; None when there is none."""
+    body = _resolve_ref(spec, op.get("requestBody"))
+    content = body.get("content") if isinstance(body, Mapping) else None
+    json_body = content.get("application/json") if isinstance(content, Mapping) else None
+    return json_body.get("schema") if isinstance(json_body, Mapping) else None
 
 
 def openapi_operations(spec: Any) -> dict:
@@ -494,12 +538,8 @@ def openapi_operations(spec: Any) -> dict:
             if method not in TRY_METHODS:
                 other += 1
                 continue
-            body = None
-            if method == "post":
-                content = ((op.get("requestBody") or {}).get("content") or {})
-                json_body = content.get("application/json") if isinstance(content, Mapping) else None
-                if isinstance(json_body, Mapping):
-                    body = schema_example(spec, json_body.get("schema"))
+            schema = _json_request_schema(spec, op) if method == "post" else None
+            body = schema_example(spec, schema) if schema is not None else None
             operations.append({
                 "method": method.upper(), "path": str(path),
                 "summary": str(op.get("summary") or op.get("operationId") or "")[:160],

@@ -11,6 +11,7 @@ import {
   type UsageRefreshResult,
 } from '../../services/ops/tokenomics'
 import { Loading, MiniStat, SectionLabel, SEVERITY_PILL, SourceBadge, fmtNumber, type TabProps } from './shared'
+import Disclosure from '../../components/Disclosure'
 
 const WINDOWS = [30, 90] as const
 
@@ -320,13 +321,12 @@ function Banner({ tone, children }: { tone: 'teal' | 'amber' | 'rose' | 'gray'; 
 
 function DemoNotice({ linked }: { linked: boolean }) {
   return (
-    <Banner tone="gray">
-      <span className="font-semibold text-gray-700">Demo data.</span> These figures come from sample rows seeded with the
-      registry, not from this agent's traces.{' '}
+    <Disclosure summary={<><span className="font-semibold text-gray-600">Demo data</span> — sample figures, not this agent’s traces.</>}>
+      These figures come from sample rows seeded with the registry, not from this agent's traces.{' '}
       {linked
         ? 'Refresh from Phoenix to replace them with measured usage.'
         : 'Link a Phoenix project on the Diagram tab to see measured usage.'}
-    </Banner>
+    </Disclosure>
   )
 }
 

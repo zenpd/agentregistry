@@ -69,11 +69,30 @@ export function fmtDollars(n: number | null | undefined): string {
   return '$' + n.toFixed(2)
 }
 
-// Whole-dollar business value: $950, $42K, $1.3M.
+// Whole-dollar business value, as the AIRegistry prototype shows it: $950, $42K, $1.78M.
 export function fmtMoney(n: number): string {
-  if (Math.abs(n) >= 1000000) return '$' + (n / 1000000).toFixed(1) + 'M'
+  if (Math.abs(n) >= 1000000) return '$' + (n / 1000000).toFixed(2) + 'M'
   if (Math.abs(n) >= 1000) return '$' + Math.round(n / 1000) + 'K'
   return '$' + Math.round(n)
+}
+
+// One colour per AI application type (the prototype's palette).
+export const TYPE_COLORS: Record<string, string> = {
+  'Autonomous Agent': '#3DDBD9',
+  'Copilot / Assistant': '#8C7CF0',
+  'Predictive / ML Model': '#F0A85A',
+  'Generative AI Feature': '#F2A6D8',
+  'Conversational AI / Chatbot': '#6EA8FE',
+  'Computer Vision Model': '#57C785',
+}
+
+export function TypeBadge({ type }: { type?: string | null }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-700 whitespace-nowrap">
+      <span className="h-2 w-2 rounded-sm shrink-0" style={{ background: (type && TYPE_COLORS[type]) || '#8C9AAB' }} />
+      {type || 'Uncategorized'}
+    </span>
+  )
 }
 
 export function fmtNumber(n: number | null | undefined): string {
@@ -83,9 +102,9 @@ export function fmtNumber(n: number | null | undefined): string {
 
 export function MiniStat({ label, value, accent, hint }: { label: string; value: string; accent?: string; hint?: string }) {
   return (
-    <div className="text-center rounded-lg bg-gray-50 py-2 px-1" title={hint}>
-      <div className={`text-sm font-bold ${accent || 'text-gray-900'}`}>{value}</div>
-      <div className="text-[10px] text-gray-400 uppercase">{label}</div>
+    <div className="text-center rounded-xl bg-white py-2.5 px-2 ring-1 ring-slate-200/80 shadow-sm" title={hint}>
+      <div className={`text-base font-extrabold leading-tight ${accent || 'text-slate-900'}`}>{value}</div>
+      <div className="mt-0.5 text-[10.5px] font-semibold uppercase tracking-[.04em] text-slate-500">{label}</div>
     </div>
   )
 }
@@ -111,6 +130,19 @@ export function fmtCostPerCall(cents: number | null | undefined): string {
   return '$' + Number(n.toPrecision(3)).toString()
 }
 
+// The label of one field inside a card (Owner, Evidence, …): small and quiet,
+// so the value under it carries the weight, unlike a SectionLabel.
+export function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <span className="text-[11px] font-semibold uppercase tracking-[.04em] text-slate-500">{children}</span>
+}
+
+// A section heading inside a tab: dark and bold with the brand accent bar,
+// so each block of a tab reads as its own titled section.
 export function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <span className="text-xs text-gray-400">{children}</span>
+  return (
+    <span className="inline-flex items-center gap-2 text-[13px] font-bold text-slate-800">
+      <span className="h-3.5 w-1 shrink-0 rounded-full bg-gradient-to-b from-zen-400 to-zen-700" aria-hidden />
+      {children}
+    </span>
+  )
 }

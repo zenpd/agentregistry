@@ -143,6 +143,8 @@ async def integration(agent_id: str, _=Depends(require_read)):
         "reuseCheck": {"checked": agent.reuse_checked or [], "justification": agent.reuse_justification},
         "tryIt": {**_try_it_state(agent), "examplePayload": reuse.example_payload(agent.inputs)},
         "accessRequests": [_request_dict(r) for r in requests],
+        # Testing mode: the requester may approve their own request.
+        "selfApprovalAllowed": get_settings().allow_self_approval,
         "consumers": {
             "approvedTeams": [c for c in consumers if c.lower() in approved],
             "declared": [c for c in consumers if c.lower() not in approved],
@@ -218,8 +220,10 @@ async def decide_access(agent_id: str, request_id: str, body: DecisionIn, user=D
         if row.status != allowed:
             raise HTTPException(status_code=409, detail=f"Cannot {body.decision} a request that is {row.status}")
         # Segregation of duties: with RBAC off, anyone could otherwise
-        # approve their own request.
-        if body.decision == "approve" and row.requester_id == actor:
+        # approve their own request. ALLOW_SELF_APPROVAL relaxes it for
+        # testing; such approvals are marked in the audit log.
+        self_approval = body.decision == "approve" and row.requester_id == actor
+        if self_approval and not get_settings().allow_self_approval:
             raise HTTPException(status_code=403, detail="You cannot approve your own access request")
 
         consumers = list(agent.consumers or [])
@@ -242,7 +246,8 @@ async def decide_access(agent_id: str, request_id: str, body: DecisionIn, user=D
         row.decided_at = datetime.now(timezone.utc)
         row.decision_note = note
         db.add(_audit(agent_id, actor, f"access_{body.decision}",
-                      {"request_id": row.id, "team": row.team, "consumers": consumers}))
+                      {"request_id": row.id, "team": row.team, "consumers": consumers,
+                       **({"self_approved": True} if self_approval else {})}))
     return {"id": request_id, "status": row.status}
 
 
@@ -265,6 +270,11 @@ def _within_rate_limit(user_id: str, agent_id: str, per_minute: int) -> bool:
 async def _resolve(host: str, port: int) -> list[str]:
     infos = await asyncio.get_running_loop().getaddrinfo(host, port)
     return [info[4][0] for info in infos]
+
+
+# Private (VNet-only) apps resolve only through the VPN's DNS server.
+_RESOLVE_HINT = ("The name is not known to this server's DNS. If the app is on a private network, "
+                 "connect to the VPN (and make sure its DNS is used), then try again.")
 
 
 def _http_client(timeout: float) -> httpx.AsyncClient:
@@ -330,7 +340,7 @@ async def try_agent(agent_id: str, body: TryIn, user=Depends(require_update)):
     except reuse.TryItBlocked as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except OSError as exc:
-        result.update(ok=False, error=f"Could not resolve {parsed.hostname}: {exc.strerror or exc}")
+        result.update(ok=False, error=f"Could not resolve {parsed.hostname}: {exc.strerror or exc}.", hint=_RESOLVE_HINT)
     else:
         headers = {"Accept": "application/json, text/plain;q=0.9, */*;q=0.5", "X-Registry-Try-It": "true"}
         if payload is not None:
@@ -356,9 +366,10 @@ async def try_agent(agent_id: str, body: TryIn, user=Depends(require_update)):
         result["latencyMs"] = round((time.perf_counter() - started) * 1000)
 
     async with get_db_session() as db:
-        # Bodies are left out on purpose: they may carry personal data.
+        # Bodies and query strings are left out on purpose: the caller now
+        # chooses the path, and either can carry personal data.
         db.add(_audit(agent_id, actor, "try_it", {
-            "url": url, "method": body.method, "status": result.get("status"),
+            "url": url.split("?", 1)[0], "method": body.method, "status": result.get("status"),
             "ok": result.get("ok"), "error": result.get("error"), "latencyMs": result.get("latencyMs"),
         }))
     return result
@@ -392,7 +403,7 @@ async def api_operations(agent_id: str, user=Depends(require_update)):
     except reuse.TryItBlocked as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except OSError as exc:
-        return {**result, "error": f"Could not resolve {parsed.hostname}: {exc.strerror or exc}"}
+        return {**result, "error": f"Could not resolve {parsed.hostname}: {exc.strerror or exc}.", "hint": _RESOLVE_HINT}
     try:
         async with _http_client(settings.api_discovery_timeout_seconds) as client:
             async with client.stream("GET", spec_url, headers={"Accept": "application/json",
@@ -403,6 +414,9 @@ async def api_operations(agent_id: str, user=Depends(require_update)):
                                    "If the app scales to zero when idle, try again in a moment."}
     except httpx.HTTPError as exc:
         return {**result, "error": f"Could not reach {state['base']}: {type(exc).__name__}: {exc}"}
+    if resp.is_redirect:
+        return {**result, "error": f"{spec_url} redirects to {resp.headers.get('location') or 'another address'}, "
+                                   "which is not followed. Ask the owner for the API path."}
     if not resp.is_success:
         return {**result, "error": f"{spec_url} answered {resp.status_code}, so this host does not publish an "
                                    "OpenAPI document there. Ask the owner for the API path."}
@@ -410,6 +424,9 @@ async def api_operations(agent_id: str, user=Depends(require_update)):
         return {**result, "error": f"The OpenAPI document is over {MAX_SPEC_BYTES // 1_000_000} MB"}
     try:
         found = reuse.openapi_operations(json.loads(raw.decode("utf-8", errors="replace")))
-    except ValueError as exc:
-        return {**result, "error": f"{spec_url} is not an OpenAPI document ({exc})"}
+    # Another team's document: anything unreadable is reported, never a 500.
+    # RecursionError is what json raises on pathologically deep nesting.
+    except (ValueError, TypeError, AttributeError, RecursionError) as exc:
+        reason = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
+        return {**result, "error": f"{spec_url} could not be read as an OpenAPI document ({reason})"}
     return {**result, **found, "ok": True, "error": None}

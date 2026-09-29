@@ -44,3 +44,6 @@ ui/onboarding-verify.spec.cjs
 
 # Lockfile excluded from this repo by team choice
 ui/package-lock.json
+
+# Local working notes
+PROTOTYPE_GAP_ANALYSIS.md

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useSearchParams, Link } from 'react-router-dom'
+import { AlertTriangle, Bot, Building2, Coins, LayoutDashboard, Plug, ShieldCheck, Tag, TrendingUp, User, Waypoints } from 'lucide-react'
 import { getAgent, getGraphV2, type Agent, type GraphV2Response } from '../services/api'
-import { STAGE_PILL } from './agent/shared'
+import { STAGE_PILL, TypeBadge } from './agent/shared'
 import OverviewTab from './agent/OverviewTab'
 import DiagramTab from './agent/DiagramTab'
 import GovernanceTab from './agent/GovernanceTab'
@@ -9,10 +10,13 @@ import TokenomicsTab from './agent/TokenomicsTab'
 import RevenueTab from './agent/RevenueTab'
 import RiskTab from './agent/RiskTab'
 import IntegrateTab from './agent/IntegrateTab'
-import ReuseChecklist from '../components/ReuseChecklist'
 
 const TABS = ['overview', 'diagram', 'governance', 'tokenomics', 'revenue', 'risk', 'integrate'] as const
 type Tab = typeof TABS[number]
+const TAB_ICON: Record<Tab, typeof Bot> = {
+  overview: LayoutDashboard, diagram: Waypoints, governance: ShieldCheck,
+  tokenomics: Coins, revenue: TrendingUp, risk: AlertTriangle, integrate: Plug,
+}
 const TAB_LABEL: Record<Tab, string> = {
   overview: 'Overview', diagram: 'Diagram', governance: 'Governance',
   tokenomics: 'Tokenomics', revenue: 'Revenue & Expenditure', risk: 'Risk', integrate: 'Integrate',
@@ -63,36 +67,51 @@ export default function AgentPage() {
     <div className="space-y-4 animate-fade-in max-w-5xl">
       <Link to="/agents" className="text-sm text-gray-400 hover:text-gray-600">&larr; AI Registry</Link>
 
-      <div className="card p-6">
-        <div className="flex justify-between items-start mb-3">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">{agent.name}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{agent.aiType} · {agent.deptName || agent.dept || 'No department'} · {agent.owner || 'No owner'}</p>
+      <div className="card p-0 overflow-hidden">
+        <header className="px-6 pt-5 pb-4 bg-gradient-to-r from-zen-50 via-white to-white border-b border-slate-100">
+          <div className="flex items-start gap-4">
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-gradient-zen text-white shadow-glow-zen">
+              <Bot size={24} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-2xl font-extrabold text-slate-900 leading-tight">{agent.name}</h1>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <TypeBadge type={agent.aiType} />
+                <MetaChip icon={<Building2 size={12} />}>{agent.deptName || agent.dept || 'No department'}</MetaChip>
+                {agent.owner && agent.owner !== 'Unassigned'
+                  ? <MetaChip icon={<User size={12} />}>{agent.owner}</MetaChip>
+                  : <MetaChip icon={<User size={12} />} warn>No owner</MetaChip>}
+                {agent.version && <MetaChip icon={<Tag size={12} />}>{agent.version}</MetaChip>}
+              </div>
+            </div>
+            <span className={`${STAGE_PILL[agent.stage] || 'status-pending'} !text-[13px] !px-3 !py-1`}>{agent.stage}</span>
           </div>
-          <span className={STAGE_PILL[agent.stage] || 'status-pending'}>{agent.stage}</span>
-        </div>
 
-        {agent.reuse && agent.stage !== 'Deprecated' && (
-          <div className="mb-4"><ReuseChecklist reuse={agent.reuse} agentId={id} /></div>
-        )}
+          <div className="mt-4 flex gap-1 overflow-x-auto rounded-xl bg-slate-100/80 p-1" role="tablist">
+            {TABS.map(t => {
+              const Icon = TAB_ICON[t]
+              return (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={tab === t}
+                  data-tab={t}
+                  onClick={() => setTab(t)}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm whitespace-nowrap transition-colors ${
+                    tab === t
+                      ? 'bg-white font-semibold text-zen-700 shadow-sm ring-1 ring-slate-200'
+                      : 'font-medium text-slate-600 hover:bg-white/60 hover:text-slate-900'
+                  }`}
+                >
+                  <Icon size={15} className={tab === t ? 'text-zen-600' : 'text-slate-400'} />
+                  {TAB_LABEL[t]}
+                </button>
+              )
+            })}
+          </div>
+        </header>
 
-        <div className="flex gap-1 border-b border-gray-100 mb-4 overflow-x-auto" role="tablist">
-          {TABS.map(t => (
-            <button
-              key={t}
-              role="tab"
-              aria-selected={tab === t}
-              data-tab={t}
-              onClick={() => setTab(t)}
-              className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${
-                tab === t ? 'border-teal-600 text-teal-700' : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {TAB_LABEL[t]}
-            </button>
-          ))}
-        </div>
-
+        <div className="p-6">
         {tab === 'overview' && <OverviewTab {...tabProps} graph={graph} />}
         {tab === 'diagram' && <DiagramTab {...tabProps} />}
         {tab === 'governance' && <GovernanceTab {...tabProps} />}
@@ -100,7 +119,19 @@ export default function AgentPage() {
         {tab === 'revenue' && <RevenueTab {...tabProps} />}
         {tab === 'risk' && <RiskTab {...tabProps} />}
         {tab === 'integrate' && <IntegrateTab {...tabProps} />}
+        </div>
       </div>
     </div>
+  )
+}
+
+function MetaChip({ icon, warn, children }: { icon: React.ReactNode; warn?: boolean; children: React.ReactNode }) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs whitespace-nowrap ${
+      warn ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-200 bg-white text-slate-700'
+    }`}>
+      <span className={warn ? 'text-amber-500' : 'text-slate-400'}>{icon}</span>
+      {children}
+    </span>
   )
 }

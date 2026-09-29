@@ -192,9 +192,11 @@ async def test_contract_edit_cleans_lists_rejects_tracing_urls_and_is_audited(cl
 # ── Access requests ──────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_access_request_approval_puts_the_team_in_the_dependency_graph(client, db):
+async def test_access_request_approval_puts_the_team_in_the_dependency_graph(client, db, monkeypatch):
     from services.graph_service import build_graph
+    from shared.config import get_settings
 
+    monkeypatch.setattr(get_settings(), "allow_self_approval", False)  # the two-person rule
     as_user("u2")
     rid = (await client.post("/api/v1/agents/prod/access-requests",
                              json={"team": "Treasury Ops", "purpose": "Reconcile treasury invoices daily"})).json()["id"]
@@ -577,3 +579,47 @@ async def test_agent_detail_carries_the_full_certification_checklist(client, db)
     assert prod["certified"] and all(c["met"] for c in prod["checks"])
     listing = (await client.get("/api/v1/agents/?limit=100")).json()["data"]
     assert {a["id"]: a["deptName"] for a in listing}["webpage"] == "Finance"
+
+
+@pytest.mark.asyncio
+async def test_try_it_audit_leaves_out_the_callers_query_string(client, db, fake_agent):
+    from db.models import AuditLog
+
+    await client.post("/api/v1/agents/prod/try", json={"method": "GET", "path": "/v2/lookup?email=jane@example.com"})
+    assert str(fake_agent["calls"][0].url) == "https://agent.example.com/v2/lookup?email=jane@example.com"
+    async with db() as s:
+        audit = (await s.execute(select(AuditLog).where(AuditLog.action == "try_it"))).scalar_one()
+    assert audit.changes["url"] == "https://agent.example.com/v2/lookup" and "jane" not in str(audit.changes)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply,expected", [
+    (lambda req: httpx.Response(301, headers={"location": "https://login.example.com/"}), "redirects to https://login"),
+    (lambda req: httpx.Response(200, text="<html>app</html>"), "could not be read as an OpenAPI document"),
+    (lambda req: httpx.Response(200, json={"detail": "ok"}), "no paths"),
+    (lambda req: httpx.Response(200, content=b"[" * 200_000), "could not be read"),
+])
+async def test_an_unreadable_api_list_is_reported_not_a_500(client, db, fake_agent, reply, expected):
+    await _add_web_page_agent(db)
+    fake_agent["respond"] = reply
+    res = await client.get("/api/v1/agents/webpage/api-operations")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is False and expected in body["error"] and body["operations"] == []
+
+
+@pytest.mark.asyncio
+async def test_self_approval_in_testing_mode_is_allowed_and_marked(client, db, monkeypatch):
+    from db.models import AuditLog
+    from shared.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "allow_self_approval", True)
+    as_user("u2")
+    rid = (await client.post("/api/v1/agents/prod/access-requests",
+                             json={"team": "Solo Tester", "purpose": "Testing the flow on my own"})).json()["id"]
+    assert (await _integration(client))["selfApprovalAllowed"] is True
+    ok = await client.post(f"/api/v1/agents/prod/access-requests/{rid}/decision", json={"decision": "approve"})
+    assert ok.status_code == 200 and ok.json()["status"] == "approved"
+    async with db() as s:
+        audit = (await s.execute(select(AuditLog).where(AuditLog.action == "access_approve"))).scalar_one()
+    assert audit.changes["self_approved"] is True

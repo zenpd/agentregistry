@@ -29,7 +29,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Agent, GovernanceReview, AgentTokenUsage
+from db.models import Agent, Department, GovernanceReview, AgentTokenUsage
 
 # Raw hex on purpose: these colours are serialised straight into the graph
 # payload consumed by the canvas (the cobol exemption from CSS variables).
@@ -120,6 +120,9 @@ async def build_graph(db: AsyncSession, org_id: str | None = None) -> dict[str, 
     agents = await load_agents(db, org_id)
     gates = await _worst_gate_map(db)
     token_cost = await _token_cost_map(db)
+    # attrs["dept"] stays the id (logic compares it); dept_name is what people read.
+    dept_names = dict((await db.execute(select(Department.id, Department.name))).all())
+    dept_names["unassigned"] = "Unassigned"
 
     dept_order: list[str] = []
     for agent in agents:
@@ -154,6 +157,7 @@ async def build_graph(db: AsyncSession, org_id: str | None = None) -> dict[str, 
             "kind": f"group:{dept}",
             "attrs": {
                 "dept": dept,
+                "dept_name": dept_names.get(dept, dept),
                 "stage": stage,
                 "entry": "production" if stage == "Production" else "pipeline",
                 "model_name": agent.model_name,
@@ -203,12 +207,13 @@ async def build_graph(db: AsyncSession, org_id: str | None = None) -> dict[str, 
             add_node({"id": nid, "name": consumer, "kind": "consumer", "attrs": {}})
             add_edge(agent.id, nid, "CONSUMED_BY")
 
-    legend = _build_legend(nodes, dept_color)
+    legend = _build_legend(nodes, dept_color, dept_names)
     stats = _build_stats(nodes, edges, agents)
     return {"nodes": nodes, "edges": edges, "legend": legend, "stats": stats}
 
 
-def _build_legend(nodes: list[dict[str, Any]], dept_color) -> list[dict[str, Any]]:
+def _build_legend(nodes: list[dict[str, Any]], dept_color,
+                  dept_names: dict[str, str] | None = None) -> list[dict[str, Any]]:
     counts: dict[str, int] = {}
     for node in nodes:
         counts[node["kind"]] = counts.get(node["kind"], 0) + 1
@@ -220,7 +225,8 @@ def _build_legend(nodes: list[dict[str, Any]], dept_color) -> list[dict[str, Any
 
     def label_of(kind: str) -> str:
         if kind.startswith("group:"):
-            return kind.removeprefix("group:").replace("dept-", "").replace("-", " ").title()
+            dept = kind.removeprefix("group:")
+            return (dept_names or {}).get(dept) or dept.replace("dept-", "").replace("-", " ").title()
         return {
             "system": "Enterprise Systems",
             "database": "Databases",
@@ -386,7 +392,8 @@ def affected_subgraph(adj: dict[str, Any], node_id: str) -> dict[str, Any]:
         affected_nodes.add(current)
         attrs = adj["agent_attrs"].get(current) or {}
         if attrs.get("dept"):
-            blast_depts.add(attrs["dept"])
+            # One name per id, so the count is unchanged; the list is read by people.
+            blast_depts.add(attrs.get("dept_name") or attrs["dept"])
         for caller in adj["callers_of"].get(current, []):
             key = f"{caller}|{current}|CALLS"
             if caller not in visited:

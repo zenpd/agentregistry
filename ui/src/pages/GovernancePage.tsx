@@ -4,6 +4,7 @@ import {
   registerDiscovery, dismissDiscovery, runGovernance,
   type Agent, type GovernanceOverview, type Discovery
 } from '../services/api'
+import { errorMessage } from './agent/shared'
 
 export default function GovernancePage() {
   const [agents, setAgents] = useState<Agent[]>([])
@@ -12,6 +13,8 @@ export default function GovernancePage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [running, setRunning] = useState<string | null>(null)
+  // Outcome of the last gate change or auto-review, shown instead of only logged.
+  const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
 
   useEffect(() => { fetchData() }, [])
 
@@ -35,21 +38,30 @@ export default function GovernancePage() {
   }
 
   async function handleUpdateGate(agentId: string, gate: string, status: string) {
+    const name = agents.find(a => a.id === agentId)?.name || agentId
     try {
       await updateGate(agentId, gate, status)
       await fetchData()
+      setNotice({ tone: 'ok', text: `${name}: ${gateLabels[gate]} set to ${status}.` })
     } catch (e: any) {
-      console.error('Failed to update gate:', e)
+      setNotice({ tone: 'error', text: `${name}: ${gateLabels[gate]} was not changed — ${errorMessage(e, 'the update failed')}` })
     }
   }
 
   async function handleRunGovernance(agentId: string) {
+    const name = agents.find(a => a.id === agentId)?.name || agentId
     setRunning(agentId)
     try {
-      await runGovernance(agentId)
+      const res = (await runGovernance(agentId)).data as { status?: string; message?: string; reviews?: Record<string, string> }
       await fetchData()
+      if (res?.reviews) {
+        const set = gates.map(g => `${gateLabels[g]}: ${res.reviews![g]}`).join(' · ')
+        setNotice({ tone: 'ok', text: `Auto-review of ${name} set ${set}.` })
+      } else {
+        setNotice({ tone: 'error', text: `Auto-review of ${name} did not run — ${res?.message || 'no result returned'}.` })
+      }
     } catch (e: any) {
-      console.error('Governance run failed:', e)
+      setNotice({ tone: 'error', text: `Auto-review of ${name} failed — ${errorMessage(e, 'the request failed')}` })
     } finally {
       setRunning(null)
     }
@@ -74,12 +86,13 @@ export default function GovernancePage() {
   }
 
   const gates = ['arb', 'security', 'dp']
-  const gateLabels: Record<string, string> = { arb: 'Architecture Review', security: 'Security Review', dp: 'Data Protection' }
+  const gateLabels: Record<string, string> = { arb: 'Architecture Review Board', security: 'Security Review', dp: 'Data Protection Review' }
   const statuses = ['Not Submitted', 'In Review', 'Changes Requested', 'Approved with Conditions', 'Approved']
   const pendingDiscs = discoveries.filter(d => d.status === 'pending')
 
   // KPI calculations
-  const cleared = agents.filter(a => ['arb', 'security', 'dp'].every(g => a.reviews?.[g] === 'Approved')).length
+  // Approved with conditions is still approved, as on the reuse checklist and in the prototype.
+  const cleared = agents.filter(a => ['arb', 'security', 'dp'].every(g => ['Approved', 'Approved with Conditions'].includes(a.reviews?.[g] || ''))).length
   const blocked = agents.filter(a => ['arb', 'security', 'dp'].some(g => a.reviews?.[g] === 'Changes Requested')).length
   const inReview = agents.filter(a => ['arb', 'security', 'dp'].some(g => a.reviews?.[g] === 'In Review')).length
 
@@ -88,25 +101,32 @@ export default function GovernancePage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Governance & Discovery</h1>
+      <div>
+        <h1 className="text-2xl font-bold">Governance & Discovery</h1>
+        <p className="text-gray-500 mt-0.5">Every agent’s path through Architecture, Security and Data Protection review, plus AI found running that isn’t registered yet.</p>
+      </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-4 gap-4">
         <div className="bg-white rounded-lg border p-4">
           <div className="text-2xl font-bold text-green-600">{cleared}</div>
-          <div className="text-xs text-gray-500">Cleared for production</div>
+          <div className="text-xs font-medium text-gray-700">Cleared for production</div>
+          <div className="text-[11px] text-gray-400 mt-0.5">All three reviews approved (with or without conditions)</div>
         </div>
         <div className="bg-white rounded-lg border p-4">
           <div className="text-2xl font-bold text-red-600">{blocked}</div>
-          <div className="text-xs text-gray-500">Blocked</div>
+          <div className="text-xs font-medium text-gray-700">Blocked</div>
+          <div className="text-[11px] text-gray-400 mt-0.5">Changes requested on at least one review</div>
         </div>
         <div className="bg-white rounded-lg border p-4">
           <div className="text-2xl font-bold text-amber-600">{inReview}</div>
-          <div className="text-xs text-gray-500">In active review</div>
+          <div className="text-xs font-medium text-gray-700">In active review</div>
+          <div className="text-[11px] text-gray-400 mt-0.5">At least one review awaiting a decision</div>
         </div>
         <div className="bg-white rounded-lg border p-4">
-          <div className="text-2xl font-bold text-coral-600">{pendingDiscs.length}</div>
-          <div className="text-xs text-gray-500">Unregistered AI apps found</div>
+          <div className="text-2xl font-bold text-orange-600">{pendingDiscs.length}</div>
+          <div className="text-xs font-medium text-gray-700">Unregistered AI apps found</div>
+          <div className="text-[11px] text-gray-400 mt-0.5">Flagged by auto-discovery, not registered yet</div>
         </div>
       </div>
 
@@ -129,6 +149,13 @@ export default function GovernancePage() {
         </div>
       )}
 
+      {notice && (
+        <div className={`flex items-start justify-between gap-3 rounded-lg border px-3 py-2 text-sm ${notice.tone === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-700'}`} role="status">
+          <span>{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} className="text-xs opacity-70 hover:opacity-100" aria-label="Dismiss">✕</button>
+        </div>
+      )}
+
       {/* Review Status Table */}
       <div className="bg-white rounded-lg border overflow-x-auto">
         <table className="w-full text-sm">
@@ -137,7 +164,7 @@ export default function GovernancePage() {
               <th className="p-3">Agent</th>
               <th className="p-3">Stage</th>
               {gates.map(g => <th key={g} className="p-3">{gateLabels[g]}</th>)}
-              <th className="p-3">Actions</th>
+              <th className="p-3" title="Auto-review runs rule checks and overwrites all three review statuses with its result">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -161,8 +188,9 @@ export default function GovernancePage() {
                     onClick={() => handleRunGovernance(a.id)}
                     disabled={running === a.id}
                     className="text-xs bg-teal-50 text-teal-700 px-2 py-1 rounded hover:bg-teal-100 disabled:opacity-50"
+                    title="Runs rule-based checks and overwrites all three review statuses with the result"
                   >
-                    {running === a.id ? 'Running...' : 'Run review'}
+                    {running === a.id ? 'Running…' : 'Run auto-review'}
                   </button>
                 </td>
               </tr>
@@ -188,7 +216,7 @@ export default function GovernancePage() {
                     d.confidence >= 70 ? 'bg-amber-50 text-amber-700 border-amber-200' :
                     'bg-red-50 text-red-700 border-red-200'
                   }`}>
-                    {d.confidence}%
+                    {d.confidence}% confidence
                   </span>
                 </div>
                 {d.signal && <div className="text-xs text-gray-600 mt-2">{d.signal}</div>}

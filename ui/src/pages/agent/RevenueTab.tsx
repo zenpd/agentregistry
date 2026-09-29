@@ -18,7 +18,8 @@ import {
   type ResourceLink,
   type TrendMonth,
 } from '../../services/ops/economics'
-import { Loading, SectionLabel, SEVERITY_PILL, SourceBadge, fmtCents, fmtNumber, type TabProps } from './shared'
+import { Loading, FieldLabel, SectionLabel, SEVERITY_PILL, SourceBadge, fmtCents, fmtNumber, type TabProps } from './shared'
+import Disclosure from '../../components/Disclosure'
 
 // Validated categorical slots 1-2 (blue, orange); value is neutral ink, not a series hue.
 const SERIES = { token: '#2a78d6', infra: '#eb6834', value: '#374151' }
@@ -62,6 +63,18 @@ function fmtCost(cents: number | null | undefined): string {
   return '$' + Number(n.toPrecision(3)).toString()
 }
 
+// Past 1,000% a percentage stops reading as a number; the multiple says the
+// same thing plainly (value is N times what it costs to run).
+function fmtRoi(pct: number): string {
+  return Math.abs(pct) >= 1000 ? `${Math.round(pct / 100 + 1).toLocaleString()}× cost` : `${pct.toLocaleString()}%`
+}
+
+// A real but tiny share must not read as zero. The API rounds to one
+// decimal, so a nonzero cost can arrive as 0.
+function fmtSmallPct(pct: number, hasCost: boolean): string {
+  return hasCost && pct < 0.1 ? '<0.1%' : `${pct.toLocaleString()}%`
+}
+
 function fmtSigned(cents: number): string {
   return (cents < 0 ? '−' : '+') + fmtCents(Math.abs(cents))
 }
@@ -95,10 +108,10 @@ function Tile({ label, value, sub, accent, muted }: {
   muted?: boolean
 }) {
   return (
-    <div className="rounded-lg bg-gray-50 px-3 py-2 min-w-0">
-      <div className="text-[10px] text-gray-400 uppercase tracking-wide">{label}</div>
-      <div className={`mt-0.5 ${muted ? 'text-sm font-medium text-gray-400' : `text-base font-bold ${accent || 'text-gray-900'}`}`}>{value}</div>
-      {sub && <div className="text-[11px] text-gray-500 mt-0.5 flex flex-wrap items-center gap-1">{sub}</div>}
+    <div className="rounded-xl bg-white px-3.5 py-2.5 min-w-0 ring-1 ring-slate-200/80 shadow-sm">
+      <div className="text-[10.5px] font-semibold uppercase tracking-[.04em] text-slate-500">{label}</div>
+      <div className={`mt-1 ${muted ? 'text-sm font-medium text-slate-400' : `text-lg font-extrabold leading-tight ${accent || 'text-slate-900'}`}`}>{value}</div>
+      {sub && <div className="text-[11.5px] text-slate-500 mt-1 flex flex-wrap items-center gap-1">{sub}</div>}
     </div>
   )
 }
@@ -151,11 +164,10 @@ export default function RevenueTab({ agentId }: TabProps) {
       <PeriodStrip econ={econ} />
       {error && <p className="text-xs text-rose-600">Reload failed: {error}</p>}
       {econ.tokenSource === 'seed' && (
-        <Banner tone="gray">
-          <span className="font-semibold text-gray-700">Demo data.</span> The token cost comes from sample usage rows
-          seeded with the registry, not from this agent's traces.{' '}
+        <Disclosure summary={<><span className="font-semibold text-gray-600">Demo data</span> — the token cost is a sample figure.</>}>
+          The token cost comes from sample usage rows seeded with the registry, not from this agent's traces.{' '}
           {econ.token.phoenixLinked ? 'Refresh from Phoenix on the Tokenomics tab to replace it.' : 'Link a Phoenix project on the Diagram tab to measure it.'}
-        </Banner>
+        </Disclosure>
       )}
       {nothingKnown && (
         <Banner tone="gray">
@@ -242,11 +254,12 @@ function Headline({ econ }: { econ: AgentEconomicsDetail }) {
               sub={<span>declared value − total cost{econ.costComplete ? '' : ' (incomplete)'}</span>} />
           : <Tile label="Net" muted value="—" sub={<span>Value not declared</span>} />}
         {econ.roiPct != null
-          ? <Tile label="ROI" value={`${econ.roiPct.toLocaleString()}%`}
-              sub={<span>{econ.paybackMonths != null ? `payback ${econ.paybackMonths} mo on ${fmtCents(econ.oneTimeCostCents)} one-time` : '(value − cost) ÷ cost'}</span>} />
+          ? <Tile label="ROI" value={fmtRoi(econ.roiPct)}
+              sub={<span>{econ.paybackMonths != null ? `payback ${econ.paybackMonths} mo on ${fmtCents(econ.oneTimeCostCents)} one-time`
+                : Math.abs(econ.roiPct) >= 1000 ? `value vs cost · ROI ${econ.roiPct.toLocaleString()}%` : '(value − cost) ÷ cost'}</span>} />
           : <Tile label="ROI" muted value="—" sub={<span>{econ.valueDeclared ? 'No cost to compare' : 'Value not declared'}</span>} />}
         {econ.costToValuePct != null
-          ? <Tile label="Cost to value" value={`${econ.costToValuePct.toLocaleString()}%`} sub={<span>of declared value spent running it</span>} />
+          ? <Tile label="Cost to value" value={fmtSmallPct(econ.costToValuePct, econ.totalCostCents > 0)} sub={<span>of declared value spent running it</span>} />
           : <Tile label="Cost to value" muted value="—" sub={<span>Value not declared</span>} />}
       </div>
     </section>
@@ -375,7 +388,7 @@ function Trend({ econ }: { econ: AgentEconomicsDetail }) {
               {' '}— token {fmtCost(focus.tokenCostCents)}, infra {fmtCents(focus.infraCostCents)}
               {focus.infraSource ? ` (${focus.infraSource})` : ''}, value {fmtCents(focus.valueCents)}
               {focus.netCents != null && <>, net {fmtSigned(focus.netCents)}</>}
-              {focus.roiPct != null && <>, ROI {focus.roiPct}%</>}
+              {focus.roiPct != null && <>, ROI {fmtRoi(focus.roiPct)}</>}
             </p>
           )}
         </>
@@ -405,7 +418,7 @@ function TrendTable({ months }: { months: TrendMonth[] }) {
                 <td className="py-1 pr-3">{fmtCost(m.totalCostCents)}</td>
                 <td className="py-1 pr-3">{fmtCents(m.valueCents)}</td>
                 <td className="py-1 pr-3">{m.netCents == null ? '—' : fmtSigned(m.netCents)}</td>
-                <td className="py-1 pr-3">{m.roiPct == null ? '—' : `${m.roiPct}%`}</td>
+                <td className="py-1 pr-3">{m.roiPct == null ? '—' : fmtRoi(m.roiPct)}</td>
               </tr>
             ))}
           </tbody>
@@ -587,7 +600,7 @@ function CollectorStatus({ agentId, status, error, onCollected }: {
 function MeteredResources({ econ }: { econ: AgentEconomicsDetail }) {
   return (
     <div className="space-y-1">
-      <SectionLabel>Metered this month, by resource</SectionLabel>
+      <FieldLabel>Metered this month, by resource</FieldLabel>
       <ul className="divide-y divide-gray-100 text-xs">
         {econ.infra.byResource.map(r => (
           <li key={r.resourceId} className="flex items-center justify-between gap-3 py-1">
@@ -677,7 +690,7 @@ function DeclaredInfraForm({ agentId, stage, estimateCents, onSaved }: {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <SectionLabel>Declared by owner</SectionLabel>
+        <FieldLabel>Declared by owner</FieldLabel>
         <span className="text-[11px] text-gray-400">
           {profile.declared
             ? `${fmtCents(profile.monthlyCostCents)}/mo declared${profile.updatedBy ? ` by ${profile.updatedBy}` : ''}`
@@ -783,7 +796,7 @@ function ResourceLinks({ agentId, tagKey }: { agentId: string; tagKey: string })
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <SectionLabel>Linked Azure resources</SectionLabel>
+        <FieldLabel>Linked Azure resources</FieldLabel>
         <span className="text-[11px] text-gray-400">
           Resources tagged <span className="font-mono">{tagKey}={agentId}</span> are found without a link; link shared ones with a share %.
         </span>

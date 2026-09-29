@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Send, AlertTriangle, ListTree, Server } from 'lucide-react'
+import { Send, ListTree } from 'lucide-react'
 import {
   getApiOperations, tryAgent, updateContract,
   type ApiOperations, type EndpointAdvice, type Integration, type TryItResult,
 } from '../services/ops/integrate'
 import { errorMessage } from '../pages/agent/shared'
+import ErrorNote from './ErrorNote'
 
 function pretty(body: unknown): string {
   if (body == null) return ''
@@ -36,6 +37,18 @@ function explain(result: TryItResult, method: string, canPickPath: boolean): str
 }
 
 type Target = 'api' | 'recorded'
+
+const normPath = (p: string) => p.split('?')[0].replace(/\/+$/, '') || '/'
+
+// Whether a path is one the host publishes; {params} match one segment, so
+// /api/v1/onboard/abc counts as /api/v1/onboard/{session_id}.
+function inApiList(ops: ApiOperations, path: string): boolean {
+  const wanted = normPath(path)
+  return ops.operations.some(o => {
+    const pattern = normPath(o.path).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{[^}]+\}/g, '[^/]+')
+    return new RegExp(`^${pattern}$`).test(wanted)
+  })
+}
 
 // Paths that prove the host is up but are not what a consumer calls, so a
 // 200 from them is no reason to make them the contract endpoint.
@@ -98,7 +111,11 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
 
   const onApi = tryIt.pathEditable && target === 'api'
   const isHtml = (result?.contentType || '').includes('text/html')
-  const hint = result ? explain(result, result.method, tryIt.pathEditable) : null
+  const explained = result ? explain(result, result.method, tryIt.pathEditable) : null
+  // The endpoint advice is only worth saying once a call has gone wrong.
+  const hint = explained && endpointAdvice && (!tryIt.backendDefault || target === 'recorded')
+    ? `${explained} ${endpointAdvice.looksLike === 'frontend' ? 'The recorded endpoint looks like a web page' : 'The recorded endpoint is a tracing URL'} — see Contract above for where to find the real API.`
+    : explained
   // A path that just answered with data, and is not what the contract says yet.
   const savable = !!onEndpointSaved && !!result?.ok && !isHtml && result.url !== tryIt.url && onApi
     && !PROBE_PATH.test(new URL(result.url).pathname)
@@ -166,45 +183,14 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
   }
 
   const templated = onApi && path.includes('{')
+  // Mirrors the server's rule, so a bad path is explained before Send.
+  const badPath = onApi && (!path.startsWith('/') || path.startsWith('//'))
+  // Once the API list is loaded it is better evidence than any guess from
+  // the URL: e.g. a recorded /analytics that the backend does not serve.
+  const unlisted = onApi && !badPath && !templated && !!ops?.ok && ops.operations.length > 0 && !inApiList(ops, path)
 
   return (
     <div className="space-y-3" data-testid="try-it">
-      {tryIt.backendDefault && endpointAdvice?.suggestedBase ? (
-        <div className="flex gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900" data-testid="try-it-backend-default">
-          <Server size={14} className="shrink-0 mt-0.5 text-sky-600" />
-          <span className="flex-1">
-            {target === 'api' ? (
-              <>
-                <span className="font-medium">Calling the backend host by default.</span> The recorded endpoint is the
-                app’s web page, so calls go to <code className="font-mono">{endpointAdvice.suggestedBase}</code> instead.
-                Load its API operations to pick a real path.{' '}
-                <button type="button" className="underline hover:no-underline" onClick={() => { setTarget('recorded'); setResult(null) }}>
-                  Call the recorded page instead
-                </button>
-              </>
-            ) : (
-              <>
-                <span className="font-medium">Calling the recorded endpoint,</span> the app’s web page — expect HTML, not data.{' '}
-                <button type="button" className="underline hover:no-underline" onClick={() => { setTarget('api'); setResult(null) }}>
-                  Back to the backend host
-                </button>
-              </>
-            )}
-          </span>
-        </div>
-      ) : endpointAdvice && (
-        <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="try-it-endpoint-advice">
-          <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-600" />
-          <span>
-            <span className="font-medium">
-              {endpointAdvice.looksLike === 'frontend' ? "This doesn't look like an API — " : 'This is a tracing endpoint, not an API — '}
-            </span>
-            calling it below will likely return {endpointAdvice.looksLike === 'frontend' ? 'a web page' : 'nothing useful'}, not data.
-            See Contract above for where to find the real one.
-          </span>
-        </div>
-      )}
-
       {onApi && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <button type="button" onClick={loadOperations} disabled={opsBusy} className="btn-secondary btn-sm flex items-center gap-1.5" data-testid="load-operations">
@@ -233,7 +219,7 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
           )}
         </div>
       )}
-      {opsError && <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800" data-testid="operations-error">{opsError}</div>}
+      {opsError && <ErrorNote message={opsError} hint={ops?.hint} onDismiss={() => setOpsError(null)} testId="operations-error" />}
 
       <div className="flex items-center gap-2 text-xs">
         <select className="input w-auto py-1.5" value={method} onChange={e => setMethod(e.target.value as 'POST' | 'GET')} aria-label="HTTP method">
@@ -257,6 +243,19 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
           <code className="flex-1 truncate rounded-lg bg-gray-50 px-3 py-2 font-mono text-gray-700" title={tryIt.url || ''}>{tryIt.url}</code>
         )}
       </div>
+      {tryIt.backendDefault && endpointAdvice?.suggestedBase && (
+        <p className="text-[11.5px] text-gray-400" data-testid="try-it-backend-default">
+          {target === 'api'
+            ? <>Calling the app’s backend host (the recorded endpoint is its web page). <button type="button" className="underline hover:text-gray-600" onClick={() => { setTarget('recorded'); setResult(null) }}>Call the recorded page instead</button></>
+            : <>Calling the recorded web page. <button type="button" className="underline hover:text-gray-600" onClick={() => { setTarget('api'); setResult(null) }}>Back to the backend host</button></>}
+        </p>
+      )}
+      {badPath && <p className="text-xs text-rose-700">The path must start with a single /, e.g. /api/v1/…</p>}
+      {unlisted && (
+        <p className="text-xs text-amber-700" data-testid="path-not-listed">
+          <code className="font-mono">{normPath(path)}</code> is not in this host’s API list, so it will most likely answer 404. Pick an operation above.
+        </p>
+      )}
       {templated && <p className="text-xs text-amber-700">Replace the {'{…}'} part of the path with a real value before sending.</p>}
 
       {method === 'POST' && (
@@ -275,7 +274,7 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
           Sent from the registry server. Your login is not passed to the agent. Calls are logged without their
           content and limited per minute.
         </p>
-        <button type="button" onClick={send} disabled={busy} className="btn-primary btn-sm flex items-center gap-1.5 shrink-0">
+        <button type="button" onClick={send} disabled={busy || badPath} className="btn-primary btn-sm flex items-center gap-1.5 shrink-0">
           <Send size={14} /> {busy ? 'Calling…' : 'Send'}
         </button>
       </div>
@@ -293,7 +292,7 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
             {result.contentType && <span className="text-gray-400 truncate">{result.contentType}</span>}
             <span className="ml-auto font-mono text-gray-400 truncate max-w-full" title={result.url}>{result.url}</span>
           </div>
-          {result.error && <div className="px-3 py-2 text-xs text-rose-700">{result.error}</div>}
+          {result.error && <div className="px-3 py-2"><ErrorNote message={result.error} hint={result.hint} /></div>}
           {result.location && (
             <div className="px-3 py-2 text-xs text-amber-700">Redirect to {result.location} was not followed.</div>
           )}

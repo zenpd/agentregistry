@@ -6,7 +6,7 @@ import {
   type DiagramGraph, type DependenciesResponse, type DependencyComparison, type DeclaredDeps,
   type ObservedOnlyDep, type AdoptResponse, type BlastRadius, type UpstreamDep, type SharedResource,
 } from '../../services/ops/diagram'
-import { Loading, SectionLabel, SourceBadge, MiniStat, STAGE_PILL, fmtDollars, fmtNumber, type TabProps } from './shared'
+import { Loading, FieldLabel, SectionLabel, SourceBadge, MiniStat, STAGE_PILL, fmtDollars, fmtNumber, type TabProps } from './shared'
 import TraceNetworkGraph, { styleFor } from '../../components/TraceNetworkGraph'
 import TrajectoryDiagram from '../../components/TrajectoryDiagram'
 import PhoenixProjectPicker from '../../components/PhoenixProjectPicker'
@@ -478,7 +478,7 @@ function DeclaredList({ declared, upstream }: { declared: DeclaredDeps; upstream
     <div className="grid grid-cols-2 gap-3">
       {filled.map(([label, items]) => (
         <div key={label}>
-          <SectionLabel>{label}</SectionLabel>
+          <FieldLabel>{label}</FieldLabel>
           <div className="flex flex-wrap gap-1 mt-1">
             {items.map(item => (
               <span key={item} className={`text-xs px-2 py-0.5 rounded-full ring-1 ${NEUTRAL_CHIP}`}>{item}</span>

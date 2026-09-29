@@ -227,6 +227,13 @@ def test_a_fe_host_pairs_with_its_be_host(endpoint, sibling):
     assert advice["suggestedBase"] == sibling and sibling in advice["message"]
 
 
+def test_advice_points_to_try_it_when_the_be_host_is_known():
+    known = reuse.endpoint_advice("https://shop-fe.example.com/dashboard")["where"][0]
+    assert "https://shop-be.example.com" in known and "Load API operations" in known
+    unknown = reuse.endpoint_advice("https://www.example.com/login")["where"][0]
+    assert "Load API operations" not in unknown and "/openapi.json" in unknown
+
+
 @pytest.mark.parametrize("endpoint", [
     "https://www.example.com/login", "https://app.example.com/", "https://onboarding-be.example.com/dashboard",
     "/dashboard", "", None,
@@ -298,6 +305,37 @@ def test_openapi_lists_the_get_and_post_operations_with_a_starting_body():
     assert found["operations"][2]["hasPathParams"] and found["operations"][2]["summary"] == "get_session"
     # DELETE can't be sent from Try it; it is counted, not silently dropped.
     assert found["otherMethods"] == 1 and found["truncated"] is False
+
+
+def _post_body(schema, **extra):
+    spec = {"paths": {"/a": {"post": {"requestBody": {"content": {"application/json": {"schema": schema}}}}}}, **extra}
+    return reuse.openapi_operations(spec)["operations"][0]["exampleBody"]
+
+
+@pytest.mark.parametrize("schema,expected", [
+    # OpenAPI 3.1: a type list, and examples as a list.
+    ({"type": "object", "properties": {"n": {"type": ["string", "null"]}}}, {"n": ""}),
+    ({"type": "object", "properties": {"x": {"type": "string", "examples": ["hello"]}}}, {"x": "hello"}),
+    # allOf composes: every part's fields, not only the first part's.
+    ({"allOf": [{"type": "object", "properties": {"a": {"type": "string"}}},
+                {"type": "object", "properties": {"b": {"type": "integer"}}}]}, {"a": "", "b": 0}),
+    ({"anyOf": [{"type": ["null"]}, {"type": "boolean"}]}, False),
+    # Malformed or unusual shapes give an empty start, never an error.
+    ({"anyOf": [True]}, None),
+    ({"type": "object", "properties": ["x"]}, {}),
+    ({"type": 5}, None),
+])
+def test_starting_body_handles_31_composition_and_malformed_schemas(schema, expected):
+    assert _post_body(schema) == expected
+
+
+def test_a_shared_request_body_is_followed():
+    spec = {"paths": {"/a": {"post": {"requestBody": {"$ref": "#/components/requestBodies/B"}}},
+                      "/b": {"post": {"requestBody": ["not", "a", "body"]}}},
+            "components": {"requestBodies": {"B": {"content": {"application/json": {
+                "schema": {"type": "object", "properties": {"x": {"type": "string"}}}}}}}}}
+    ops = reuse.openapi_operations(spec)["operations"]
+    assert [o["exampleBody"] for o in ops] == [{"x": ""}, None]
 
 
 def test_a_document_without_paths_is_not_an_openapi_spec():

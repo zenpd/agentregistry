@@ -49,6 +49,8 @@ export interface Integration {
   reuseCheck: { checked: { id: string; name: string; score: number; certified: boolean }[]; justification: string | null }
   tryIt: TryItTarget & { examplePayload: Record<string, string> }
   accessRequests: AccessRequest[]
+  // Testing mode (ALLOW_SELF_APPROVAL): the requester may approve their own request.
+  selfApprovalAllowed: boolean
   consumers: { approvedTeams: string[]; declared: string[] }
 }
 
@@ -76,6 +78,7 @@ export interface ApiOperation {
 export interface ApiOperations {
   ok: boolean
   error?: string | null
+  hint?: string | null
   base: string
   specUrl: string
   title: string | null
@@ -104,6 +107,8 @@ export interface TryItResult {
   truncated?: boolean
   location?: string | null
   error?: string
+  // What to do about the error; only sent with one.
+  hint?: string
   latencyMs?: number
 }
 

@@ -10,6 +10,7 @@ import GovernancePage from './pages/GovernancePage'
 import PlatformView from './pages/PlatformView'
 import DependencyGraphView from './pages/DependencyGraphView'
 import BusinessView from './pages/BusinessView'
+import ApprovalsPage from './pages/ApprovalsPage'
 import { getAuthToken } from './services/api'
 
 export default function App() {
@@ -30,6 +31,7 @@ function AuthShell() {
       <Routes>
         <Route path="/" element={<ExecutivePage />} />
         <Route path="/business" element={<BusinessView />} />
+        <Route path="/approvals" element={<ApprovalsPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/agents/:id" element={<AgentPage />} />
         <Route path="/governance" element={<GovernancePage />} />

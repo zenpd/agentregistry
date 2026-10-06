@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { UserPlus, Users } from 'lucide-react'
 import { createUser, getMe, getTaxonomy, getUsers, type User } from '../services/api'
+import InfoTip from './InfoTip'
 import { errorMessage } from '../pages/agent/shared'
 
 const EMPTY = { name: '', email: '', role: '', password: '' }
@@ -57,7 +58,7 @@ export default function UsersSection() {
     }
   }
 
-  const label = 'block text-xs font-semibold uppercase text-gray-500 mb-1 tracking-wide'
+  const label = 'block text-xs font-semibold uppercase text-slate-600 mb-1 tracking-wide'
 
   return (
     <div className="card p-6 space-y-4" data-testid="users-section">
@@ -66,7 +67,7 @@ export default function UsersSection() {
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-zen-50 text-zen-600"><Users size={20} /></div>
           <div>
             <h3 className="text-[16px] font-extrabold text-slate-900">Users</h3>
-            <p className="text-[13px] text-slate-500">People who can sign in. Optional while testing — you can approve your own requests.</p>
+            <p className="text-[13px] text-slate-600">People who can sign in. Optional while testing — you can approve your own requests.</p>
           </div>
         </div>
         {!adding && (
@@ -91,11 +92,14 @@ export default function UsersSection() {
               <input id="u-email" type="email" className="input" value={form.email} onChange={set('email')} placeholder="priya@company.com" />
             </div>
             <div>
-              <label className={label} htmlFor="u-role">Role</label>
+              <div className="flex items-center gap-1">
+                <label className={label} htmlFor="u-role">Role</label>
+                <InfoTip term="user_role" className="-my-0.5 mb-1" />
+              </div>
               <select id="u-role" className="input" value={role} onChange={set('role')}>
                 {roles.map(r => <option key={r} value={r}>{r}</option>)}
               </select>
-              <p className="mt-1 text-[11px] text-slate-400">Recorded only for now; everyone can do everything.</p>
+              <p className="mt-1 text-[12px] text-slate-500">Recorded only for now; everyone can do everything.</p>
             </div>
             <div>
               <label className={label} htmlFor="u-password">Temporary password</label>
@@ -116,7 +120,7 @@ export default function UsersSection() {
       {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-700">{error}</div>}
 
       {users === null ? (
-        <p className="text-sm text-slate-400">Loading users…</p>
+        <p className="text-sm text-slate-500">Loading users…</p>
       ) : (
         <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white" data-testid="user-list">
           {users.map(u => (
@@ -125,12 +129,12 @@ export default function UsersSection() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-slate-900 truncate">{u.name}</span>
-                  {u.id === me && <span className="rounded-full bg-zen-50 px-2 py-0.5 text-[11px] font-bold text-zen-700 ring-1 ring-zen-200">You</span>}
+                  {u.id === me && <span className="rounded-full bg-zen-50 px-2 py-0.5 text-[12px] font-bold text-zen-700 ring-1 ring-zen-200">You</span>}
                 </div>
-                <div className="text-[13px] text-slate-500 truncate">{u.email}</div>
+                <div className="text-[13px] text-slate-600 truncate">{u.email}</div>
               </div>
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[12px] font-semibold text-slate-700">{u.role}</span>
-              <span className={`text-[12px] font-semibold ${u.isActive ? 'text-emerald-700' : 'text-slate-400'}`}>{u.isActive ? 'Active' : 'Inactive'}</span>
+              <span className={`text-[12px] font-semibold ${u.isActive ? 'text-emerald-700' : 'text-slate-500'}`}>{u.isActive ? 'Active' : 'Inactive'}</span>
             </li>
           ))}
         </ul>

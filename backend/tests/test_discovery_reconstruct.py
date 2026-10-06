@@ -26,7 +26,7 @@ def _edge(result, frm, to, kind=CALLS):
 
 def test_empty_spans_returns_empty_graph():
     result = reconstruct([])
-    assert result == {"spanCount": 0, "traceCount": 0, "nodes": [], "edges": []}
+    assert result == {"spanCount": 0, "traceCount": 0, "nodes": [], "edges": [], "mode": "steps"}
 
 
 def test_tool_span_is_a_node():
@@ -435,3 +435,32 @@ def test_no_root_falls_back_to_first_node_without_crashing():
     spans = [_span("s1", "s2", "a", "TOOL"), _span("s2", "s1", "b", "TOOL")]
     result = reconstruct(spans)
     assert any(n["isRoot"] for n in result["nodes"])
+
+
+# ── apps that send plain OpenTelemetry spans (no agent / tool kinds) ──────────
+
+def _plain(name, trace, kind="UNKNOWN", start="2026-09-29T10:00:00+00:00", parent=None):
+    return {"name": name, "span_kind": kind, "parent_id": parent, "start_time": start, "end_time": start,
+            "context": {"trace_id": trace, "span_id": f"{trace}-{name}"}, "attributes": {}}
+
+
+def test_plain_spans_are_drawn_as_operations_when_nothing_else_resolves():
+    from discovery.reconstruct import reconstruct
+    spans = [_plain("iso_mapper.transform", f"t{i}") for i in range(3)] + [_plain("ChatCompletion", "t9", kind="LLM")]
+    g = reconstruct(spans)
+    assert g["mode"] == "operations"
+    assert [(n["name"], n["kind"], n["count"]) for n in g["nodes"]] == [("iso_mapper.transform", "step", 3)]   # model calls are not steps
+    assert g["spanCount"] == 4 and g["traceCount"] == 4
+
+
+def test_the_fallback_is_not_used_when_real_steps_exist():
+    from discovery.reconstruct import reconstruct
+    spans = [_plain("planner", "t1", kind="AGENT"), _plain("iso_mapper.transform", "t1")]
+    g = reconstruct(spans)
+    assert g["mode"] == "steps" and [n["name"] for n in g["nodes"]] == ["planner"]
+
+
+def test_only_model_calls_still_gives_an_empty_graph_not_a_crash():
+    from discovery.reconstruct import reconstruct
+    g = reconstruct([_plain("ChatCompletion", "t1", kind="LLM"), _plain("_internal", "t2"), _plain("", "t3")])
+    assert g["nodes"] == [] and g["mode"] == "steps" and g["spanCount"] == 3

@@ -15,6 +15,7 @@ export); this is the first code that READS them back.
 from __future__ import annotations
 
 from typing import Any, AsyncIterator
+from urllib.parse import quote
 
 import httpx
 
@@ -59,7 +60,11 @@ class PhoenixClient:
             raise PhoenixError("GET", f"{self.base_url}{path}", response.status_code, response.text)
         if not response.content:
             return None
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as exc:
+            # An HTML login page from a proxy is not Phoenix: report it as a failure to read.
+            raise PhoenixError("GET", f"{self.base_url}{path}", 0, "The answer was not JSON") from exc
 
     async def projects(self) -> list[str]:
         """Every project name Phoenix currently knows about. One page only
@@ -67,6 +72,28 @@ class PhoenixClient:
         full sweep."""
         page = await self._get("/v1/projects", params={"limit": PAGE_SIZE})
         return [p["name"] for p in (page or {}).get("data") or []]
+
+    async def all_projects(self, max_pages: int = 20) -> list[dict]:
+        """Every project, following the cursor ({name, id}); `projects()` is
+        the single-page dropdown helper. Bounded so a runaway cursor ends."""
+        found: list[dict] = []
+        cursor: str | None = None
+        for _ in range(max_pages):
+            params: dict[str, Any] = {"limit": PAGE_SIZE}
+            if cursor:
+                params["cursor"] = cursor
+            try:
+                page = await self._get("/v1/projects", params=params)
+            except PhoenixError as exc:
+                # A Phoenix that scales to zero can miss the first request while it wakes up: one more try.
+                if exc.status != 0:
+                    raise
+                page = await self._get("/v1/projects", params=params)
+            found.extend({"name": p["name"], "id": p.get("id")} for p in (page or {}).get("data") or [] if p.get("name"))
+            cursor = (page or {}).get("next_cursor")
+            if not cursor:
+                break
+        return found
 
     async def spans(
         self,
@@ -99,7 +126,7 @@ class PhoenixClient:
                 params["span_kind"] = span_kind
             if cursor:
                 params["cursor"] = cursor
-            page = await self._get(f"/v1/projects/{project}/spans", params=params)
+            page = await self._get(f"/v1/projects/{quote(project, safe='')}/spans", params=params)
             pages_fetched += 1
             for span in (page or {}).get("data") or []:
                 yield span

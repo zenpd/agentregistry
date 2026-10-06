@@ -48,7 +48,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable
 
-from discovery.observed_deps import agent_name_index, classify_span
+from discovery.observed_deps import _FRAMEWORK_AGENT_NAMES, _PLUMBING_PATTERN, agent_name_index, classify_span
 
 # How many plumbing hops to walk through when looking for a resolved
 # ancestor — generous enough for any real LangGraph interrupt/routing
@@ -149,7 +149,40 @@ def _layer_depths(node_keys: Iterable[str], edge_pairs: Iterable[tuple[str, str]
     return depth, roots
 
 
+# Span kinds that are model calls, never a step of their own even when nothing else is drawn.
+_MODEL_KINDS = {"LLM", "EMBEDDING", "RERANKER", "EVALUATOR"}
+
+
+def _loose_step(span: dict) -> tuple[str, str] | None:
+    """For an app that sends plain OpenTelemetry spans (no agent / tool / retriever
+    kinds): a span with a usable name is one of that app's operations, drawn as a step."""
+    if str(span.get("span_kind") or "").upper() in _MODEL_KINDS:
+        return None
+    name = span.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    lname = name.strip().lower()
+    if lname in _FRAMEWORK_AGENT_NAMES or _PLUMBING_PATTERN.match(lname):
+        return None
+    return ("step", name.strip())
+
+
 def reconstruct(spans: Iterable[dict]) -> dict:
+    """The graph for a sample. When the app reports no agent / tool / retriever
+    steps at all, the operations named in its spans are drawn instead and the
+    result says so (``mode: "operations"``), rather than an empty diagram."""
+    spans = list(spans)
+    result = _build(spans, loose=False)
+    result["mode"] = "steps"
+    if not result["nodes"] and spans:
+        loose = _build(spans, loose=True)
+        if loose["nodes"]:
+            loose["mode"] = "operations"
+            return loose
+    return result
+
+
+def _build(spans: Iterable[dict], loose: bool) -> dict:
     """Builds {nodes, edges, spanCount, traceCount} from raw Phoenix span
     dicts. Never raises on one malformed span — a span missing a field it
     needs is just skipped for that field, never fatal to the whole
@@ -189,6 +222,8 @@ def reconstruct(spans: Iterable[dict]) -> dict:
             trace_ids.add(trace_id)
 
         classified = classify_span(span, agent_names)
+        if not classified and loose:
+            classified = _loose_step(span)
         key = None
         if not classified and span_id and span.get("status_code") == "ERROR":
             folded_errors.append(span_id)

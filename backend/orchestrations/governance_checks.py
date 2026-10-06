@@ -24,7 +24,8 @@ HIGH_SEVERITIES = ("HIGH", "CRITICAL")
 PII_RULE_ID = "data_privacy.pii_detected"
 # Audit actions that change an agent's declared facts (edit form, adopted
 # trace dependencies, confirmed context.md suggestions).
-AGENT_CHANGE_ACTIONS = ("update", "adopt_observed_dependencies", "context.suggestion.confirm")
+AGENT_CHANGE_ACTIONS = ("update", "adopt_observed_dependencies", "context.suggestion.confirm",
+                        "ai.autofill", "ai.autofill.undo")
 
 
 def utcnow() -> datetime:
@@ -86,6 +87,11 @@ async def _risk_scan_run(db: AsyncSession, agent_id: str) -> bool:
     return job.first() is not None
 
 
+async def _auto_filled(db: AsyncSession, agent: Agent) -> dict[str, str]:
+    from services.autofill import auto_filled_fields
+    return await auto_filled_fields(db, agent)
+
+
 async def _material_changes(db: AsyncSession, agent_id: str) -> list[dict]:
     rows = (await db.execute(
         select(AuditLog.created_at, AuditLog.changes).where(
@@ -143,6 +149,7 @@ async def load_state(db: AsyncSession, agent: Agent, now: datetime) -> dict:
         "observed_model": usage["topModel"] if usage else None,
         "model_aliases": await load_aliases(db),
         "material_changes": await _material_changes(db, agent.id),
+        "auto_filled": await _auto_filled(db, agent),
         "validity_days": gp.validity_days(risk_tier, settings),
     }
     return {

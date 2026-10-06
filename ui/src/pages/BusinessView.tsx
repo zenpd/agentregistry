@@ -4,6 +4,8 @@ import {
   AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, CircleDashed, Coins, Hourglass, Pencil, Rocket, TrendingUp, X,
 } from 'lucide-react'
 import { getAgents, getPortfolioEconomics, type AgentEconomics, type RegistryAgent } from '../services/api'
+import InfoTip from '../components/InfoTip'
+import type { GlossaryKey } from '../lib/glossary'
 import EditAgentModal from '../components/EditAgentModal'
 import { STAGE_PILL, SourceBadge, TypeBadge, errorMessage, fmtCents, fmtMoney } from './agent/shared'
 
@@ -41,7 +43,7 @@ const APPROVED = ['Approved', 'Approved with Conditions']
 const BLOCKER: Record<Blocker, { label: string; icon: typeof Hourglass; iconClass: string }> = {
   changes: { label: 'Changes requested', icon: AlertTriangle, iconClass: 'text-rose-600 bg-rose-50' },
   reviewing: { label: 'Waiting on a reviewer', icon: Hourglass, iconClass: 'text-amber-600 bg-amber-50' },
-  unsubmitted: { label: 'Reviews not submitted', icon: CircleDashed, iconClass: 'text-slate-500 bg-slate-100' },
+  unsubmitted: { label: 'Reviews not submitted', icon: CircleDashed, iconClass: 'text-slate-600 bg-slate-100' },
   ready: { label: 'Approved, ready to promote', icon: CheckCircle2, iconClass: 'text-emerald-600 bg-emerald-50' },
 }
 const ORDER: Blocker[] = ['changes', 'reviewing', 'unsubmitted', 'ready']
@@ -103,7 +105,7 @@ export default function BusinessView() {
   // A different unit starts with the full list and nothing expanded.
   useEffect(() => { setFocus(null); setOpen(null) }, [dept])
 
-  if (loading) return <div className="p-8 text-center text-gray-500">Loading…</div>
+  if (loading) return <div className="p-8 text-center text-slate-600">Loading…</div>
   if (error) return <div className="p-8 text-center text-rose-500">Error: {error}</div>
 
   const units = [...agents.reduce((m, a) => {
@@ -141,14 +143,14 @@ export default function BusinessView() {
 
   const select = (key: string) => setSearchParams(key ? { dept: key } : {}, { replace: true })
   const chip = (active: boolean) => `text-xs px-3 py-1 rounded-full border transition-colors ${
-    active ? 'bg-teal-600 text-white border-teal-600' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:text-gray-800'
+    active ? 'bg-zen-600 text-white border-zen-600' : 'bg-white text-slate-700 border-gray-200 hover:border-gray-300 hover:text-slate-800'
   }`
 
   return (
     <div className="space-y-5 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold gradient-text">Business Impact</h1>
-        <p className="text-gray-500 mt-0.5">What each business unit is running, the outcomes it produces and what it costs. Filter to your team.</p>
+        <p className="text-slate-600 mt-0.5">What each business unit is running, the outcomes it produces and what it costs. Filter to your team.</p>
       </div>
 
       <div className="flex gap-2 flex-wrap" role="group" aria-label="Business unit" data-testid="bu-chips">
@@ -165,21 +167,21 @@ export default function BusinessView() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="bu-kpis">
         <Kpi label="Agents running" value={running.length.toLocaleString()}
           sub={`${live.length} live in production${list.length > running.length ? ` · ${list.length - running.length} retired not counted` : ''}`} />
-        <Kpi label="Value / month" value={fmtMoney(realized + projected)} accent="text-teal-600"
+        <Kpi label="Value / month" tip="declared_value" value={fmtMoney(realized + projected)} accent="text-zen-600"
           sub={`${fmtMoney(realized)} realized · ${fmtMoney(projected)} projected`} />
-        <Kpi label="Cost to run / month" value={`${costUnknown ? '≥' : ''}${fmtCents(costCents)}`} accent="text-rose-600"
+        <Kpi label="Cost to run / month" tip="cost_to_run" value={`${costUnknown ? '≥' : ''}${fmtCents(costCents)}`} accent="text-rose-600"
           sub={`token + infra${costUnknown ? ` · ${costUnknown} agent${costUnknown === 1 ? '' : 's'} with no usage data` : ''}`} />
-        <Kpi label="Return on cost" accent="text-zen-700"
+        <Kpi label="Return on cost" tip="return_on_cost" accent="text-zen-700"
           value={costCents > 0 && valueCents > 0 ? fmtTimes(valueCents / costCents) : '—'}
           sub={costCents > 0 && valueCents > 0 ? `declared value ÷ cost · ${hours.toLocaleString()} h saved (≈ ${Math.round(hours / FTE_HOURS_PER_MONTH)} FTE)`
             : valueCents > 0 ? 'no cost recorded yet' : 'no value declared yet'} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
-        <SummaryCard icon={<Rocket size={18} />} tone="bg-zen-50 text-zen-600" title="Value waiting to go live"
+        <SummaryCard icon={<Rocket size={18} />} tone="bg-zen-50 text-zen-600" title="Value waiting to go live" tip="value_waiting"
           sub="Projected value not yet in Production, by what is holding it back. Click one to see those agents."
           figure={fmtMoney(pipelineValue)} figureSub={`${pipeline.length} agent${pipeline.length === 1 ? '' : 's'} in the pipeline`} testId="pipeline-summary">
-          {groups.length === 0 ? <p className="text-sm text-slate-500">Nothing in the pipeline for this unit.</p> : (
+          {groups.length === 0 ? <p className="text-sm text-slate-600">Nothing in the pipeline for this unit.</p> : (
             <ul className="space-y-1">
               {groups.map(g => {
                 const b = BLOCKER[g.kind]
@@ -191,7 +193,7 @@ export default function BusinessView() {
                       aria-pressed={active} data-testid={`blocker-${g.kind}`}
                       className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors ${active ? 'bg-zen-50 ring-1 ring-zen-300' : 'hover:bg-slate-50'}`}>
                       <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${b.iconClass}`}><Icon size={14} /></span>
-                      <span className="flex-1 text-[13.5px] font-semibold text-slate-800">{b.label} <span className="font-normal text-slate-500">· {g.count}</span></span>
+                      <span className="flex-1 text-[13.5px] font-semibold text-slate-800">{b.label} <span className="font-normal text-slate-600">· {g.count}</span></span>
                       <span className="font-mono text-[12.5px] tabular-nums text-slate-900">{fmtMoney(g.value)}</span>
                     </button>
                   </li>
@@ -206,11 +208,11 @@ export default function BusinessView() {
           )}
         </SummaryCard>
 
-        <SummaryCard icon={<AlertTriangle size={18} />} tone="bg-amber-50 text-amber-600" title="Missing numbers"
+        <SummaryCard icon={<AlertTriangle size={18} />} tone="bg-amber-50 text-amber-600" title="Missing numbers" tip="missing_numbers"
           sub="Owners have not declared these, so the totals above leave the agent out. Click one to see which agents."
           figure={String(running.filter(a => gapsOf(a).length).length)} figureSub="agents with gaps" testId="gaps-summary">
           {GAPS.every(g => !gapCount(g)) ? (
-            <p className="flex items-center gap-2 text-sm text-slate-600"><CheckCircle2 size={16} className="text-emerald-500" /> Every agent here has a value, an outcome and an owner.</p>
+            <p className="flex items-center gap-2 text-sm text-slate-700"><CheckCircle2 size={16} className="text-emerald-500" /> Every agent here has a value, an outcome and an owner.</p>
           ) : (
             <div className="flex flex-wrap gap-2">
               {GAPS.filter(gapCount).map(g => {
@@ -227,7 +229,7 @@ export default function BusinessView() {
             </div>
           )}
           {GAPS.some(gapCount) && (
-            <p className="flex items-center gap-2 text-[12.5px] text-slate-500">
+            <p className="flex items-center gap-2 text-[12.5px] text-slate-600">
               <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
               Agents with gaps carry this dot in the list below; open one to fill them in.
             </p>
@@ -239,7 +241,7 @@ export default function BusinessView() {
         <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
           <div>
             <h2 className="text-[16px] font-extrabold text-slate-900">Agents in {unit ? unit.label : 'every business unit'}</h2>
-            <p className="text-[13px] text-slate-500">Highest value first. Click an agent for its value, cost and what it still needs.</p>
+            <p className="text-[13px] text-slate-600">Highest value first. Click an agent for its value, cost and what it still needs.</p>
           </div>
           {focus && (
             <button type="button" onClick={() => setFocus(null)} data-testid="clear-focus"
@@ -251,13 +253,13 @@ export default function BusinessView() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm" data-testid="bu-table">
             <thead>
-              <tr className="text-left text-[11.5px] font-bold uppercase tracking-[.06em] text-slate-600 whitespace-nowrap bg-gradient-to-r from-zen-50 to-slate-50">
+              <tr className="text-left text-[12.5px] font-bold uppercase tracking-[.06em] text-slate-700 whitespace-nowrap bg-gradient-to-r from-zen-50 to-slate-50">
                 <th className="py-3 pl-3 pr-3 rounded-l-lg">Initiative</th>
-                <th className="py-3 pr-3">AI type</th>
+                <th className="py-3 pr-3">AI type <InfoTip term="ai_type" /></th>
                 <th className="py-3 pr-3">Owner</th>
-                <th className="py-3 pr-3">Stage</th>
-                <th className="py-3 pr-3 text-right text-emerald-700">Value / mo</th>
-                <th className="py-3 pr-3 text-right text-rose-700">Cost / mo</th>
+                <th className="py-3 pr-3">Stage <InfoTip term="stage" /></th>
+                <th className="py-3 pr-3 text-right text-emerald-700">Value / mo <InfoTip term="declared_value" /></th>
+                <th className="py-3 pr-3 text-right text-rose-700">Cost / mo <InfoTip term="cost_to_run" /></th>
                 <th className="py-3 pr-3 w-8 rounded-r-lg" aria-label="Details" />
               </tr>
             </thead>
@@ -275,17 +277,17 @@ export default function BusinessView() {
                           <span className="text-[14.5px] font-bold text-slate-900">{a.name}</span>
                           {gaps.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" title={`Missing: ${gaps.join(', ').toLowerCase()}`} />}
                         </div>
-                        <div className="mt-0.5 text-[12.5px] text-slate-600 line-clamp-1 max-w-[360px]">
+                        <div className="mt-0.5 text-[12.5px] text-slate-700 line-clamp-1 max-w-[360px]">
                           {!unit && <span className="font-semibold text-zen-600">{deptLabel(a)} · </span>}
-                          {a.businessOutcome || <span className="text-gray-400">No outcome stated</span>}
+                          {a.businessOutcome || <span className="text-slate-500">No outcome stated</span>}
                         </div>
                       </td>
                       <td className="py-3 pr-3"><TypeBadge type={a.aiType} /></td>
-                      <td className="py-3 pr-3 text-[13px] text-slate-700">{a.owner && a.owner !== 'Unassigned' ? a.owner : <span className="text-gray-400">—</span>}</td>
+                      <td className="py-3 pr-3 text-[13px] text-slate-700">{a.owner && a.owner !== 'Unassigned' ? a.owner : <span className="text-slate-500">—</span>}</td>
                       <td className="py-3 pr-3"><span className={STAGE_PILL[a.stage] || 'status-pending'}>{a.stage}</span></td>
                       <td className="py-3 pr-3 text-right font-mono text-[14px] font-bold text-emerald-700">{a.valueAmount ? fmtMoney(a.valueAmount) : '—'}</td>
                       <td className="py-3 pr-3 text-right font-mono text-[13.5px] font-semibold text-rose-600">{e?.totalCostCents != null ? fmtCents(e.totalCostCents) : '—'}</td>
-                      <td className="py-3 pr-3 text-slate-400">
+                      <td className="py-3 pr-3 text-slate-500">
                         <button type="button" aria-expanded={isOpen} aria-label={`${isOpen ? 'Hide' : 'Show'} details for ${a.name}`}
                           onClick={ev => { ev.stopPropagation(); setOpen(isOpen ? null : a.id) }}>
                           <ChevronDown size={16} className={`transition-transform ${isOpen ? 'rotate-180 text-zen-600' : ''}`} />
@@ -304,7 +306,7 @@ export default function BusinessView() {
               })}
             </tbody>
           </table>
-          {shown.length === 0 && <p className="py-6 text-center text-sm text-gray-400">No agents here.</p>}
+          {shown.length === 0 && <p className="py-6 text-center text-sm text-slate-500">No agents here.</p>}
         </div>
       </div>
 
@@ -315,30 +317,30 @@ export default function BusinessView() {
   )
 }
 
-function Kpi({ label, value, sub, accent }: { label: string; value: string; sub: string; accent?: string }) {
+function Kpi({ label, value, sub, accent, tip }: { label: string; value: string; sub: string; accent?: string; tip?: GlossaryKey }) {
   return (
     <div className="card p-4">
-      <div className="text-xs text-gray-500 uppercase tracking-wide">{label}</div>
-      <div className={`text-2xl font-bold mt-1 ${accent || 'text-gray-900'}`}>{value}</div>
-      <div className="text-xs text-gray-400 mt-1">{sub}</div>
+      <div className="text-xs text-slate-600 uppercase tracking-wide">{label}{tip && <> <InfoTip term={tip} /></>}</div>
+      <div className={`text-2xl font-bold mt-1 ${accent || 'text-slate-900'}`}>{value}</div>
+      <div className="text-xs text-slate-500 mt-1">{sub}</div>
     </div>
   )
 }
 
-function SummaryCard({ icon, tone, title, sub, figure, figureSub, testId, children }: {
-  icon: React.ReactNode; tone: string; title: string; sub: string; figure: string; figureSub: string; testId: string; children: React.ReactNode
+function SummaryCard({ icon, tone, title, tip, sub, figure, figureSub, testId, children }: {
+  icon: React.ReactNode; tone: string; title: string; tip?: GlossaryKey; sub: string; figure: string; figureSub: string; testId: string; children: React.ReactNode
 }) {
   return (
     <section className="card p-5 space-y-3" data-testid={testId}>
       <div className="flex items-start gap-3">
         <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${tone}`}>{icon}</div>
         <div className="flex-1 min-w-0">
-          <h2 className="text-[16px] font-extrabold text-slate-900">{title}</h2>
-          <p className="text-[12.5px] text-slate-500">{sub}</p>
+          <h2 className="text-[16px] font-extrabold text-slate-900">{title}{tip && <> <InfoTip term={tip} /></>}</h2>
+          <p className="text-[12.5px] text-slate-600">{sub}</p>
         </div>
         <div className="shrink-0 text-right">
           <div className="text-[22px] font-extrabold leading-none text-slate-900">{figure}</div>
-          <div className="mt-1 text-[11.5px] text-slate-500">{figureSub}</div>
+          <div className="mt-1 text-[12.5px] text-slate-600">{figureSub}</div>
         </div>
       </div>
       {children}
@@ -360,7 +362,7 @@ function AgentDetail({ agent: a, econ: e, gaps, onFix }: {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[15px] font-extrabold text-slate-900">{a.name}</div>
-          <div className="text-[12.5px] text-slate-500">{deptLabel(a)} · {a.stage}{a.hoursSavedMonthly ? ` · ${a.hoursSavedMonthly.toLocaleString()} h saved / mo` : ''}</div>
+          <div className="text-[12.5px] text-slate-600">{deptLabel(a)} · {a.stage}{a.hoursSavedMonthly ? ` · ${a.hoursSavedMonthly.toLocaleString()} h saved / mo` : ''}</div>
         </div>
         <Link to={`/agents/${a.id}?tab=revenue`} data-testid="go-to-agent"
           className="inline-flex items-center gap-1.5 rounded-full bg-gradient-zen px-4 py-1.5 text-[13px] font-semibold text-white shadow-sm hover:brightness-110">
@@ -371,13 +373,13 @@ function AgentDetail({ agent: a, econ: e, gaps, onFix }: {
       <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
         <DetailBlock icon={<Coins size={15} />} title="Value vs cost">
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[13px]">
-            <dt className="text-slate-500">Declared value</dt>
+            <dt className="text-slate-600">Declared value <InfoTip term="declared_value" /></dt>
             <dd className="text-right font-semibold text-slate-900">{a.valueAmount ? `${fmtMoney(a.valueAmount)}/mo` : '—'}</dd>
-            <dt className="text-slate-500 flex items-center gap-1">Token {e?.tokenSource && <SourceBadge source={e.tokenSource} />}</dt>
+            <dt className="text-slate-600 flex items-center gap-1">Token {e?.tokenSource && <SourceBadge source={e.tokenSource} />}</dt>
             <dd className="text-right text-slate-900">{e?.tokenCostCents != null ? fmtCents(e.tokenCostCents) : 'unknown'}</dd>
-            <dt className="text-slate-500 flex items-center gap-1">Infra {e?.infraSource && <SourceBadge source={e.infraSource} />}</dt>
+            <dt className="text-slate-600 flex items-center gap-1">Infra {e?.infraSource && <SourceBadge source={e.infraSource} />}</dt>
             <dd className="text-right text-slate-900">{e?.infraCostCents != null ? fmtCents(e.infraCostCents) : '—'}</dd>
-            <dt className="text-slate-500">Return</dt>
+            <dt className="text-slate-600">Return <InfoTip term="return_on_cost" /></dt>
             <dd className="text-right font-semibold text-zen-700">{value > 0 && cost ? fmtTimes(value / cost) : '—'}</dd>
           </dl>
         </DetailBlock>
@@ -388,12 +390,12 @@ function AgentDetail({ agent: a, econ: e, gaps, onFix }: {
               <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${B.iconClass}`}><B.icon size={14} /></span>
               <div className="text-[13px]">
                 <div className="font-semibold text-slate-800">{B.label}</div>
-                <div className="text-slate-500">{blocker.detail}</div>
+                <div className="text-slate-600">{blocker.detail}</div>
                 <Link to={`/agents/${a.id}?tab=governance`} className="mt-1 inline-block font-semibold text-zen-700 hover:underline">Open Governance</Link>
               </div>
             </div>
           ) : (
-            <p className="flex items-center gap-2 text-[13px] text-slate-600">
+            <p className="flex items-center gap-2 text-[13px] text-slate-700">
               <CheckCircle2 size={15} className="text-emerald-500" /> {a.stage === 'Deprecated' ? 'Retired' : 'Live in production'}
             </p>
           )}
@@ -401,11 +403,11 @@ function AgentDetail({ agent: a, econ: e, gaps, onFix }: {
 
         <DetailBlock icon={<AlertTriangle size={15} />} title="Missing numbers">
           {gaps.length === 0 ? (
-            <p className="flex items-center gap-2 text-[13px] text-slate-600"><CheckCircle2 size={15} className="text-emerald-500" /> Value, outcome and owner declared</p>
+            <p className="flex items-center gap-2 text-[13px] text-slate-700"><CheckCircle2 size={15} className="text-emerald-500" /> Value, outcome and owner declared</p>
           ) : (
             <div className="space-y-2">
               <div className="flex flex-wrap gap-1">
-                {gaps.map(g => <span key={g} className="rounded bg-amber-50 px-1.5 py-0.5 text-[11.5px] font-semibold text-amber-800 ring-1 ring-amber-200">{g}</span>)}
+                {gaps.map(g => <span key={g} className="rounded bg-amber-50 px-1.5 py-0.5 text-[12.5px] font-semibold text-amber-800 ring-1 ring-amber-200">{g}</span>)}
               </div>
               <button type="button" onClick={onFix} className="btn-secondary btn-sm flex items-center gap-1" data-testid="fix-gaps">
                 <Pencil size={13} /> Fill them in
@@ -421,7 +423,7 @@ function AgentDetail({ agent: a, econ: e, gaps, onFix }: {
 function DetailBlock({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-lg bg-slate-50/80 p-3 ring-1 ring-slate-100">
-      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[.05em] text-slate-500">
+      <div className="mb-2 flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-[.05em] text-slate-600">
         <span className="text-zen-500">{icon}</span>{title}
       </div>
       {children}

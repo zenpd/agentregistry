@@ -48,7 +48,9 @@ MAX_DEPTH = 6
 MAX_ERROR_CHARS = 1000
 
 REFRESH_LOCK = "refresh"
-REFRESH_JOBS = ("usage_ingestion", "cost_rollup", "risk_scan", "governance_checks")
+REFRESH_JOBS = ("usage_ingestion", "record_autofill", "cost_rollup", "risk_scan", "governance_checks")
+# Inside a refresh the cost, risk and governance steps follow anyway, so the auto-fill does not redo them.
+_REFRESH_KWARGS: dict[str, dict] = {"record_autofill": {"recalculate": False}}
 JOB_STATUSES = frozenset({"ok", "partial", "not_configured", "skipped", "error", "unreachable"})
 _OK = {"ok", "skipped"}
 _FAILED = {"error", "unreachable", "not_configured", "unavailable", "stale", "cancelled"}
@@ -68,8 +70,12 @@ class JobSpec:
 
 
 JOBS: dict[str, JobSpec] = {s.name: s for s in (
+    JobSpec("phoenix_discovery", "Discover agents in Phoenix", "Discovery",
+            "orchestrations.phoenix_discovery:discover_phoenix", time(0, 30)),
     JobSpec("usage_ingestion", "Usage ingestion (Phoenix)", "Usage",
             "orchestrations.usage_ingestion:ingest_usage", time(1, 0)),
+    JobSpec("record_autofill", "Fill in records automatically", "Auto-fill",
+            "orchestrations.record_autofill:autofill_records", time(1, 15)),
     JobSpec("infra_costs", "Infra cost pull (Azure Cost Management)", "Infra cost",
             "costs.azure_cost_collector:collect_infra_costs", time(1, 30), admin_only=True),
     JobSpec("cost_rollup", "Cost rollup, budget status, anomalies", "Cost rollup",
@@ -78,6 +84,8 @@ JOBS: dict[str, JobSpec] = {s.name: s for s in (
             "orchestrations.risk_scan:scan_risks", time(2, 30)),
     JobSpec("governance_checks", "Governance checks (expiry, recertification)", "Governance",
             "orchestrations.governance_checks:run_governance_checks", time(3, 0)),
+    JobSpec("insight_refresh", "AI insights refresh", "Insights",
+            "orchestrations.insight_refresh:refresh_insights", time(3, 30)),
 )}
 
 
@@ -289,6 +297,12 @@ async def _running(db: AsyncSession, job: str, agent_id: str | None) -> list[Job
     return list((await db.execute(_overlapping(stmt, agent_id))).scalars().all())
 
 
+async def is_running(db: AsyncSession, job: str, agent_id: str | None) -> bool:
+    """Is a live run of this job under way for this agent, or for all agents?"""
+    now = utcnow()
+    return any(is_live(r, now) for r in await _running(db, job, agent_id))
+
+
 async def latest_runs(db: AsyncSession, agent_id: str | None = None, *, any_scope: bool = False) -> dict[str, JobRun | None]:
     """Newest run per job. any_scope ignores agent_id; otherwise agent_id=None
     means the all-agents runs."""
@@ -477,8 +491,8 @@ async def run_job(job: str, agent_id: str | None = None, trigger: str = "manual"
 
 
 async def refresh_agent(agent_id: str, trigger: str = "manual") -> dict:
-    """Usage → cost → risk → governance for one agent, one after another. A
-    failed step does not stop the next: each works from whatever data exists.
+    """Usage → record auto-fill → cost → risk → governance for one agent, one after
+    another. A failed step does not stop the next: each works from whatever data exists.
     A 'refresh' row in job_runs keeps two refreshes of one agent from interleaving."""
     started = utcnow()
     run_id = secrets.token_hex(12)
@@ -494,7 +508,7 @@ async def refresh_agent(agent_id: str, trigger: str = "manual") -> dict:
     status, error = "error", None
     try:
         for job in REFRESH_JOBS:
-            results.append(await run_job(job, agent_id=agent_id, trigger=trigger))
+            results.append(await run_job(job, agent_id=agent_id, trigger=trigger, **_REFRESH_KWARGS.get(job, {})))
         # A step held by another run refreshed nothing, so the refresh is only partial.
         status = overall_status(["partial" if r.get("locked") else r["status"] for r in results])
     except asyncio.CancelledError:

@@ -20,10 +20,7 @@ import {
   type RiskSeverity,
   type RiskStatus,
 } from '../../services/ops/risk'
-import {
-  CATEGORY_COLORS, CATEGORY_LABELS, Loading, MiniStat, SectionLabel, SEVERITIES, SEVERITY_PILL, SOURCE_BADGE,
-  SourceBadge, type TabProps,
-} from './shared'
+import { CATEGORY_COLORS, CATEGORY_LABELS, Loading, MiniStat, SectionLabel, SEVERITIES, SEVERITY_PILL, SOURCE_BADGE, SourceBadge, type TabProps, useReloadOn } from './shared'
 
 const STATUS_PILL: Record<RiskStatus, string> = {
   open: 'bg-rose-50 text-rose-700 ring-rose-200',
@@ -62,7 +59,7 @@ const MIN_STABLE_TRACES = 50
 
 type StatusFilter = 'active' | 'all' | RiskStatus
 
-const PILL = 'text-[10px] px-1.5 py-0.5 rounded-full ring-1 whitespace-nowrap'
+const PILL = 'text-[12px] px-1.5 py-0.5 rounded-full ring-1 whitespace-nowrap'
 const TEXTAREA = 'input w-full text-xs min-h-[56px]'
 
 function errorMessage(e: any, fallback: string): string {
@@ -105,7 +102,7 @@ function addDays(isoDate: string, days: number): string {
 }
 
 function SeverityPill({ severity }: { severity: string }) {
-  return <span className={`${PILL} ${SEVERITY_PILL[severity] || 'bg-gray-50 text-gray-600 ring-gray-200'}`}>{severity}</span>
+  return <span className={`${PILL} ${SEVERITY_PILL[severity] || 'bg-gray-50 text-slate-700 ring-gray-200'}`}>{severity}</span>
 }
 
 function ErrorLine({ text }: { text: string | null }) {
@@ -114,7 +111,7 @@ function ErrorLine({ text }: { text: string | null }) {
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
-export default function RiskTab({ agentId, onChanged }: TabProps) {
+export default function RiskTab({ agentId, onChanged, dataVersion }: TabProps) {
   const [data, setData] = useState<AgentRisksResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active')
@@ -137,6 +134,7 @@ export default function RiskTab({ agentId, onChanged }: TabProps) {
     setError(null)
     load()
   }, [load])
+  useReloadOn(dataVersion, load)
 
   // A finding added, resolved or re-rated can flip the reuse checklist on the
   // agent header, so the page reloads too, not only this tab.
@@ -167,7 +165,7 @@ export default function RiskTab({ agentId, onChanged }: TabProps) {
 
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <SectionLabel>Risk register · showing {listed.length} of {data.findings.length}</SectionLabel>
+          <SectionLabel tip="risk_register">Risk register · showing {listed.length} of {data.findings.length}</SectionLabel>
           <div className="flex flex-wrap items-center gap-2">
             <select
               aria-label="Filter by status"
@@ -244,15 +242,15 @@ function ScoreHeader({ data, agentId, onScanned }: { data: AgentRisksResponse; a
     <div className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <SectionLabel>Current risk</SectionLabel>
+          <SectionLabel tip="severity">Current risk</SectionLabel>
           <div className="flex items-center gap-2">
             {score.worst ? (
               <>
                 <span className={`text-xs px-2 py-0.5 rounded-full ring-1 font-semibold ${SEVERITY_PILL[score.worst]}`}>{score.worst}</span>
-                <span className="text-xs text-gray-500">worst active severity · {score.total} active finding(s)</span>
+                <span className="text-xs text-slate-600">worst active severity · {score.total} active finding(s)</span>
               </>
             ) : (
-              <span className="text-xs text-gray-500">No active findings</span>
+              <span className="text-xs text-slate-600">No active findings</span>
             )}
           </div>
         </div>
@@ -270,11 +268,11 @@ function ScoreHeader({ data, agentId, onScanned }: { data: AgentRisksResponse; a
             key={s}
             label={s}
             value={String(score.countsBySeverity[s] ?? 0)}
-            accent={score.countsBySeverity[s] ? SEVERITY_TEXT[s] : 'text-gray-300'}
+            accent={score.countsBySeverity[s] ? SEVERITY_TEXT[s] : 'text-slate-400'}
           />
         ))}
-        <MiniStat label="Overdue" value={String(score.overdue)} accent={score.overdue ? 'text-rose-600' : 'text-gray-300'} hint="Past the due date and not yet resolved or accepted" />
-        <MiniStat label="Resolved" value={String(score.resolved)} accent="text-teal-600" />
+        <MiniStat label="Overdue" value={String(score.overdue)} accent={score.overdue ? 'text-rose-600' : 'text-slate-400'} hint="Past the due date and not yet resolved or accepted" />
+        <MiniStat label="Resolved" value={String(score.resolved)} accent="text-zen-600" />
       </div>
 
       {scanError && <ErrorLine text={scanError} />}
@@ -288,11 +286,11 @@ const SEVERITY_TEXT: Record<RiskSeverity, string> = {
 }
 
 function LastScanLine({ lastScan }: { lastScan: LastRiskScan | null }) {
-  if (!lastScan) return <p className="text-[11px] text-gray-400">Never scanned</p>
+  if (!lastScan) return <p className="text-[12px] text-slate-500">Never scanned</p>
   const when = lastScan.finishedAt || lastScan.startedAt
   const failed = !['ok', 'partial', 'running'].includes(lastScan.status)
   return (
-    <p className={`text-[11px] ${failed ? 'text-rose-600' : 'text-gray-400'}`} title={when ? fmtDateTime(when) : undefined}>
+    <p className={`text-[12px] ${failed ? 'text-rose-600' : 'text-slate-500'}`} title={when ? fmtDateTime(when) : undefined}>
       {lastScan.status === 'running' ? 'Scan running' : failed ? `Last scan ${lastScan.status}` : 'Last scanned'}
       {when && ` ${relative(when)}`}
       {` · ${lastScan.trigger}${lastScan.scope === 'all' ? ', all agents' : ''}`}
@@ -315,7 +313,7 @@ function ScanResultLine({ result }: { result: RiskScanResult }) {
     <div className="rounded-lg bg-teal-50/60 ring-1 ring-teal-100 px-3 py-2 text-xs text-teal-800 space-y-0.5">
       <p>Scan complete: {result.findingCount} condition(s) detected{parts.length ? ` — ${parts.join(' · ')}` : ''}.</p>
       {result.uncheckedRules.length > 0 && (
-        <p className="text-teal-700/80">
+        <p className="text-zen-700/80">
           Not checked this time (input missing): {result.uncheckedRules.join(', ')}. Their stored findings were left as they were.
         </p>
       )}
@@ -367,7 +365,7 @@ function TraceSignalsPanel({ data }: { data: AgentRisksResponse }) {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <SectionLabel>Trace signals · last {windowDays} days · {data.phoenixProject}</SectionLabel>
+        <SectionLabel tip="phoenix_project">Trace signals · last {windowDays} days · {data.phoenixProject}</SectionLabel>
         <SourceBadge source="phoenix" />
         {smallSample && <span className={`${PILL} bg-amber-50 text-amber-700 ring-amber-200`}>Small sample</span>}
       </div>
@@ -386,7 +384,7 @@ function TraceSignalsPanel({ data }: { data: AgentRisksResponse }) {
         <MiniStat label="LLM calls" value={kri.llm_calls.toLocaleString()} />
       </div>
       {(smallSample || scan.sampleCapped) && (
-        <p className="text-[11px] text-gray-400">
+        <p className="text-[12px] text-slate-500">
           {smallSample && `Fewer than ${MIN_STABLE_TRACES} traces, so rates swing on a handful of spans. `}
           {scan.sampleCapped && 'The sample hit the 5,000-span cap (newest first), so older spans in the window were not read.'}
         </p>
@@ -396,7 +394,7 @@ function TraceSignalsPanel({ data }: { data: AgentRisksResponse }) {
 }
 
 function Notice({ tone, children }: { tone: 'gray' | 'amber'; children: React.ReactNode }) {
-  const cls = tone === 'amber' ? 'bg-amber-50 ring-amber-100 text-amber-800' : 'bg-gray-50 ring-gray-100 text-gray-600'
+  const cls = tone === 'amber' ? 'bg-amber-50 ring-amber-100 text-amber-800' : 'bg-gray-50 ring-gray-100 text-slate-700'
   return <div className={`rounded-lg ring-1 px-3 py-2 text-xs ${cls}`}>{children}</div>
 }
 
@@ -423,11 +421,11 @@ function Charts({ active, financial }: { active: RiskRegisterFinding[]; financia
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
-        <span className="text-xs text-gray-400 mb-2 block">Active findings by category</span>
+        <span className="text-xs text-slate-500 mb-2 block">Active findings by category</span>
         <RiskPie data={pie} size={150} />
       </div>
       <div>
-        <span className="text-xs text-gray-400 mb-2 block">Category × severity</span>
+        <span className="text-xs text-slate-500 mb-2 block">Category × severity</span>
         <RiskHeatmap rows={heatmap} severities={SEVERITIES} />
       </div>
     </div>
@@ -437,15 +435,15 @@ function Charts({ active, financial }: { active: RiskRegisterFinding[]; financia
 // ── Register ─────────────────────────────────────────────────────────────────
 
 function RegisterEmpty({ data, filtered }: { data: AgentRisksResponse; filtered: boolean }) {
-  if (filtered) return <p className="text-sm text-gray-400 py-4 text-center">No findings match these filters.</p>
+  if (filtered) return <p className="text-sm text-slate-500 py-4 text-center">No findings match these filters.</p>
   if (!data.lastScan) {
     return (
-      <p className="text-sm text-gray-400 py-4 text-center">
+      <p className="text-sm text-slate-500 py-4 text-center">
         No findings yet. This agent has never been scanned. Click Scan now, or add a risk by hand.
       </p>
     )
   }
-  return <p className="text-sm text-gray-400 py-4 text-center">No findings for this agent.</p>
+  return <p className="text-sm text-slate-500 py-4 text-center">No findings for this agent.</p>
 }
 
 function FindingRow({ finding: f, agentId, data, onChanged }: {
@@ -462,28 +460,28 @@ function FindingRow({ finding: f, agentId, data, onChanged }: {
         <SeverityPill severity={f.severity} />
         <div className="flex-1 min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className={`text-sm font-medium ${muted ? 'text-gray-500' : 'text-gray-800'}`}>{f.title}</span>
+            <span className={`text-sm font-medium ${muted ? 'text-slate-600' : 'text-slate-800'}`}>{f.title}</span>
             <span className={`${PILL} ${STATUS_PILL[f.status]}`}>{STATUS_LABEL[f.status] || f.status}</span>
             {f.overdue && <span className={`${PILL} bg-rose-600 text-white ring-rose-600`}>Overdue</span>}
-            {SOURCE_LABEL[f.source] && <span className={`${PILL} bg-gray-50 text-gray-500 ring-gray-200`}>{SOURCE_LABEL[f.source]}</span>}
+            {SOURCE_LABEL[f.source] && <span className={`${PILL} bg-gray-50 text-slate-600 ring-gray-200`}>{SOURCE_LABEL[f.source]}</span>}
           </div>
-          <p className="text-[11px] text-gray-400">
+          <p className="text-[12px] text-slate-500">
             {CATEGORY_LABELS[f.category] || f.category}
             {f.detectedAt && ` · first detected ${fmtDate(f.detectedAt)}`}
             {f.lastDetectedAt && f.source === 'auto' && ` · last seen ${fmtDate(f.lastDetectedAt)}`}
             {f.resolvedAt && f.status === 'resolved' && ` · resolved ${fmtDate(f.resolvedAt)}`}
             {f.ruleId && <span className="font-mono"> · {f.ruleId}</span>}
           </p>
-          {f.description && <p className="text-xs text-gray-600">{f.description}</p>}
-          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
-            <span><span className="text-gray-400">Owner:</span> {f.owner || <span className="text-gray-400">unassigned</span>}</span>
-            <span className={f.overdue ? 'text-rose-600 font-medium' : ''}><span className="text-gray-400">Due:</span> {fmtDate(f.dueDate)}</span>
+          {f.description && <p className="text-xs text-slate-700">{f.description}</p>}
+          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-600">
+            <span><span className="text-slate-500">Owner:</span> {f.owner || <span className="text-slate-500">unassigned</span>}</span>
+            <span className={f.overdue ? 'text-rose-600 font-medium' : ''}><span className="text-slate-500">Due:</span> {fmtDate(f.dueDate)}</span>
             {f.status === 'accepted' && (
-              <span><span className="text-gray-400">Accepted until</span> {fmtDate(f.acceptedUntil)}{f.acceptedBy && ` by ${f.acceptedBy}`}</span>
+              <span><span className="text-slate-500">Accepted until</span> {fmtDate(f.acceptedUntil)}{f.acceptedBy && ` by ${f.acceptedBy}`}</span>
             )}
           </div>
           {f.mitigation && (
-            <p className="text-xs text-gray-600"><span className="text-gray-400">Mitigation:</span> {f.mitigation}</p>
+            <p className="text-xs text-slate-700"><span className="text-slate-500">Mitigation:</span> {f.mitigation}</p>
           )}
         </div>
       </div>
@@ -501,7 +499,7 @@ function FindingRow({ finding: f, agentId, data, onChanged }: {
         <button onClick={() => setAction(action === 'update' ? null : 'update')} className={`btn-sm ${action === 'update' ? 'btn-primary' : 'btn-secondary'}`}>
           Edit owner / due date
         </button>
-        <button onClick={() => setShowHistory(v => !v)} className="text-xs text-teal-600 hover:text-teal-700 ml-auto">
+        <button onClick={() => setShowHistory(v => !v)} className="text-xs text-zen-600 hover:text-zen-700 ml-auto">
           {showHistory ? 'Hide history' : `History (${f.history.length})`}
         </button>
       </div>
@@ -586,10 +584,10 @@ function ActionForm({ finding, action, today, maxDays, onCancel, onSubmit }: {
   return (
     <div className="rounded-lg bg-gray-50 p-3 space-y-2">
       {action === 'resolve' && finding.source === 'auto' && (
-        <p className="text-[11px] text-gray-500">If the condition is still true, the next scan reopens this finding.</p>
+        <p className="text-[12px] text-slate-600">If the condition is still true, the next scan reopens this finding.</p>
       )}
       {action === 'accept' && (
-        <p className="text-[11px] text-gray-500">
+        <p className="text-[12px] text-slate-600">
           Accepting records that you have decided to live with this risk until a date. It reopens automatically when
           that date passes. Maximum {maxDays} days.
         </p>
@@ -597,12 +595,12 @@ function ActionForm({ finding, action, today, maxDays, onCancel, onSubmit }: {
 
       {(action === 'acknowledge' || action === 'update') && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <label className="text-xs text-gray-500 space-y-1 block">
+          <label className="text-xs text-slate-600 space-y-1 block">
             <span>Owner</span>
             <input className="input w-full text-xs" value={owner} onChange={e => setOwner(e.target.value)} placeholder="Name or team" />
           </label>
           {action === 'update' && (
-            <label className="text-xs text-gray-500 space-y-1 block">
+            <label className="text-xs text-slate-600 space-y-1 block">
               <span>Due date</span>
               <input type="date" className="input w-full text-xs" value={dueDate} onChange={e => setDueDate(e.target.value)} />
             </label>
@@ -611,7 +609,7 @@ function ActionForm({ finding, action, today, maxDays, onCancel, onSubmit }: {
       )}
 
       {(action === 'mitigate' || action === 'update') && (
-        <label className="text-xs text-gray-500 space-y-1 block">
+        <label className="text-xs text-slate-600 space-y-1 block">
           <span>Mitigation plan{action === 'mitigate' ? ' (required)' : ''}</span>
           <textarea className={TEXTAREA} value={mitigation} onChange={e => setMitigation(e.target.value)} placeholder="What is being done to reduce this risk" />
         </label>
@@ -619,7 +617,7 @@ function ActionForm({ finding, action, today, maxDays, onCancel, onSubmit }: {
 
       {action === 'accept' && (
         <div className="flex flex-wrap items-end gap-2">
-          <label className="text-xs text-gray-500 space-y-1 block">
+          <label className="text-xs text-slate-600 space-y-1 block">
             <span>Accepted until</span>
             <input type="date" className="input text-xs" min={today} max={maxDate} value={acceptedUntil} onChange={e => setAcceptedUntil(e.target.value)} />
           </label>
@@ -631,7 +629,7 @@ function ActionForm({ finding, action, today, maxDays, onCancel, onSubmit }: {
         </div>
       )}
 
-      <label className="text-xs text-gray-500 space-y-1 block">
+      <label className="text-xs text-slate-600 space-y-1 block">
         <span>{noteLabel}</span>
         <textarea className={TEXTAREA} value={note} onChange={e => setNote(e.target.value)} />
       </label>
@@ -648,14 +646,14 @@ function ActionForm({ finding, action, today, maxDays, onCancel, onSubmit }: {
 }
 
 function History({ entries }: { entries: RiskRegisterFinding['history'] }) {
-  if (entries.length === 0) return <p className="text-[11px] text-gray-400">No history recorded (finding predates change tracking).</p>
+  if (entries.length === 0) return <p className="text-[12px] text-slate-500">No history recorded (finding predates change tracking).</p>
   return (
     <ol className="border-l border-gray-200 ml-1 pl-3 space-y-1">
       {[...entries].reverse().map((h, i) => (
-        <li key={`${h.at}-${i}`} className="text-[11px] text-gray-500">
-          <span className="text-gray-400">{fmtDateTime(h.at)}</span>
-          {' · '}<span className="text-gray-600">{h.by}</span>
-          {' · '}<span className="font-medium text-gray-700">{h.action}</span>
+        <li key={`${h.at}-${i}`} className="text-[12px] text-slate-600">
+          <span className="text-slate-500">{fmtDateTime(h.at)}</span>
+          {' · '}<span className="text-slate-700">{h.by}</span>
+          {' · '}<span className="font-medium text-slate-700">{h.action}</span>
           {h.note && <span> — {h.note}</span>}
         </li>
       ))}
@@ -698,37 +696,37 @@ function AddRiskForm({ agentId, today, onDone }: { agentId: string; today: strin
 
   return (
     <div className="card p-4 space-y-2">
-      <p className="text-xs text-gray-500">
+      <p className="text-xs text-slate-600">
         Risks added here are never changed or closed by a scan. Only a person moves them through the lifecycle.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <label className="text-xs text-gray-500 space-y-1 block">
+        <label className="text-xs text-slate-600 space-y-1 block">
           <span>Category</span>
           <select className="input w-full text-xs" value={category} onChange={e => setCategory(e.target.value as RiskCategory)}>
             {RISK_CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
           </select>
         </label>
-        <label className="text-xs text-gray-500 space-y-1 block">
+        <label className="text-xs text-slate-600 space-y-1 block">
           <span>Severity</span>
           <select className="input w-full text-xs" value={severity} onChange={e => setSeverity(e.target.value as RiskSeverity)}>
             {RISK_SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </label>
       </div>
-      <label className="text-xs text-gray-500 space-y-1 block">
+      <label className="text-xs text-slate-600 space-y-1 block">
         <span>Title</span>
         <input className="input w-full text-xs" value={title} maxLength={255} onChange={e => setTitle(e.target.value)} />
       </label>
-      <label className="text-xs text-gray-500 space-y-1 block">
+      <label className="text-xs text-slate-600 space-y-1 block">
         <span>Description</span>
         <textarea className={TEXTAREA} value={description} onChange={e => setDescription(e.target.value)} />
       </label>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <label className="text-xs text-gray-500 space-y-1 block">
+        <label className="text-xs text-slate-600 space-y-1 block">
           <span>Owner</span>
           <input className="input w-full text-xs" value={owner} onChange={e => setOwner(e.target.value)} placeholder="Name or team" />
         </label>
-        <label className="text-xs text-gray-500 space-y-1 block">
+        <label className="text-xs text-slate-600 space-y-1 block">
           <span>Due date</span>
           <input type="date" className="input w-full text-xs" min={today} value={dueDate} onChange={e => setDueDate(e.target.value)} />
         </label>
@@ -751,13 +749,13 @@ function FinancialSection({ financial }: { financial: FinancialFinding[] }) {
         <SectionLabel>Financial findings (live)</SectionLabel>
         {hasDemo && <SourceBadge source="seed" />}
       </div>
-      <p className="text-[11px] text-gray-400">
+      <p className="text-[12px] text-slate-500">
         Read live from cost anomalies, waste findings and the Revenue & Expenditure rules each time this tab loads.
         They are not stored in the register and clear when the underlying condition clears. Visibility only: nothing
         here pauses or limits the agent.
       </p>
       {financial.length === 0 ? (
-        <p className="text-xs text-gray-400">No financial findings.</p>
+        <p className="text-xs text-slate-500">No financial findings.</p>
       ) : (
         <div className="space-y-1.5">
           {financial.map((f, i) => (
@@ -765,11 +763,11 @@ function FinancialSection({ financial }: { financial: FinancialFinding[] }) {
               <SeverityPill severity={f.severity} />
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-gray-700 font-medium">{f.title}</span>
-                  <span className="text-gray-400">· {ORIGIN_LABEL[f.origin] || f.origin}</span>
+                  <span className="text-slate-700 font-medium">{f.title}</span>
+                  <span className="text-slate-500">· {ORIGIN_LABEL[f.origin] || f.origin}</span>
                   {f.dataSource && f.dataSource in SOURCE_BADGE && <SourceBadge source={f.dataSource} />}
                 </div>
-                {f.description && <p className="text-gray-500">{f.description}</p>}
+                {f.description && <p className="text-slate-600">{f.description}</p>}
               </div>
             </div>
           ))}

@@ -34,8 +34,8 @@ export default function PlaygroundPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-4 animate-fade-in">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900">Agent Playground</h2>
-        <p className="text-gray-500 mt-1">Call any registered agent with your own input before you ask for access.</p>
+        <h2 className="text-2xl font-bold text-slate-900">Agent Playground</h2>
+        <p className="text-slate-600 mt-1">Call any registered agent with your own input before you ask for access.</p>
       </div>
 
       <div className="card p-4 space-y-4">
@@ -57,15 +57,15 @@ export default function PlaygroundPage() {
           <>
             <ReuseChecklist reuse={integration.reuse} agentId={selected} />
             <TryItPanel agentId={selected} tryIt={integration.tryIt} endpointAdvice={integration.contract.endpointAdvice} />
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-slate-600">
               Contract, access requests and consumers are on the agent’s{' '}
-              <Link to={`/agents/${selected}?tab=integrate`} className="text-teal-700 hover:underline">
+              <Link to={`/agents/${selected}?tab=integrate`} className="text-zen-700 hover:underline">
                 Integrate tab{agent ? ` (${agent.name})` : ''}
               </Link>.
             </div>
           </>
         )}
-        {!selected && <p className="text-sm text-gray-400">Pick an agent to see how to call it.</p>}
+        {!selected && <p className="text-sm text-slate-500">Pick an agent to see how to call it.</p>}
       </div>
     </div>
   )

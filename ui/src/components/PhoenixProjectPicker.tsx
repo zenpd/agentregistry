@@ -53,10 +53,10 @@ export default function PhoenixProjectPicker({ value, onChange, id }: { value: s
       )}
       {failure && <p className="text-xs text-rose-600 mt-1" data-testid="phoenix-failure">{failure}</p>}
       {projects !== null && !failure && projects.length === 0 && (
-        <p className="text-xs text-gray-400 mt-1">Phoenix has no projects yet.</p>
+        <p className="text-xs text-slate-500 mt-1">Phoenix has no projects yet.</p>
       )}
       {projects !== null && !failure && projects.length > 0 && (
-        <p className="text-xs text-gray-400 mt-1">{projects.length} project(s) found — pick from the list or type your own.</p>
+        <p className="text-xs text-slate-500 mt-1">{projects.length} project(s) found — pick from the list or type your own.</p>
       )}
     </div>
   )

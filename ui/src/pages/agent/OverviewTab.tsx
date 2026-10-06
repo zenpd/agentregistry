@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Agent, GraphV2Response } from '../../services/api'
+import InfoTip from '../../components/InfoTip'
+import type { GlossaryKey } from '../../lib/glossary'
 import {
   confirmContextSuggestion,
   dismissContextSuggestion,
@@ -24,17 +26,7 @@ import {
   type OverviewHeader,
   type SuggestionType,
 } from '../../services/ops/overview'
-import {
-  CATEGORY_LABELS,
-  Loading,
-  SEVERITIES,
-  SEVERITY_PILL,
-  FieldLabel, SectionLabel,
-  SourceBadge,
-  fmtCents,
-  fmtNumber,
-  type TabProps,
-} from './shared'
+import { CATEGORY_LABELS, Loading, SEVERITIES, SEVERITY_PILL, FieldLabel, SectionLabel, SourceBadge, fmtCents, fmtNumber, type TabProps, useReloadOn } from './shared'
 
 const GATES: { key: GateKey; label: string }[] = [
   { key: 'arb', label: 'ARB' },
@@ -43,7 +35,7 @@ const GATES: { key: GateKey; label: string }[] = [
 ]
 
 const GATE_PILL: Record<string, string> = {
-  'Not Submitted': 'bg-gray-100 text-gray-600 ring-gray-200',
+  'Not Submitted': 'bg-gray-100 text-slate-700 ring-gray-200',
   'In Review': 'bg-violet-50 text-violet-700 ring-violet-200',
   'Changes Requested': 'bg-rose-50 text-rose-700 ring-rose-200',
   'Approved with Conditions': 'bg-amber-50 text-amber-700 ring-amber-200',
@@ -54,10 +46,10 @@ const GATE_PILL: Record<string, string> = {
 const APPROVED = ['Approved', 'Approved with Conditions']
 
 const BUDGET_STATE: Record<string, { label: string; className: string }> = {
-  on_track: { label: 'On track', className: 'text-teal-700' },
+  on_track: { label: 'On track', className: 'text-emerald-700' },
   at_threshold: { label: 'At alert threshold', className: 'text-amber-700' },
   over_budget: { label: 'Over budget', className: 'text-rose-700' },
-  no_usage_data: { label: 'No usage data', className: 'text-gray-400' },
+  no_usage_data: { label: 'No usage data', className: 'text-slate-500' },
 }
 
 const FRESHNESS_PILL: Record<string, string> = {
@@ -80,14 +72,14 @@ const LLM_NOTE: Partial<Record<LlmStatus, string>> = {
 }
 
 const MARKDOWN_CLASS =
-  'text-sm text-gray-700 space-y-2 break-words [&_h1]:text-base [&_h1]:font-semibold [&_h1]:text-gray-900 ' +
-  '[&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-gray-900 [&_h2]:pt-2 [&_h3]:font-semibold [&_h3]:text-gray-800 ' +
-  '[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-teal-600 [&_a]:underline ' +
+  'text-sm text-slate-700 space-y-2 break-words [&_h1]:text-base [&_h1]:font-semibold [&_h1]:text-slate-900 ' +
+  '[&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-slate-900 [&_h2]:pt-2 [&_h3]:font-semibold [&_h3]:text-slate-800 ' +
+  '[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-zen-600 [&_a]:underline ' +
   '[&_code]:font-mono [&_code]:text-xs [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:rounded ' +
   '[&_pre]:bg-gray-50 [&_pre]:p-2 [&_pre]:rounded [&_pre]:overflow-x-auto [&_table]:text-xs [&_table]:border-collapse ' +
   '[&_th]:border [&_th]:border-gray-200 [&_th]:bg-gray-50 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left ' +
   '[&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 ' +
-  '[&_blockquote]:border-l-2 [&_blockquote]:border-gray-200 [&_blockquote]:pl-3 [&_blockquote]:text-gray-500'
+  '[&_blockquote]:border-l-2 [&_blockquote]:border-gray-200 [&_blockquote]:pl-3 [&_blockquote]:text-slate-600'
 
 const UPLOAD_ACCEPT = '.md,.markdown,.txt,text/markdown,text/plain'
 
@@ -120,7 +112,7 @@ function fmtBytes(n: number): string {
 }
 
 function Pill({ className, children }: { className: string; children: ReactNode }) {
-  return <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 whitespace-nowrap ${className}`}>{children}</span>
+  return <span className={`text-[12px] px-1.5 py-0.5 rounded-full ring-1 whitespace-nowrap ${className}`}>{children}</span>
 }
 
 function ErrorLine({ text, onRetry }: { text: string | null; onRetry?: () => void }) {
@@ -150,12 +142,12 @@ function Markdown({ text }: { text: string }) {
 
 // ── Header KPI strip ────────────────────────────────────────────────────────
 
-function Tile({ label, to, children }: { label: string; to?: string; children: ReactNode }) {
+function Tile({ label, to, children, tip }: { label: string; to?: string; children: ReactNode; tip?: GlossaryKey }) {
   return (
     <div className="rounded-xl bg-white p-3.5 space-y-1.5 min-w-0 ring-1 ring-slate-200/80 shadow-sm">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10.5px] font-semibold uppercase tracking-[.04em] text-slate-500">{label}</span>
-        {to && <Link to={to} className="text-[11px] font-semibold text-zen-600 hover:text-zen-700 hover:underline">Open →</Link>}
+        <span className="text-[11.5px] font-semibold uppercase tracking-[.04em] text-slate-600">{label}{tip && <> <InfoTip term={tip} /></>}</span>
+        {to && <Link to={to} className="text-[12px] font-semibold text-zen-600 hover:text-zen-700 hover:underline">Open →</Link>}
       </div>
       {children}
     </div>
@@ -166,19 +158,19 @@ function RiskTile({ header, agentId }: { header: OverviewHeader; agentId: string
   const { worst, openCounts, total } = header.riskScore
   const counts = [...SEVERITIES].reverse().filter(s => openCounts[s])
   return (
-    <Tile label="Open risks" to={`/agents/${agentId}?tab=risk`}>
+    <Tile label="Open risks" tip="risk_register" to={`/agents/${agentId}?tab=risk`}>
       {total === 0 || !worst ? (
-        <p className="text-sm font-semibold text-teal-700">None open</p>
+        <p className="text-sm font-semibold text-emerald-700">None open</p>
       ) : (
         <div className="flex items-center gap-2">
-          <span className="text-lg font-bold text-gray-900">{total}</span>
+          <span className="text-lg font-bold text-slate-900">{total}</span>
           <Pill className={SEVERITY_PILL[worst] || SEVERITY_PILL.LOW}>worst {worst}</Pill>
         </div>
       )}
       {counts.length > 0 && (
-        <p className="text-[11px] text-gray-500">{counts.map(s => `${openCounts[s]} ${s.toLowerCase()}`).join(' · ')}</p>
+        <p className="text-[12px] text-slate-600">{counts.map(s => `${openCounts[s]} ${s.toLowerCase()}`).join(' · ')}</p>
       )}
-      <p className="text-[10px] text-gray-400">Declared risk level: {header.riskLevel || '—'}</p>
+      <p className="text-[12px] text-slate-500">Declared risk level: {header.riskLevel || '—'}</p>
     </Tile>
   )
 }
@@ -186,8 +178,8 @@ function RiskTile({ header, agentId }: { header: OverviewHeader; agentId: string
 function GatesTile({ header, agentId }: { header: OverviewHeader; agentId: string }) {
   const approved = GATES.filter(g => APPROVED.includes(header.gates[g.key])).length
   return (
-    <Tile label="Governance gates" to={`/agents/${agentId}?tab=governance`}>
-      <p className={`text-sm font-semibold ${approved === GATES.length ? 'text-teal-700' : 'text-gray-900'}`}>
+    <Tile label="Governance gates" tip="gate" to={`/agents/${agentId}?tab=governance`}>
+      <p className={`text-sm font-semibold ${approved === GATES.length ? 'text-emerald-700' : 'text-slate-900'}`}>
         {approved} of {GATES.length} approved
       </p>
       <div className="flex flex-wrap gap-1">
@@ -207,27 +199,27 @@ function GatesTile({ header, agentId }: { header: OverviewHeader; agentId: strin
 function BudgetTile({ header, agentId }: { header: OverviewHeader; agentId: string }) {
   const b = header.budget
   return (
-    <Tile label="Budget (month to date)" to={`/agents/${agentId}?tab=tokenomics`}>
+    <Tile label="Budget (month to date)" tip="budget" to={`/agents/${agentId}?tab=tokenomics`}>
       {!b ? (
-        <p className="text-sm text-gray-400">No budget set</p>
+        <p className="text-sm text-slate-500">No budget set</p>
       ) : (
         <>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-sm font-semibold ${BUDGET_STATE[b.state]?.className || 'text-gray-900'}`}>
+            <span className={`text-sm font-semibold ${BUDGET_STATE[b.state]?.className || 'text-slate-900'}`}>
               {BUDGET_STATE[b.state]?.label || b.state}
             </span>
-            {b.usedPct != null && <span className="text-xs font-mono text-gray-600">{b.usedPct}%</span>}
+            {b.usedPct != null && <span className="text-xs font-mono text-slate-700">{b.usedPct}%</span>}
             <SourceBadge source={b.source} />
           </div>
           {b.state === 'no_usage_data' ? (
-            <p className="text-[11px] text-gray-500">Budget {fmtCents(b.monthlyBudgetCents)}; nothing to measure against yet</p>
+            <p className="text-[12px] text-slate-600">Budget {fmtCents(b.monthlyBudgetCents)}; nothing to measure against yet</p>
           ) : (
-            <p className="text-[11px] text-gray-500 font-mono">{fmtCents(b.mtdCents)} of {fmtCents(b.monthlyBudgetCents)}</p>
+            <p className="text-[12px] text-slate-600 font-mono">{fmtCents(b.mtdCents)} of {fmtCents(b.monthlyBudgetCents)}</p>
           )}
-          {b.unpriced.length > 0 && <p className="text-[10px] text-amber-700">Unpriced model: {b.unpriced.join(', ')}</p>}
+          {b.unpriced.length > 0 && <p className="text-[12px] text-amber-700">Unpriced model: {b.unpriced.join(', ')}</p>}
         </>
       )}
-      <p className="text-[10px] text-gray-400">Visibility only, never enforced</p>
+      <p className="text-[12px] text-slate-500">Visibility only, never enforced</p>
     </Tile>
   )
 }
@@ -241,20 +233,20 @@ function TelemetryTile({ header, agentId }: { header: OverviewHeader; agentId: s
         {t.freshness && <Pill className={FRESHNESS_PILL[t.freshness]}>{t.freshness}</Pill>}
       </div>
       {t.status === 'not_linked' && (
-        <p className="text-[11px] text-gray-500">No Phoenix project linked, so no usage data. Link one on the Diagram tab.</p>
+        <p className="text-[12px] text-slate-600">No Phoenix project linked, so no usage data. Link one on the Diagram tab.</p>
       )}
       {t.status === 'no_usage_yet' && (
-        <p className="text-[11px] text-gray-500">
+        <p className="text-[12px] text-slate-600">
           Linked to <span className="font-mono">{t.phoenixProject}</span>; no usage ingested yet.
         </p>
       )}
       {t.status === 'demo' && (
-        <p className="text-[11px] text-gray-500">
+        <p className="text-[12px] text-slate-600">
           Showing demo usage, not real traces.{t.linked ? '' : ' No Phoenix project linked.'}
         </p>
       )}
       {t.status === 'ok' && (
-        <p className="text-[11px] text-gray-500">
+        <p className="text-[12px] text-slate-600">
           <span className="font-mono">{t.phoenixProject}</span> · ingested {relTime(t.lastIngestedAt)}
           {t.lastActivityDate && <> · last activity {t.lastActivityDate}</>}
         </p>
@@ -286,11 +278,11 @@ function KpiStrip({ overview, error, onRetry, agentId }: {
 
 // ── Key facts ───────────────────────────────────────────────────────────────
 
-function Fact({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
+function Fact({ label, children, wide, tip }: { label: string; children: ReactNode; wide?: boolean; tip?: GlossaryKey }) {
   return (
     <div className={wide ? 'col-span-2 md:col-span-3' : ''}>
-      <FieldLabel>{label}</FieldLabel>
-      <div className="text-sm text-gray-900">{children}</div>
+      <FieldLabel tip={tip}>{label}</FieldLabel>
+      <div className="text-sm text-slate-900">{children}</div>
     </div>
   )
 }
@@ -301,26 +293,26 @@ function FactsGrid({ agent, facts }: { agent: Agent; facts: OverviewFacts | null
   const endpoint = facts?.apiEndpoint ?? agent.apiEndpoint
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-      <Fact label="Owner">
+      <Fact label="Owner" tip="owner">
         {agent.owner || 'Unassigned'}
-        {agent.ownerContact && <span className="block text-xs text-gray-500">{agent.ownerContact}</span>}
+        {agent.ownerContact && <span className="block text-xs text-slate-600">{agent.ownerContact}</span>}
       </Fact>
-      <Fact label="Department">{facts?.dept ?? agent.dept ?? '—'}</Fact>
-      <Fact label="Type">{agent.aiType || '—'}</Fact>
+      <Fact label="Department" tip="department">{facts?.dept ?? agent.dept ?? '—'}</Fact>
+      <Fact label="Type" tip="ai_type">{agent.aiType || '—'}</Fact>
       <Fact label="Model">
         {model ? <span className="font-mono">{model}</span> : '—'}
-        {provider && <span className="block text-xs text-gray-500">{provider}</span>}
+        {provider && <span className="block text-xs text-slate-600">{provider}</span>}
       </Fact>
-      <Fact label="Value">
+      <Fact label="Value" tip="declared_value">
         {agent.valueAmount ? <span className="font-mono">${(agent.valueAmount / 1000).toFixed(0)}K/mo</span> : 'Not declared'}
-        {agent.valueType && <span className="block text-xs text-gray-500">{agent.valueType}</span>}
+        {agent.valueType && <span className="block text-xs text-slate-600">{agent.valueType}</span>}
       </Fact>
-      <Fact label="Hours saved">{agent.hoursSavedMonthly ? `${fmtNumber(agent.hoursSavedMonthly)} h/mo` : 'Not declared'}</Fact>
-      <Fact label="SLA">{agent.sla || '—'}</Fact>
+      <Fact label="Hours saved" tip="hours_saved">{agent.hoursSavedMonthly ? `${fmtNumber(agent.hoursSavedMonthly)} h/mo` : 'Not declared'}</Fact>
+      <Fact label="SLA" tip="sla">{agent.sla || '—'}</Fact>
       <Fact label="EU AI Act category">{facts?.euAiActCategory || '—'}</Fact>
       <Fact label="Version">{agent.version || '—'}</Fact>
-      <Fact label="API endpoint" wide>
-        <span className="font-mono text-gray-700 break-all">{endpoint || 'N/A'}</span>
+      <Fact label="API endpoint" tip="api_endpoint" wide>
+        <span className="font-mono text-slate-700 break-all">{endpoint || 'N/A'}</span>
         {facts?.apiEndpointWarning && (
           <span className="mt-1 flex items-start gap-1 text-xs text-amber-700">
             <span aria-hidden>⚠</span>
@@ -345,7 +337,7 @@ function DeclaredDependencies({ agent, agentId, graph }: { agent: Agent; agentId
   const deps = graph ? graph.edges.filter(e => e.from === agentId || e.to === agentId) : []
   const groups = CHIP_GROUPS.filter(g => (agent[g.key] || []).length > 0)
   if (groups.length === 0 && deps.length === 0) {
-    return <p className="text-xs text-gray-400">No declared systems, data stores or dependencies.</p>
+    return <p className="text-xs text-slate-500">No declared systems, data stores or dependencies.</p>
   }
   return (
     <div className="space-y-4">
@@ -365,7 +357,7 @@ function DeclaredDependencies({ agent, agentId, graph }: { agent: Agent; agentId
       )}
       {deps.length > 0 && (
         <div>
-          <SectionLabel>Dependencies</SectionLabel>
+          <SectionLabel tip="dependency_graph">Dependencies</SectionLabel>
           <div className="mt-2 space-y-1">
             {deps.map((e, i) => {
               const otherId = e.from === agentId ? e.to : e.from
@@ -374,8 +366,8 @@ function DeclaredDependencies({ agent, agentId, graph }: { agent: Agent; agentId
               const direction = e.from === agentId ? typeLabel : 'needed by'
               return (
                 <div key={i} className="text-xs flex gap-2">
-                  <span className="text-gray-400">{direction}</span>
-                  <span className="font-mono text-teal-600">{otherName}</span>
+                  <span className="text-slate-500">{direction}</span>
+                  <span className="font-mono text-zen-600">{otherName}</span>
                 </div>
               )
             })}
@@ -393,16 +385,16 @@ function CompletenessBar({ pct, missing }: { pct: number; missing: string[] }) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-3">
-        <span className="text-xs text-gray-500 whitespace-nowrap">Completeness</span>
+        <span className="text-xs text-slate-600 whitespace-nowrap">Completeness</span>
         <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
           <div className={`h-full ${color}`} style={{ width: `${Math.max(0, Math.min(pct, 100))}%` }} />
         </div>
-        <span className="text-xs font-mono text-gray-700 w-10 text-right">{pct}%</span>
+        <span className="text-xs font-mono text-slate-700 w-10 text-right">{pct}%</span>
       </div>
       {missing.length > 0 && (
         <div className="flex flex-wrap items-center gap-1">
-          <span className="text-[10px] text-gray-400">Missing or under 20 characters:</span>
-          {missing.map(s => <Pill key={s} className="bg-gray-50 text-gray-500 ring-gray-200">{s}</Pill>)}
+          <span className="text-[12px] text-slate-500">Missing or under 20 characters:</span>
+          {missing.map(s => <Pill key={s} className="bg-gray-50 text-slate-600 ring-gray-200">{s}</Pill>)}
         </div>
       )}
     </div>
@@ -410,12 +402,12 @@ function CompletenessBar({ pct, missing }: { pct: number; missing: string[] }) {
 }
 
 function SuggestionTag() {
-  return <span className="text-[10px] text-amber-700 bg-amber-50 ring-1 ring-amber-200 rounded-full px-1.5 py-0.5 whitespace-nowrap">Suggestion — not counted until confirmed</span>
+  return <span className="text-[12px] text-amber-700 bg-amber-50 ring-1 ring-amber-200 rounded-full px-1.5 py-0.5 whitespace-nowrap">Suggestion — not counted until confirmed</span>
 }
 
 function Excerpt({ text }: { text: string }) {
   if (!text) return null
-  return <p className="text-[11px] text-gray-500 italic border-l-2 border-gray-200 pl-2 mt-1 break-words">"{text}"</p>
+  return <p className="text-[12px] text-slate-600 italic border-l-2 border-gray-200 pl-2 mt-1 break-words">"{text}"</p>
 }
 
 function Suggestions({ insight, busy, onAction }: {
@@ -426,7 +418,7 @@ function Suggestions({ insight, busy, onAction }: {
   const risks = insight.suggestedRisks
   const deps = insight.suggestedDependencies
   if (risks.length === 0 && deps.length === 0) {
-    return <p className="text-xs text-gray-400">No open suggestions from this document.</p>
+    return <p className="text-xs text-slate-500">No open suggestions from this document.</p>
   }
   const buttons = (type: SuggestionType, ref: string, confirmLabel: string) => {
     const id = `${type}:${ref}`
@@ -445,17 +437,17 @@ function Suggestions({ insight, busy, onAction }: {
     <div className="space-y-3">
       {risks.length > 0 && (
         <div className="space-y-2">
-          <SectionLabel>Suggested risks ({risks.length})</SectionLabel>
+          <SectionLabel tip="risk_register">Suggested risks ({risks.length})</SectionLabel>
           {risks.map(r => (
             <div key={r.key} className="rounded-lg border border-dashed border-amber-200 bg-amber-50/30 p-3 flex gap-3 items-start">
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-1.5 mb-1">
                   <Pill className={SEVERITY_PILL[r.severity] || SEVERITY_PILL.LOW}>{r.severity}</Pill>
-                  <Pill className="bg-white text-gray-600 ring-gray-200">{CATEGORY_LABELS[r.category] || r.category}</Pill>
+                  <Pill className="bg-white text-slate-700 ring-gray-200">{CATEGORY_LABELS[r.category] || r.category}</Pill>
                   <SuggestionTag />
                 </div>
-                <p className="text-sm font-medium text-gray-900">{r.title}</p>
-                <p className="text-xs text-gray-600">{r.description}</p>
+                <p className="text-sm font-medium text-slate-900">{r.title}</p>
+                <p className="text-xs text-slate-700">{r.description}</p>
                 <Excerpt text={r.excerpt} />
               </div>
               {buttons('risk', r.key, 'Add to risk register')}
@@ -470,8 +462,8 @@ function Suggestions({ insight, busy, onAction }: {
             <div key={d.name} className="rounded-lg border border-dashed border-amber-200 bg-amber-50/30 p-3 flex gap-3 items-start">
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                  <span className="text-sm font-mono text-teal-700">{d.name}</span>
-                  <Pill className="bg-white text-gray-600 ring-gray-200">{FIELD_LABEL[d.field] || d.field}</Pill>
+                  <span className="text-sm font-mono text-zen-700">{d.name}</span>
+                  <Pill className="bg-white text-slate-700 ring-gray-200">{FIELD_LABEL[d.field] || d.field}</Pill>
                   <SuggestionTag />
                 </div>
                 <Excerpt text={d.excerpt} />
@@ -490,8 +482,8 @@ function Signals({ insight }: { insight: ContextInsight }) {
   if (labels.length === 0) return null
   return (
     <div className="flex flex-wrap items-center gap-1">
-      <span className="text-[10px] text-gray-400">Mentions:</span>
-      {labels.map(l => <Pill key={l} className="bg-gray-50 text-gray-600 ring-gray-200">{l}</Pill>)}
+      <span className="text-[12px] text-slate-500">Mentions:</span>
+      {labels.map(l => <Pill key={l} className="bg-gray-50 text-slate-700 ring-gray-200">{l}</Pill>)}
     </div>
   )
 }
@@ -518,7 +510,7 @@ function VersionHistory({ agentId, versions, onLoad }: {
     }
   }
 
-  if (versions.length === 0) return <p className="text-xs text-gray-400">No saved versions yet.</p>
+  if (versions.length === 0) return <p className="text-xs text-slate-500">No saved versions yet.</p>
   return (
     <div className="space-y-2">
       <ErrorLine text={error} />
@@ -526,15 +518,15 @@ function VersionHistory({ agentId, versions, onLoad }: {
         {versions.map((v, i) => (
           <li key={v.id} className="px-3 py-2">
             <div className="flex items-center gap-3 text-xs">
-              <span className="font-mono text-gray-400 w-8">v{versions.length - i}</span>
-              <span className="text-gray-700">{fmtDateTime(v.savedAt)}</span>
-              <span className="text-gray-500 truncate">{v.savedBy || '—'}</span>
+              <span className="font-mono text-slate-500 w-8">v{versions.length - i}</span>
+              <span className="text-slate-700">{fmtDateTime(v.savedAt)}</span>
+              <span className="text-slate-600 truncate">{v.savedBy || '—'}</span>
               <span className="ml-auto flex items-center gap-2">
-                {v.removed ? <Pill className="bg-gray-100 text-gray-500 ring-gray-200">removed</Pill> : <span className="text-gray-400">{fmtBytes(v.sizeBytes)}</span>}
+                {v.removed ? <Pill className="bg-gray-100 text-slate-600 ring-gray-200">removed</Pill> : <span className="text-slate-500">{fmtBytes(v.sizeBytes)}</span>}
                 {i === 0 && <Pill className="bg-teal-50 text-teal-700 ring-teal-200">current</Pill>}
-                <span className="font-mono text-gray-300" title={v.hash}>{v.hash.slice(0, 8)}</span>
+                <span className="font-mono text-slate-400" title={v.hash}>{v.hash.slice(0, 8)}</span>
                 {!v.removed && (
-                  <button className="text-teal-600 hover:underline" onClick={() => view(v)} disabled={loadingId !== null}>
+                  <button className="text-zen-600 hover:underline" onClick={() => view(v)} disabled={loadingId !== null}>
                     {loadingId === v.id ? 'Loading…' : viewing?.id === v.id ? 'Hide' : 'View'}
                   </button>
                 )}
@@ -571,7 +563,7 @@ function ContextEditor({ draft, origin, saving, error, onChange, onUpload, onSav
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-slate-600">
           Editing {origin}. Markdown, any length. Saved as a new version; earlier versions stay in the history.
         </p>
         <button className="btn-secondary btn-sm" onClick={onUpload} disabled={saving}>Upload .md / .txt</button>
@@ -583,7 +575,7 @@ function ContextEditor({ draft, origin, saving, error, onChange, onUpload, onSav
         spellCheck={false}
         aria-label="context.md content"
       />
-      <p className="text-[10px] text-gray-400">
+      <p className="text-[12px] text-slate-500">
         {fmtBytes(size)} · The registry reads this as data only and never follows instructions in it. It only adds suggestions, which a person confirms.
       </p>
       <ErrorLine text={error} />
@@ -725,14 +717,14 @@ function ContextPanel({ agentId, ctx, summary, error, onRetry, onChanged }: {
   const latest = versions[0]
   const status = (
     <>
-      {notice && <p className="text-xs text-teal-700">{notice}</p>}
+      {notice && <p className="text-xs text-zen-700">{notice}</p>}
       <ErrorLine text={editing ? null : actionError} />
     </>
   )
 
   const history = versions.length > 0 && (
     <div>
-      <button className="text-xs text-teal-600 hover:underline" onClick={() => setShowHistory(s => !s)}>
+      <button className="text-xs text-zen-600 hover:underline" onClick={() => setShowHistory(s => !s)}>
         {showHistory ? 'Hide' : 'Show'} version history ({versions.length})
       </button>
       {showHistory && (
@@ -766,8 +758,8 @@ function ContextPanel({ agentId, ctx, summary, error, onRetry, onChanged }: {
       <div className="space-y-3">
         {fileInput}
         <div className="rounded-lg border border-dashed border-gray-200 p-4 space-y-3">
-          <p className="text-sm text-gray-600">No context added — the registry works fully without it.</p>
-          <p className="text-xs text-gray-400">
+          <p className="text-sm text-slate-700">No context added — the registry works fully without it.</p>
+          <p className="text-xs text-slate-500">
             A context.md lets the owner describe purpose, users, data, systems, oversight and fallback in their own words.
             The registry then offers suggestions a person confirms; nothing changes on its own.
           </p>
@@ -789,7 +781,7 @@ function ContextPanel({ agentId, ctx, summary, error, onRetry, onChanged }: {
     <div className="space-y-4">
       {fileInput}
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-slate-600">
           {versions.length} version{versions.length === 1 ? '' : 's'}
           {' · '}{fmtBytes(summary?.sizeBytes ?? latest?.sizeBytes ?? 0)}
           {latest && <> · updated {relTime(latest.savedAt)} by {latest.savedBy || 'unknown'}</>}
@@ -807,11 +799,11 @@ function ContextPanel({ agentId, ctx, summary, error, onRetry, onChanged }: {
 
       {insight.llmStatus === 'ok' && insight.summary ? (
         <div className="rounded-lg bg-teal-50/40 border border-teal-100 p-3">
-          <span className="text-[10px] uppercase tracking-wide text-teal-700">Generated summary — verify before relying on it</span>
-          <p className="text-sm text-gray-700 mt-1">{insight.summary}</p>
+          <span className="text-[12px] uppercase tracking-wide text-zen-700">Generated summary — verify before relying on it</span>
+          <p className="text-sm text-slate-700 mt-1">{insight.summary}</p>
         </div>
       ) : LLM_NOTE[insight.llmStatus] ? (
-        <p className="text-[11px] text-gray-400">{LLM_NOTE[insight.llmStatus]}</p>
+        <p className="text-[12px] text-slate-500">{LLM_NOTE[insight.llmStatus]}</p>
       ) : null}
 
       <Signals insight={insight} />
@@ -830,7 +822,7 @@ function ContextPanel({ agentId, ctx, summary, error, onRetry, onChanged }: {
 
 // ── Tab ─────────────────────────────────────────────────────────────────────
 
-export default function OverviewTab({ agent, agentId, onChanged, graph }: TabProps & { graph: GraphV2Response | null }) {
+export default function OverviewTab({ agent, agentId, onChanged, dataVersion, graph }: TabProps & { graph: GraphV2Response | null }) {
   const [overview, setOverview] = useState<AgentOverview | null>(null)
   const [overviewError, setOverviewError] = useState<string | null>(null)
   const [ctx, setCtx] = useState<AgentContext | null>(null)
@@ -858,6 +850,7 @@ export default function OverviewTab({ agent, agentId, onChanged, graph }: TabPro
     setLoading(true)
     load()
   }, [load])
+  useReloadOn(dataVersion, load)
 
   const contextChanged = (next?: AgentContext) => {
     if (next) setCtx(next)
@@ -878,13 +871,13 @@ export default function OverviewTab({ agent, agentId, onChanged, graph }: TabPro
           {agent.description && (
             <div>
               <FieldLabel>Description</FieldLabel>
-              <p className="text-sm text-gray-700">{agent.description}</p>
+              <p className="text-sm text-slate-700">{agent.description}</p>
             </div>
           )}
           {agent.businessOutcome && (
             <div>
-              <FieldLabel>Business Outcome</FieldLabel>
-              <p className="text-sm text-gray-700">{agent.businessOutcome}</p>
+              <FieldLabel tip="business_outcome">Business Outcome</FieldLabel>
+              <p className="text-sm text-slate-700">{agent.businessOutcome}</p>
             </div>
           )}
         </div>
@@ -894,8 +887,8 @@ export default function OverviewTab({ agent, agentId, onChanged, graph }: TabPro
 
       <div className="border-t border-gray-100 pt-4 space-y-3">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-gray-900">Context</h3>
-          <span className="text-[10px] text-gray-400">optional · context.md</span>
+          <h3 className="text-sm font-semibold text-slate-900">Context</h3>
+          <span className="text-[12px] text-slate-500">optional · context.md</span>
         </div>
         <ContextPanel
           agentId={agentId}

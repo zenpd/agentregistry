@@ -30,8 +30,8 @@ export default function LoginPage() {
             Z
           </div>
           <div>
-            <div className="font-bold text-gray-900">Agent Registry</div>
-            <div className="text-xs text-gray-500">Enterprise AI Control Tower</div>
+            <div className="font-bold text-slate-900">Agent Registry</div>
+            <div className="text-xs text-slate-600">Enterprise AI Control Tower</div>
           </div>
         </div>
 
@@ -39,7 +39,7 @@ export default function LoginPage() {
 
         <form onSubmit={submit} className="space-y-3">
           <div>
-            <label className="text-xs text-gray-500">Email</label>
+            <label className="text-xs text-slate-600">Email</label>
             <input
               type="email"
               value={email}
@@ -49,7 +49,7 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <label className="text-xs text-gray-500">Password</label>
+            <label className="text-xs text-slate-600">Password</label>
             <input
               type="password"
               value={password}
@@ -68,7 +68,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-4 text-xs text-gray-400">
+        <div className="mt-4 text-xs text-slate-500">
           <div>Demo credentials:</div>
           <div>admin@airegistry.local / admin123</div>
         </div>

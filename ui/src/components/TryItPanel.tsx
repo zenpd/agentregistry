@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Send, ListTree } from 'lucide-react'
 import {
   getApiOperations, tryAgent, updateContract,
@@ -6,6 +6,7 @@ import {
 } from '../services/ops/integrate'
 import { errorMessage } from '../pages/agent/shared'
 import ErrorNote from './ErrorNote'
+import InfoTip from './InfoTip'
 
 function pretty(body: unknown): string {
   if (body == null) return ''
@@ -82,8 +83,16 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState<string | null>(null)
 
-  // Keyed on content, so a reload of the same agent keeps what was typed.
+  // A different agent starts over. When only the example changes (the registry filled in the inputs
+  // while the page was open), what a person typed and the result they are reading are kept.
+  const shown = useRef({ agentId, example })
   useEffect(() => {
+    const before = shown.current
+    shown.current = { agentId, example }
+    if (before.agentId === agentId) {
+      setBody(current => (current === before.example ? example : current))
+      return
+    }
     setBody(example)
     setResult(null)
     setError(null)
@@ -103,8 +112,8 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
 
   if (!tryIt.available) {
     return (
-      <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600" data-testid="try-it-unavailable">
-        <span className="font-medium text-gray-700">Try it is not available for this agent.</span> {tryIt.reason}
+      <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-slate-700" data-testid="try-it-unavailable">
+        <span className="font-medium text-slate-700">Try it is not available for this agent.</span> {tryIt.reason}
       </div>
     )
   }
@@ -196,7 +205,8 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
           <button type="button" onClick={loadOperations} disabled={opsBusy} className="btn-secondary btn-sm flex items-center gap-1.5" data-testid="load-operations">
             <ListTree size={14} /> {opsBusy ? 'Reading openapi.json…' : ops?.ok ? 'Reload API operations' : 'Load API operations'}
           </button>
-          {opsBusy && <span className="text-gray-400">An app that scales to zero can take ~30 s to wake up.</span>}
+          <InfoTip term="openapi_doc" />
+          {opsBusy && <span className="text-slate-500">An app that scales to zero can take ~30 s to wake up.</span>}
           {ops?.ok && ops.operations.length > 0 && (
             <select
               className="input w-auto flex-1 min-w-[240px] py-1.5 font-mono text-xs"
@@ -213,9 +223,9 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
               ))}
             </select>
           )}
-          {ops?.ok && ops.operations.length === 0 && <span className="text-gray-500">The API list has no GET or POST operations.</span>}
+          {ops?.ok && ops.operations.length === 0 && <span className="text-slate-600">The API list has no GET or POST operations.</span>}
           {ops?.ok && ops.otherMethods > 0 && (
-            <span className="w-full text-gray-400">{ops.otherMethods} PUT/PATCH/DELETE operation{ops.otherMethods === 1 ? '' : 's'} not listed — Try it sends GET and POST only.</span>
+            <span className="w-full text-slate-500">{ops.otherMethods} PUT/PATCH/DELETE operation{ops.otherMethods === 1 ? '' : 's'} not listed — Try it sends GET and POST only.</span>
           )}
         </div>
       )}
@@ -227,10 +237,10 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
           <option value="GET">GET</option>
         </select>
         {onApi ? (
-          <div className="flex flex-1 min-w-0 items-center rounded-lg bg-gray-50 ring-1 ring-gray-200 focus-within:ring-teal-400">
-            <code className="shrink-0 max-w-[45%] truncate pl-3 font-mono text-gray-500" title={tryIt.base || ''}>{tryIt.base}</code>
+          <div className="flex flex-1 min-w-0 items-center rounded-lg bg-gray-50 ring-1 ring-gray-200 focus-within:ring-zen-400">
+            <code className="shrink-0 max-w-[45%] truncate pl-3 font-mono text-slate-600" title={tryIt.base || ''}>{tryIt.base}</code>
             <input
-              className="flex-1 min-w-0 bg-transparent px-1 py-2 font-mono text-gray-800 outline-none"
+              className="flex-1 min-w-0 bg-transparent px-1 py-2 font-mono text-slate-800 outline-none"
               value={path}
               onChange={e => setPath(e.target.value)}
               aria-label="Path"
@@ -240,14 +250,14 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
             />
           </div>
         ) : (
-          <code className="flex-1 truncate rounded-lg bg-gray-50 px-3 py-2 font-mono text-gray-700" title={tryIt.url || ''}>{tryIt.url}</code>
+          <code className="flex-1 truncate rounded-lg bg-gray-50 px-3 py-2 font-mono text-slate-700" title={tryIt.url || ''}>{tryIt.url}</code>
         )}
       </div>
       {tryIt.backendDefault && endpointAdvice?.suggestedBase && (
-        <p className="text-[11.5px] text-gray-400" data-testid="try-it-backend-default">
+        <p className="text-[12.5px] text-slate-500" data-testid="try-it-backend-default">
           {target === 'api'
-            ? <>Calling the app’s backend host (the recorded endpoint is its web page). <button type="button" className="underline hover:text-gray-600" onClick={() => { setTarget('recorded'); setResult(null) }}>Call the recorded page instead</button></>
-            : <>Calling the recorded web page. <button type="button" className="underline hover:text-gray-600" onClick={() => { setTarget('api'); setResult(null) }}>Back to the backend host</button></>}
+            ? <>Calling the app’s backend host (the recorded endpoint is its web page). <button type="button" className="underline hover:text-slate-700" onClick={() => { setTarget('recorded'); setResult(null) }}>Call the recorded page instead</button></>
+            : <>Calling the recorded web page. <button type="button" className="underline hover:text-slate-700" onClick={() => { setTarget('api'); setResult(null) }}>Back to the backend host</button></>}
         </p>
       )}
       {badPath && <p className="text-xs text-rose-700">The path must start with a single /, e.g. /api/v1/…</p>}
@@ -270,7 +280,7 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
       )}
 
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-slate-500">
           Sent from the registry server. Your login is not passed to the agent. Calls are logged without their
           content and limited per minute.
         </p>
@@ -284,13 +294,13 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
       {result && (
         <div className="rounded-xl border border-gray-200 overflow-hidden" data-testid="try-it-result">
           <div className="flex flex-wrap items-center gap-2 bg-gray-50 px-3 py-2 text-xs">
-            <span className="font-mono text-gray-500">{result.method}</span>
+            <span className="font-mono text-slate-600">{result.method}</span>
             {result.status != null
               ? <span className={result.ok ? 'status-complete' : 'status-failed'}>HTTP {result.status}</span>
               : <span className="status-failed">No response</span>}
-            {result.latencyMs != null && <span className="text-gray-500">{result.latencyMs} ms</span>}
-            {result.contentType && <span className="text-gray-400 truncate">{result.contentType}</span>}
-            <span className="ml-auto font-mono text-gray-400 truncate max-w-full" title={result.url}>{result.url}</span>
+            {result.latencyMs != null && <span className="text-slate-600">{result.latencyMs} ms</span>}
+            {result.contentType && <span className="text-slate-500 truncate">{result.contentType}</span>}
+            <span className="ml-auto font-mono text-slate-500 truncate max-w-full" title={result.url}>{result.url}</span>
           </div>
           {result.error && <div className="px-3 py-2"><ErrorNote message={result.error} hint={result.hint} /></div>}
           {result.location && (
@@ -310,15 +320,15 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
           )}
           {result.body != null && pretty(result.body) !== '' && (
             isHtml ? (
-              <details className="px-3 py-2 text-xs text-gray-600">
+              <details className="px-3 py-2 text-xs text-slate-700">
                 <summary className="cursor-pointer select-none">Show the HTML that came back ({pretty(result.body).length.toLocaleString()} characters)</summary>
-                <pre className="mt-2 max-h-56 overflow-auto font-mono whitespace-pre-wrap break-all text-gray-700">{pretty(result.body)}</pre>
+                <pre className="mt-2 max-h-56 overflow-auto font-mono whitespace-pre-wrap break-all text-slate-700">{pretty(result.body)}</pre>
               </details>
             ) : (
-              <pre className="max-h-72 overflow-auto px-3 py-2 text-xs font-mono text-gray-800 whitespace-pre-wrap break-all">{pretty(result.body)}</pre>
+              <pre className="max-h-72 overflow-auto px-3 py-2 text-xs font-mono text-slate-800 whitespace-pre-wrap break-all">{pretty(result.body)}</pre>
             )
           )}
-          {result.truncated && <div className="px-3 pb-2 text-xs text-gray-400">Response cut off at 64 KB.</div>}
+          {result.truncated && <div className="px-3 pb-2 text-xs text-slate-500">Response cut off at 64 KB.</div>}
         </div>
       )}
     </div>

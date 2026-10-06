@@ -25,6 +25,8 @@ export interface DiagramGraph extends SampleMeta {
   sampleLimit: number
   truncated: boolean
   orphanRate: number | null
+  // "operations": the app reports no agent / tool / retriever steps, so the operations named in its spans are drawn.
+  mode?: 'steps' | 'operations'
 }
 
 export interface ObservedItem {

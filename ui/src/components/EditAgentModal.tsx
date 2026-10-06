@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import InfoTip from './InfoTip'
 import { Link } from 'react-router-dom'
 import { updateAgent, type Agent } from '../services/api'
 import { errorMessage } from '../pages/agent/shared'
@@ -55,7 +56,7 @@ export default function EditAgentModal({ agent, onClose, onSaved }: {
     }
   }
 
-  const label = 'block text-xs font-semibold uppercase text-gray-500 mb-1 tracking-wide'
+  const label = 'block text-xs font-semibold uppercase text-slate-600 mb-1 tracking-wide'
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
@@ -65,13 +66,13 @@ export default function EditAgentModal({ agent, onClose, onSaved }: {
         <form onSubmit={submit} className="p-6 space-y-4" data-testid="edit-agent-form">
           <div className="flex justify-between items-start">
             <div>
-              <h2 id="edit-agent-title" className="text-xl font-bold text-gray-900">Edit {agent.name}</h2>
-              <p className="text-sm text-gray-500 mt-0.5">
-                Stage changes go through the <Link to={`/agents/${agent.id}?tab=governance`} className="text-teal-700 hover:underline">Governance tab</Link>;
-                endpoint, capabilities and contract through the <Link to={`/agents/${agent.id}?tab=integrate`} className="text-teal-700 hover:underline">Integrate tab</Link>.
+              <h2 id="edit-agent-title" className="text-xl font-bold text-slate-900">Edit {agent.name}</h2>
+              <p className="text-sm text-slate-600 mt-0.5">
+                Stage changes go through the <Link to={`/agents/${agent.id}?tab=governance`} className="text-zen-700 hover:underline">Governance tab</Link>;
+                endpoint, capabilities and contract through the <Link to={`/agents/${agent.id}?tab=integrate`} className="text-zen-700 hover:underline">Integrate tab</Link>.
               </p>
             </div>
-            <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400 hover:text-gray-700 text-2xl leading-none">&times;</button>
+            <button type="button" onClick={onClose} aria-label="Close" className="text-slate-500 hover:text-slate-700 text-2xl leading-none">&times;</button>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -80,7 +81,10 @@ export default function EditAgentModal({ agent, onClose, onSaved }: {
               <input id="edit-name" className="input" value={form.name} onChange={e => set('name', e.target.value)} required />
             </div>
             <div>
-              <label className={label} htmlFor="edit-owner">Owner</label>
+              <div className="flex items-center gap-1">
+                <label className={label} htmlFor="edit-owner">Owner</label>
+                <InfoTip term="owner" className="-my-0.5 mb-1" />
+              </div>
               <input id="edit-owner" className="input" value={form.owner} onChange={e => set('owner', e.target.value)} />
             </div>
             <div>
@@ -88,14 +92,20 @@ export default function EditAgentModal({ agent, onClose, onSaved }: {
               <input id="edit-contact" className="input" value={form.owner_contact} onChange={e => set('owner_contact', e.target.value)} placeholder="team email or channel" />
             </div>
             <div>
-              <label className={label} htmlFor="edit-dept">Department</label>
+              <div className="flex items-center gap-1">
+                <label className={label} htmlFor="edit-dept">Department</label>
+                <InfoTip term="department" className="-my-0.5 mb-1" />
+              </div>
               <select id="edit-dept" className="input" value={form.dept} onChange={e => set('dept', e.target.value)}>
                 <option value="">No department</option>
                 {depts.map(d => <option key={d} value={d}>{d.replace('dept-', '')}</option>)}
               </select>
             </div>
             <div>
-              <label className={label} htmlFor="edit-type">AI type</label>
+              <div className="flex items-center gap-1">
+                <label className={label} htmlFor="edit-type">AI type</label>
+                <InfoTip term="ai_type" className="-my-0.5 mb-1" />
+              </div>
               <select id="edit-type" className="input" value={form.ai_type} onChange={e => set('ai_type', e.target.value)}>
                 {AI_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
@@ -107,16 +117,25 @@ export default function EditAgentModal({ agent, onClose, onSaved }: {
             <textarea id="edit-description" className="input" rows={3} value={form.description} onChange={e => set('description', e.target.value)} />
           </div>
           <div>
-            <label className={label} htmlFor="edit-outcome">Business outcome</label>
+            <div className="flex items-center gap-1">
+                <label className={label} htmlFor="edit-outcome">Business outcome</label>
+                <InfoTip term="business_outcome" className="-my-0.5 mb-1" />
+              </div>
             <input id="edit-outcome" className="input" value={form.business_outcome} onChange={e => set('business_outcome', e.target.value)} />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={label} htmlFor="edit-value">Value ($/mo)</label>
+              <div className="flex items-center gap-1">
+                <label className={label} htmlFor="edit-value">Value ($/mo)</label>
+                <InfoTip term="declared_value" className="-my-0.5 mb-1" />
+              </div>
               <input id="edit-value" type="number" min={0} className="input" value={form.value_amount} onChange={e => set('value_amount', Number(e.target.value))} />
             </div>
             <div>
-              <label className={label} htmlFor="edit-hours">Hours saved / month</label>
+              <div className="flex items-center gap-1">
+                <label className={label} htmlFor="edit-hours">Hours saved / month</label>
+                <InfoTip term="hours_saved" className="-my-0.5 mb-1" />
+              </div>
               <input id="edit-hours" type="number" min={0} className="input" value={form.hours_saved_monthly} onChange={e => set('hours_saved_monthly', Number(e.target.value))} />
             </div>
           </div>

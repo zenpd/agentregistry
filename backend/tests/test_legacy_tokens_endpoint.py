@@ -4,7 +4,7 @@ which is rounded to the nearest whole cent per day; recomputed from the
 same governance/costing engine as /tokens/summary and /tokenomics."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -36,7 +36,7 @@ def tokens_db(autouse=True):
             db.add(AgentTokenUsage(agent_id="a1", bucket=TODAY, model_name="gpt-4.1-mini",
                                    invocation_count=5, input_tokens=2769, output_tokens=477,
                                    cost_cents=0, source="phoenix"))
-            db.add(AgentTokenUsage(agent_id="a1", bucket=TODAY.replace(day=max(TODAY.day - 7, 1)),
+            db.add(AgentTokenUsage(agent_id="a1", bucket=(TODAY - timedelta(days=7)),
                                    model_name="gpt-4.1-mini", invocation_count=24, input_tokens=15087,
                                    output_tokens=2794, cached_tokens=3072, cost_cents=1, source="phoenix"))
             db.add(AgentTokenUsage(agent_id="unpriced", bucket=TODAY, model_name="some-unpriced-model",

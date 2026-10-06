@@ -30,9 +30,12 @@ log = get_logger("orchestrations.risk_scan")
 TRACE_WINDOW_DAYS = 7
 SPAN_PAGE_LIMIT = 1000
 SPAN_MAX_PAGES = 5
-# Sub-agents inside one app show up as observed "agents"; they are not
-# external dependencies, so they never count as drift.
-DRIFT_KINDS = frozenset({"tool", "mcp_server", "retriever", "model", "embedding"})
+# Only what a record can declare counts as drift. Sub-agents inside one app show
+# up as observed "agents" and are not dependencies. A model that differs from
+# the declared one is its own finding (the undeclared-model cost flag, and
+# recertification), and there is no field for an embedding model, so neither is
+# reported here as something left undeclared.
+DRIFT_KINDS = frozenset({"tool", "mcp_server", "retriever"})
 ORG_ID = "org-default"
 
 

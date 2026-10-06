@@ -425,6 +425,10 @@ def join_try_path(base: str, path: str) -> str:
     return url
 
 
+# Platform services that answer on every cloud VM (Azure WireServer, Alibaba metadata).
+_CLOUD_INTERNAL = frozenset({"168.63.129.16", "100.100.100.200"})
+
+
 def check_addresses(addresses: Iterable[str], allow_loopback: bool) -> None:
     """Refuses cloud metadata, link-local, multicast and reserved addresses,
     and loopback outside development. Private ranges stay allowed: internal
@@ -433,6 +437,8 @@ def check_addresses(addresses: Iterable[str], allow_loopback: bool) -> None:
         ip = ipaddress.ip_address(str(raw).split("%")[0])
         if ip.version == 6 and ip.ipv4_mapped:
             ip = ip.ipv4_mapped
+        if str(ip) in _CLOUD_INTERNAL:
+            raise TryItBlocked(f"The endpoint resolves to {ip}, a cloud platform address")
         # Loopback first: Python also counts ::1 as reserved.
         if ip.is_loopback:
             if not allow_loopback:
@@ -548,3 +554,79 @@ def openapi_operations(spec: Any) -> dict:
     info = spec.get("info") if isinstance(spec.get("info"), Mapping) else {}
     return {"title": info.get("title"), "operations": operations[:MAX_OPERATIONS],
             "truncated": len(operations) > MAX_OPERATIONS, "otherMethods": other}
+
+
+MAX_IO_LINES = 8
+_MAX_IO_FIELDS = 8
+
+
+def _field_names(spec: Mapping[str, Any], schema: Any) -> list[str]:
+    """Top-level property names of a JSON schema (an array's item fields for a list)."""
+    schema = _resolve_ref(spec, schema)
+    if not isinstance(schema, Mapping):
+        return []
+    if _schema_type(schema) == "array":
+        return _field_names(spec, schema.get("items"))
+    props = schema.get("properties")
+    return [str(k) for k in props][:_MAX_IO_FIELDS] if isinstance(props, Mapping) else []
+
+
+def _ok_response_schema(spec: Mapping[str, Any], op: Mapping[str, Any]) -> Any:
+    responses = op.get("responses")
+    if not isinstance(responses, Mapping):
+        return None
+    for code in ("200", "201", 200, 201):
+        resp = _resolve_ref(spec, responses.get(code))
+        content = resp.get("content") if isinstance(resp, Mapping) else None
+        body = content.get("application/json") if isinstance(content, Mapping) else None
+        if isinstance(body, Mapping) and body.get("schema") is not None:
+            return body["schema"]
+    return None
+
+
+# Operations every web service has. They say nothing about what an agent does,
+# so they are left out of its capabilities and its contract.
+_PLUMBING = re.compile(
+    r"^\s*(health(\s*check)?(\s*v\d+)?|root|ping|metrics|ready|readiness|liveness|live|docs|openapi|version|status)\s*(:.*)?$", re.I)
+
+
+def is_plumbing(label: Any) -> bool:
+    return bool(_PLUMBING.match(str(label or "")))
+
+
+def openapi_io(spec: Any) -> dict:
+    """{inputs, outputs}: one line per operation, "Summary: field, field", from
+    the request and success-response fields an OpenAPI document declares.
+    Operations that declare no fields are left out rather than guessed."""
+    inputs: list[str] = []
+    outputs: list[str] = []
+
+    def line(label: str, names: list[str]) -> str:
+        # Whole field names only, within what a contract line may hold.
+        text = f"{label}: "
+        for i, name in enumerate(names):
+            piece = name if i == 0 else f", {name}"
+            if len(text) + len(piece) > MAX_ITEM_CHARS - 3:
+                return text + ", …"
+            text += piece
+        return text
+
+    if not isinstance(spec, Mapping) or not isinstance(spec.get("paths"), Mapping):
+        return {"inputs": inputs, "outputs": outputs}
+    for path, item in spec["paths"].items():
+        if not isinstance(item, Mapping):
+            continue
+        for method in _ALL_METHODS:
+            op = item.get(method)
+            if not isinstance(op, Mapping):
+                continue
+            label = str(op.get("summary") or op.get("operationId") or f"{method.upper()} {path}")[:80]
+            if is_plumbing(label):
+                continue
+            asked = _field_names(spec, _json_request_schema(spec, op))
+            given = _field_names(spec, _ok_response_schema(spec, op))
+            if asked and len(inputs) < MAX_IO_LINES:
+                inputs.append(line(label, asked))
+            if given and len(outputs) < MAX_IO_LINES:
+                outputs.append(line(label, given))
+    return {"inputs": inputs, "outputs": outputs}

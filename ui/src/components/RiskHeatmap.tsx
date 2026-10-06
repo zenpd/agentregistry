@@ -27,16 +27,16 @@ export default function RiskHeatmap({ rows, severities }: Props) {
       <table className="text-xs border-separate" style={{ borderSpacing: 4 }}>
         <thead>
           <tr>
-            <th className="text-left font-medium text-gray-400 pr-2 pb-1"></th>
+            <th className="text-left font-medium text-slate-500 pr-2 pb-1"></th>
             {severities.map(s => (
-              <th key={s} className="font-medium text-gray-400 pb-1 px-1" style={{ minWidth: 56 }}>{s}</th>
+              <th key={s} className="font-medium text-slate-500 pb-1 px-1" style={{ minWidth: 56 }}>{s}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map(row => (
             <tr key={row.category}>
-              <td className="text-gray-600 font-medium pr-2 whitespace-nowrap">{row.label}</td>
+              <td className="text-slate-700 font-medium pr-2 whitespace-nowrap">{row.label}</td>
               {severities.map(s => {
                 const count = row.counts[s] || 0
                 const intensity = count === 0 ? 0.04 : 0.15 + 0.65 * (count / max)

@@ -1,9 +1,24 @@
+import { useEffect, useRef } from 'react'
 import type { Agent } from '../../services/api'
+import InfoTip from '../../components/InfoTip'
+import type { GlossaryKey } from '../../lib/glossary'
 
 export interface TabProps {
   agent: Agent
   agentId: string
   onChanged: () => void
+  // Goes up when the registry has updated the record or its figures.
+  dataVersion: number
+}
+
+// Reloads a tab's data in place, without its loading screen, when the registry has updated the record.
+export function useReloadOn(dataVersion: number, reload: () => unknown) {
+  const seen = useRef(dataVersion)
+  useEffect(() => {
+    if (dataVersion === seen.current) return
+    seen.current = dataVersion
+    reload()
+  }, [dataVersion, reload])
 }
 
 export const SEVERITY_PILL: Record<string, string> = {
@@ -46,13 +61,13 @@ export const SOURCE_BADGE: Record<string, { label: string; className: string }> 
   metered: { label: 'Metered (Azure)', className: 'bg-sky-50 text-sky-700 ring-sky-200' },
   declared: { label: 'Declared by owner', className: 'bg-indigo-50 text-indigo-700 ring-indigo-200' },
   estimate: { label: 'Estimate', className: 'bg-amber-50 text-amber-700 ring-amber-200' },
-  seed: { label: 'Demo data', className: 'bg-gray-100 text-gray-600 ring-gray-300' },
-  none: { label: 'No data', className: 'bg-gray-50 text-gray-400 ring-gray-200' },
+  seed: { label: 'Demo data', className: 'bg-gray-100 text-slate-700 ring-gray-300' },
+  none: { label: 'No data', className: 'bg-gray-50 text-slate-500 ring-gray-200' },
 }
 
 export function SourceBadge({ source }: { source: string }) {
   const b = SOURCE_BADGE[source] || SOURCE_BADGE.none
-  return <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 whitespace-nowrap ${b.className}`}>{b.label}</span>
+  return <span className={`text-[12px] px-1.5 py-0.5 rounded-full ring-1 whitespace-nowrap ${b.className}`}>{b.label}</span>
 }
 
 export function fmtCents(c: number | null | undefined): string {
@@ -88,7 +103,7 @@ export const TYPE_COLORS: Record<string, string> = {
 
 export function TypeBadge({ type }: { type?: string | null }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-700 whitespace-nowrap">
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs text-slate-700 whitespace-nowrap">
       <span className="h-2 w-2 rounded-sm shrink-0" style={{ background: (type && TYPE_COLORS[type]) || '#8C9AAB' }} />
       {type || 'Uncategorized'}
     </span>
@@ -100,17 +115,17 @@ export function fmtNumber(n: number | null | undefined): string {
   return n.toLocaleString()
 }
 
-export function MiniStat({ label, value, accent, hint }: { label: string; value: string; accent?: string; hint?: string }) {
+export function MiniStat({ label, value, accent, hint, tip }: { label: string; value: string; accent?: string; hint?: string; tip?: GlossaryKey }) {
   return (
     <div className="text-center rounded-xl bg-white py-2.5 px-2 ring-1 ring-slate-200/80 shadow-sm" title={hint}>
       <div className={`text-base font-extrabold leading-tight ${accent || 'text-slate-900'}`}>{value}</div>
-      <div className="mt-0.5 text-[10.5px] font-semibold uppercase tracking-[.04em] text-slate-500">{label}</div>
+      <div className="mt-0.5 text-[11.5px] font-semibold uppercase tracking-[.04em] text-slate-600">{label}{tip && <> <InfoTip term={tip} /></>}</div>
     </div>
   )
 }
 
 export function Loading({ text }: { text: string }) {
-  return <div className="py-10 text-center text-sm text-gray-400">{text}</div>
+  return <div className="py-10 text-center text-sm text-slate-500">{text}</div>
 }
 
 export function errorMessage(e: any, fallback: string): string {
@@ -132,17 +147,18 @@ export function fmtCostPerCall(cents: number | null | undefined): string {
 
 // The label of one field inside a card (Owner, Evidence, …): small and quiet,
 // so the value under it carries the weight, unlike a SectionLabel.
-export function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <span className="text-[11px] font-semibold uppercase tracking-[.04em] text-slate-500">{children}</span>
+export function FieldLabel({ children, tip }: { children: React.ReactNode; tip?: GlossaryKey }) {
+  return <span className="text-[12px] font-semibold uppercase tracking-[.04em] text-slate-600">{children}{tip && <> <InfoTip term={tip} /></>}</span>
 }
 
 // A section heading inside a tab: dark and bold with the brand accent bar,
 // so each block of a tab reads as its own titled section.
-export function SectionLabel({ children }: { children: React.ReactNode }) {
+export function SectionLabel({ children, tip }: { children: React.ReactNode; tip?: GlossaryKey }) {
   return (
     <span className="inline-flex items-center gap-2 text-[13px] font-bold text-slate-800">
       <span className="h-3.5 w-1 shrink-0 rounded-full bg-gradient-to-b from-zen-400 to-zen-700" aria-hidden />
       {children}
+      {tip && <InfoTip term={tip} />}
     </span>
   )
 }

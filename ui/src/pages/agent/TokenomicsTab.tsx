@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import InfoTip from '../../components/InfoTip'
 import {
   getTokenomics,
   refreshUsage,
@@ -10,7 +11,7 @@ import {
   type Tokenomics,
   type UsageRefreshResult,
 } from '../../services/ops/tokenomics'
-import { Loading, MiniStat, SectionLabel, SEVERITY_PILL, SourceBadge, fmtNumber, type TabProps } from './shared'
+import { Loading, MiniStat, SectionLabel, SEVERITY_PILL, SourceBadge, fmtNumber, type TabProps, useReloadOn } from './shared'
 import Disclosure from '../../components/Disclosure'
 
 const WINDOWS = [30, 90] as const
@@ -133,7 +134,7 @@ function describeAnomaly(a: CostAnomaly): string {
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
-export default function TokenomicsTab({ agentId }: TabProps) {
+export default function TokenomicsTab({ agentId, dataVersion }: TabProps) {
   const [days, setDays] = useState<number>(30)
   const [data, setData] = useState<Tokenomics | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -157,6 +158,7 @@ export default function TokenomicsTab({ agentId }: TabProps) {
   useEffect(() => {
     load()
   }, [load])
+  useReloadOn(dataVersion, load)
 
   useEffect(() => {
     setData(null)
@@ -203,7 +205,7 @@ export default function TokenomicsTab({ agentId }: TabProps) {
           <Headline data={data} />
           <section className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <SectionLabel>Daily usage — last {data.days} days (UTC)</SectionLabel>
+              <SectionLabel tip="tokens">Daily usage — last {data.days} days (UTC)</SectionLabel>
               <div className="flex gap-1" role="group" aria-label="Chart window">
                 {WINDOWS.map(w => (
                   <button
@@ -211,7 +213,7 @@ export default function TokenomicsTab({ agentId }: TabProps) {
                     onClick={() => setDays(w)}
                     aria-pressed={days === w}
                     className={`px-2 py-0.5 text-xs rounded-md border transition-colors ${
-                      days === w ? 'border-teal-600 bg-teal-50 text-teal-700' : 'border-gray-200 text-gray-500 hover:text-gray-700'
+                      days === w ? 'border-zen-600 bg-zen-50 text-zen-700' : 'border-gray-200 text-slate-600 hover:text-slate-700'
                     }`}
                   >
                     {w} days
@@ -237,10 +239,10 @@ export default function TokenomicsTab({ agentId }: TabProps) {
 function StatusStrip({ data, refreshing, onRefresh }: { data: Tokenomics; refreshing: boolean; onRefresh: () => void }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
         <SourceBadge source={data.source} />
         {data.phoenixProject
-          ? <span>Phoenix project <span className="font-mono text-gray-700">{data.phoenixProject}</span></span>
+          ? <span>Phoenix project <InfoTip term="phoenix_project" /> <span className="font-mono text-slate-700">{data.phoenixProject}</span></span>
           : <span>No Phoenix project linked</span>}
         {data.source === 'phoenix' && (
           <span title={fmtTime(data.lastIngestedAt)}>· Updated {fmtAgo(data.lastIngestedAt)}</span>
@@ -266,7 +268,7 @@ function RefreshNotice({ data, result, error, refreshing }: {
 }) {
   if (refreshing) {
     return (
-      <p className="text-xs text-gray-500">
+      <p className="text-xs text-slate-600">
         Reading LLM spans from Phoenix… the first read covers 30 days and can take a minute.
       </p>
     )
@@ -314,14 +316,14 @@ function Banner({ tone, children }: { tone: 'teal' | 'amber' | 'rose' | 'gray'; 
     teal: 'bg-teal-50 text-teal-800 border-teal-100',
     amber: 'bg-amber-50 text-amber-800 border-amber-100',
     rose: 'bg-rose-50 text-rose-700 border-rose-100',
-    gray: 'bg-gray-50 text-gray-600 border-gray-100',
+    gray: 'bg-gray-50 text-slate-700 border-gray-100',
   }[tone]
   return <div className={`rounded-lg border px-3 py-2 text-xs ${style}`}>{children}</div>
 }
 
 function DemoNotice({ linked }: { linked: boolean }) {
   return (
-    <Disclosure summary={<><span className="font-semibold text-gray-600">Demo data</span> — sample figures, not this agent’s traces.</>}>
+    <Disclosure summary={<><span className="font-semibold text-slate-700">Demo data</span> — sample figures, not this agent’s traces.</>}>
       These figures come from sample rows seeded with the registry, not from this agent's traces.{' '}
       {linked
         ? 'Refresh from Phoenix to replace them with measured usage.'
@@ -350,8 +352,8 @@ function EmptyState({ data }: { data: Tokenomics }) {
   }
   return (
     <div className="rounded-lg border border-dashed border-gray-200 px-4 py-6 text-center">
-      <p className="text-sm font-medium text-gray-600">{title}</p>
-      <p className="text-xs text-gray-400 mt-1 max-w-md mx-auto">{detail}</p>
+      <p className="text-sm font-medium text-slate-700">{title}</p>
+      <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">{detail}</p>
     </div>
   )
 }
@@ -369,10 +371,10 @@ function Headline({ data }: { data: Tokenomics }) {
         <MiniStat label="Projected period end" value={fmtCost(data.projectedPeriodEndCents)}
           accent={b.projectedOverBudget ? 'text-rose-600' : undefined}
           hint={`Spend so far + 14-day daily average × days left until ${fmtDay(b.periodEnd)}`} />
-        <MiniStat label="Cost / call" value={fmtCost(data.costPerCallCents)} hint={`Average over the last ${data.days} days`} />
+        <MiniStat label="Cost / call" tip="cost_to_run" value={fmtCost(data.costPerCallCents)} hint={`Average over the last ${data.days} days`} />
         <MiniStat label={`LLM calls (${data.days}d)`} value={fmtNumber(data.totals.calls)}
           hint={`${fmtNumber(data.totals.errors)} failed · ${fmtNumber(data.totals.runs)} traces`} />
-        <MiniStat label={`Token cost (${data.days}d)`} value={fmtCost(data.totals.costCents)} />
+        <MiniStat label={`Token cost (${data.days}d)`} tip="tokens" value={fmtCost(data.totals.costCents)} />
       </div>
     </section>
   )
@@ -381,7 +383,7 @@ function Headline({ data }: { data: Tokenomics }) {
 function BudgetBar({ budget: b }: { budget: BudgetView }) {
   if (!b.monthlyBudgetCents) {
     return (
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-slate-500">
         No monthly budget set — spend this period is {fmtCost(b.monthToDateCents)}. Set one below to track it.
       </p>
     )
@@ -392,8 +394,8 @@ function BudgetBar({ budget: b }: { budget: BudgetView }) {
   return (
     <div>
       <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs">
-        <span className="text-gray-500">
-          <span className="font-semibold text-gray-900">{fmtCost(b.monthToDateCents)}</span> of {fmtCost(b.monthlyBudgetCents)} budget
+        <span className="text-slate-600">
+          <span className="font-semibold text-slate-900">{fmtCost(b.monthToDateCents)}</span> of {fmtCost(b.monthlyBudgetCents)} budget
           {' '}({used.toFixed(1)}%) · period {fmtDay(b.periodStart)} – {fmtDay(b.periodEnd)}
         </span>
         <span className={`font-medium ${state.text}`}>{state.icon} {state.label}</span>
@@ -414,7 +416,7 @@ function BudgetBar({ budget: b }: { budget: BudgetView }) {
           title={`Alert threshold ${b.alertThresholdPct}%`}
         />
       </div>
-      <p className="text-[11px] text-gray-400 mt-1">
+      <p className="text-[12px] text-slate-500 mt-1">
         Marker = alert at {b.alertThresholdPct}% · light bar = projected period end
         {b.projectedOverBudget && <span className="text-rose-600"> · projected to exceed the budget</span>}
       </p>
@@ -471,7 +473,7 @@ function DailyUsageChart({ daily }: { daily: DailyUsage[] }) {
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-slate-600">
         <LegendSwatch color={SERIES.input} label="Input tokens (uncached)" />
         <LegendSwatch color={SERIES.cached} label="Cached input tokens" />
         <LegendSwatch color={SERIES.output} label="Output tokens" />
@@ -490,14 +492,14 @@ function DailyUsageChart({ daily }: { daily: DailyUsage[] }) {
           aria-label={`Daily cost and tokens for ${n} days; ${activeDays.length} days with usage`}
           className="block"
         >
-          <text x={CHART.left} y={costTop - 6} fontSize={10} fill="#9ca3af">Cost per day (USD)</text>
-          <text x={CHART.left} y={tokenTop - 6} fontSize={10} fill="#9ca3af">Tokens per day</text>
+          <text x={CHART.left} y={costTop - 6} fontSize={11} fill="#475569">Cost per day (USD)</text>
+          <text x={CHART.left} y={tokenTop - 6} fontSize={11} fill="#475569">Tokens per day</text>
 
           {[0, 0.5, 1].map(f => (
             <g key={`c${f}`}>
               <line x1={CHART.left} x2={width - CHART.right} y1={costY(costMax * f)} y2={costY(costMax * f)}
                 stroke={f === 0 ? '#e5e7eb' : '#f3f4f6'} />
-              <text x={CHART.left - 6} y={costY(costMax * f) + 3} fontSize={10} fill="#9ca3af" textAnchor="end">
+              <text x={CHART.left - 6} y={costY(costMax * f) + 3} fontSize={11} fill="#475569" textAnchor="end">
                 {fmtCost(costMax * f)}
               </text>
             </g>
@@ -506,7 +508,7 @@ function DailyUsageChart({ daily }: { daily: DailyUsage[] }) {
             <g key={`t${f}`}>
               <line x1={CHART.left} x2={width - CHART.right} y1={tokenY(tokenMax * f)} y2={tokenY(tokenMax * f)}
                 stroke={f === 0 ? '#e5e7eb' : '#f3f4f6'} />
-              <text x={CHART.left - 6} y={tokenY(tokenMax * f) + 3} fontSize={10} fill="#9ca3af" textAnchor="end">
+              <text x={CHART.left - 6} y={tokenY(tokenMax * f) + 3} fontSize={11} fill="#475569" textAnchor="end">
                 {fmtCompact(tokenMax * f)}
               </text>
             </g>
@@ -552,7 +554,7 @@ function DailyUsageChart({ daily }: { daily: DailyUsage[] }) {
           )}
 
           {labelled.map(i => (
-            <text key={`x${i}`} x={cx(i)} y={height - 5} fontSize={10} fill="#9ca3af" textAnchor="middle">
+            <text key={`x${i}`} x={cx(i)} y={height - 5} fontSize={11} fill="#475569" textAnchor="middle">
               {fmtDay(daily[i].date)}
             </text>
           ))}
@@ -572,14 +574,14 @@ function DailyUsageChart({ daily }: { daily: DailyUsage[] }) {
         </svg>
         {active && hover != null && <ChartTooltip day={active} x={cx(hover)} width={width} />}
       </div>
-      <details className="text-xs text-gray-500">
-        <summary className="cursor-pointer select-none text-gray-400 hover:text-gray-600">Show as table</summary>
+      <details className="text-xs text-slate-600">
+        <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-700">Show as table</summary>
         {activeDays.length === 0 ? (
-          <p className="mt-2 text-gray-400">No LLM calls in this window.</p>
+          <p className="mt-2 text-slate-500">No LLM calls in this window.</p>
         ) : (
           <div className="mt-2 overflow-x-auto">
             <table className="w-full text-xs">
-              <thead className="text-gray-400">
+              <thead className="text-slate-500">
                 <tr className="text-right">
                   <th className="text-left font-normal py-1">Day (UTC)</th>
                   <th className="font-normal">Calls</th><th className="font-normal">Errors</th>
@@ -587,7 +589,7 @@ function DailyUsageChart({ daily }: { daily: DailyUsage[] }) {
                   <th className="font-normal">Output</th><th className="font-normal">Cost</th>
                 </tr>
               </thead>
-              <tbody className="text-gray-700">
+              <tbody className="text-slate-700">
                 {activeDays.map(d => (
                   <tr key={d.date} className="text-right border-t border-gray-50">
                     <td className="text-left py-1">{fmtDay(d.date, true)}{d.spike && <span className="text-rose-600"> · spike</span>}</td>
@@ -618,10 +620,10 @@ function ChartTooltip({ day, x, width }: { day: DailyUsage; x: number; width: nu
   const left = x + 12 + TIP_W > width ? Math.max(x - 12 - TIP_W, 0) : x + 12
   return (
     <div
-      className="pointer-events-none absolute top-2 rounded-lg border border-gray-200 bg-white/95 px-3 py-2 text-[11px] text-gray-600 shadow-sm"
+      className="pointer-events-none absolute top-2 rounded-lg border border-gray-200 bg-white/95 px-3 py-2 text-[12px] text-slate-700 shadow-sm"
       style={{ left, width: TIP_W }}
     >
-      <div className="font-semibold text-gray-900 mb-1">{fmtDay(day.date, true)}</div>
+      <div className="font-semibold text-slate-900 mb-1">{fmtDay(day.date, true)}</div>
       <TipRow label="Cost" value={fmtCost(day.costCents)} />
       <TipRow label="LLM calls" value={`${fmtNumber(day.calls)}${day.errors ? ` (${day.errors} failed)` : ''}`} />
       <TipRow label="Input tokens" value={fmtNumber(day.inputTokens)} color={SERIES.input} />
@@ -638,7 +640,7 @@ function TipRow({ label, value, color }: { label: string; value: string; color?:
       <span className="inline-flex items-center gap-1.5">
         {color && <span className="inline-block w-2 h-2 rounded-sm" style={{ background: color }} />}{label}
       </span>
-      <span className="font-mono text-gray-900">{value}</span>
+      <span className="font-mono text-slate-900">{value}</span>
     </div>
   )
 }
@@ -659,7 +661,7 @@ function ModelTable({ data }: { data: Tokenomics }) {
       )}
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
-          <thead className="text-gray-400">
+          <thead className="text-slate-500">
             <tr className="text-right">
               <th className="text-left font-normal py-1">Model</th>
               <th className="font-normal">Calls</th>
@@ -670,12 +672,12 @@ function ModelTable({ data }: { data: Tokenomics }) {
               <th className="font-normal">Share</th>
             </tr>
           </thead>
-          <tbody className="text-gray-700">
+          <tbody className="text-slate-700">
             {data.byModel.map(m => (
               <tr key={m.model} className="text-right border-t border-gray-50">
                 <td className="text-left py-1.5">
                   <span className="font-mono">{m.model}</span>
-                  {!m.priced && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full ring-1 bg-amber-50 text-amber-700 ring-amber-200">unpriced</span>}
+                  {!m.priced && <span className="ml-1.5 text-[12px] px-1.5 py-0.5 rounded-full ring-1 bg-amber-50 text-amber-700 ring-amber-200">unpriced</span>}
                 </td>
                 <td>{fmtNumber(m.calls)}</td>
                 <td>{fmtNumber(m.inputTokens)}</td>
@@ -688,7 +690,7 @@ function ModelTable({ data }: { data: Tokenomics }) {
           </tbody>
         </table>
       </div>
-      {data.declaredModel && <p className="text-[11px] text-gray-400">Declared model: {data.declaredModel}</p>}
+      {data.declaredModel && <p className="text-[12px] text-slate-500">Declared model: {data.declaredModel}</p>}
     </section>
   )
 }
@@ -701,7 +703,7 @@ function ForecastPanel({ data }: { data: Tokenomics }) {
     <section className="space-y-2">
       <SectionLabel>Token cost forecast</SectionLabel>
       {f.status !== 'ok' ? (
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-slate-500">
           Not enough history yet ({Math.min(f.daysWithUsage, f.minDays)} of {f.minDays} days with usage in the last 30 days).
         </p>
       ) : (
@@ -711,7 +713,7 @@ function ForecastPanel({ data }: { data: Tokenomics }) {
               <MiniStat key={m.month} label={`Days ${30 * (m.month - 1) + 1}–${30 * m.month}`} value={fmtCost(m.projectedCents)} />
             ))}
           </div>
-          <p className="text-[11px] text-gray-400">
+          <p className="text-[12px] text-slate-500">
             {f.method}; each month is 30 days
             {f.dailySlopeCents != null && <> · trend {f.dailySlopeCents >= 0 ? '+' : '−'}{fmtCost(Math.abs(f.dailySlopeCents))} per day</>}
             {data.source === 'seed' && <> · based on demo data</>}
@@ -725,7 +727,7 @@ function ForecastPanel({ data }: { data: Tokenomics }) {
 // ── Anomalies ────────────────────────────────────────────────────────────────
 
 const SHARE_BAND: Record<string, string> = {
-  green: 'text-teal-700',
+  green: 'text-emerald-700',
   yellow: 'text-amber-700',
   red: 'text-rose-700',
 }
@@ -753,27 +755,27 @@ function AnomalyList({ data, onChanged }: { data: Tokenomics; onChanged: () => P
   return (
     <section className="space-y-2">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <SectionLabel>Cost anomalies</SectionLabel>
+        <SectionLabel tip="cost_anomaly">Cost anomalies</SectionLabel>
         {share && (
-          <span className="text-[11px] text-gray-400" title="Spike impact ÷ total spend (FinOps Foundation): under 2% healthy, 2–7% warning, over 7% critical">
+          <span className="text-[12px] text-slate-500" title="Spike impact ÷ total spend (FinOps Foundation): under 2% healthy, 2–7% warning, over 7% critical">
             Anomaly cost share <span className={`font-semibold ${SHARE_BAND[share.band] || ''}`}>{share.pct}%</span> of spend over {share.evaluatedDays} evaluated days
           </span>
         )}
       </div>
       {error && <p className="text-xs text-rose-600">{error}</p>}
       {data.anomalies.length === 0 ? (
-        <p className="text-xs text-gray-400">No open cost anomalies.</p>
+        <p className="text-xs text-slate-500">No open cost anomalies.</p>
       ) : (
         <ul className="space-y-2">
           {data.anomalies.map(a => (
             <li key={a.id} className="flex items-start justify-between gap-3 rounded-lg border border-gray-100 px-3 py-2">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${SEVERITY_PILL[a.severity] || SEVERITY_PILL.LOW}`}>{a.severity}</span>
-                  <span className="text-sm font-medium text-gray-800">{ANOMALY_LABEL[a.type] || a.type}</span>
-                  {a.detectedAt && <span className="text-[11px] text-gray-400" title={fmtTime(a.detectedAt)}>detected {fmtAgo(a.detectedAt)}</span>}
+                  <span className={`text-[12px] px-1.5 py-0.5 rounded-full ring-1 ${SEVERITY_PILL[a.severity] || SEVERITY_PILL.LOW}`}>{a.severity}</span>
+                  <span className="text-sm font-medium text-slate-800">{ANOMALY_LABEL[a.type] || a.type}</span>
+                  {a.detectedAt && <span className="text-[12px] text-slate-500" title={fmtTime(a.detectedAt)}>detected {fmtAgo(a.detectedAt)}</span>}
                 </div>
-                <p className="text-xs text-gray-500 mt-0.5">{describeAnomaly(a)}</p>
+                <p className="text-xs text-slate-600 mt-0.5">{describeAnomaly(a)}</p>
               </div>
               <button onClick={() => resolve(a.id)} disabled={busy != null} className="btn-secondary btn-sm shrink-0">
                 {busy === a.id ? 'Resolving…' : 'Resolve'}
@@ -782,7 +784,7 @@ function AnomalyList({ data, onChanged }: { data: Tokenomics; onChanged: () => P
           ))}
         </ul>
       )}
-      <p className="text-[11px] text-gray-400">
+      <p className="text-[12px] text-slate-500">
         Found by the daily cost rollup. Budget and model conditions close on their own once they clear; spikes and error bursts stay open until a person resolves them.
       </p>
     </section>
@@ -834,23 +836,23 @@ function BudgetEditor({ agentId, budget, onSaved }: { agentId: string; budget: B
 
   return (
     <section className="space-y-2 rounded-lg bg-gray-50 px-4 py-3">
-      <SectionLabel>Monthly token budget</SectionLabel>
+      <SectionLabel tip="budget">Monthly token budget</SectionLabel>
       <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_auto] gap-3 items-end">
-        <label className="text-xs text-gray-500 space-y-1">
+        <label className="text-xs text-slate-600 space-y-1">
           <span>Amount (USD)</span>
           <input
             className="input" type="number" min={0} step="0.01" inputMode="decimal" placeholder="No budget"
             value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })}
           />
         </label>
-        <label className="text-xs text-gray-500 space-y-1">
+        <label className="text-xs text-slate-600 space-y-1">
           <span>Alert at (% of budget)</span>
           <input
             className="input" type="number" min={1} max={100} step={1}
             value={form.alert} onChange={e => setForm({ ...form, alert: e.target.value })}
           />
         </label>
-        <label className="text-xs text-gray-500 space-y-1">
+        <label className="text-xs text-slate-600 space-y-1">
           <span>Period starts on day</span>
           <input
             className="input" type="number" min={1} max={28} step={1}
@@ -862,8 +864,8 @@ function BudgetEditor({ agentId, budget, onSaved }: { agentId: string; budget: B
         </button>
       </div>
       {changed && invalid && <p className="text-xs text-rose-600">{invalid}</p>}
-      {message && <p className={`text-xs ${message.ok ? 'text-teal-700' : 'text-rose-600'}`}>{message.text}</p>}
-      <p className="text-[11px] text-gray-400">
+      {message && <p className={`text-xs ${message.ok ? 'text-emerald-700' : 'text-rose-600'}`}>{message.text}</p>}
+      <p className="text-[12px] text-slate-500">
         Informational only — the registry never pauses or stops an agent. Leave the amount empty or 0 for no budget.
       </p>
     </section>

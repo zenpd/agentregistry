@@ -5,6 +5,8 @@ import {
 } from 'lucide-react'
 import { APPROVALS_CHANGED, getApprovals, type ApprovalAccessRequest, type Approvals } from '../services/ops/approvals'
 import { decideAccess } from '../services/ops/integrate'
+import InfoTip from '../components/InfoTip'
+import type { GlossaryKey } from '../lib/glossary'
 import { STAGE_PILL, errorMessage } from './agent/shared'
 
 type Queue = 'all' | 'access' | 'reviews' | 'discoveries'
@@ -44,7 +46,7 @@ export default function ApprovalsPage() {
   }, [load])
 
   if (error && !data) return <div className="p-8 text-center text-rose-500">Error: {error}</div>
-  if (!data) return <div className="p-8 text-center text-gray-500">Loading…</div>
+  if (!data) return <div className="p-8 text-center text-slate-600">Loading…</div>
 
   const { counts } = data
   const show = (q: Queue) => queue === 'all' || queue === q
@@ -52,8 +54,8 @@ export default function ApprovalsPage() {
   return (
     <div className="space-y-5 animate-fade-in max-w-5xl">
       <div>
-        <h1 className="text-2xl font-bold gradient-text">Approvals</h1>
-        <p className="text-gray-500 mt-0.5">
+        <h1 className="text-2xl font-bold gradient-text">Approvals <InfoTip term="approvals_inbox" /></h1>
+        <p className="text-slate-600 mt-0.5">
           Everything waiting for a decision across the registry — who may use an agent, governance reviews in
           progress, and AI found running without being registered.
         </p>
@@ -68,14 +70,14 @@ export default function ApprovalsPage() {
           label="Reviews awaiting decision" sub="Governance gates in review" testId="queue-reviews" />
         <QueueTile active={queue === 'discoveries'} onClick={() => setQueue(queue === 'discoveries' ? 'all' : 'discoveries')}
           icon={<Radar size={20} />} tone="orange" count={counts.discoveries}
-          label="Discovered AI" sub="Running, not yet registered" testId="queue-discoveries" />
+          label="Governance findings" sub="Checks on registered agents" testId="queue-discoveries" />
       </div>
 
       {counts.total === 0 && (
         <div className="card p-10 text-center" data-testid="all-clear">
           <CheckCircle2 size={36} className="mx-auto text-emerald-500" />
           <p className="mt-3 text-lg font-bold text-slate-900">All caught up</p>
-          <p className="text-sm text-slate-500">Nothing is waiting for a decision.</p>
+          <p className="text-sm text-slate-600">Nothing is waiting for a decision.</p>
         </div>
       )}
 
@@ -86,7 +88,7 @@ export default function ApprovalsPage() {
       )}
 
       {show('access') && counts.total > 0 && (
-        <QueueSection title="Access requests" count={counts.accessRequests}
+        <QueueSection title="Access requests" tip="access_request" count={counts.accessRequests}
           hint={`A team asks to consume an agent. Approving adds the team to the agent's consumers.${
             data.selfApprovalAllowed ? '' : ' You cannot approve a request you raised.'}`}
           empty="No access requests waiting." testId="section-access">
@@ -95,7 +97,7 @@ export default function ApprovalsPage() {
       )}
 
       {show('reviews') && counts.total > 0 && (
-        <QueueSection title="Reviews awaiting decision" count={counts.reviews}
+        <QueueSection title="Reviews awaiting decision" tip="gate" count={counts.reviews}
           hint="Governance gates the owner has submitted. The reviewer decides on the agent's Governance tab, where the evidence and checklist are."
           empty="No reviews waiting." testId="section-reviews">
           {data.reviews.map(g => (
@@ -104,11 +106,11 @@ export default function ApprovalsPage() {
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-slate-900">{g.gateLabel}</span>
-                  <span className="text-slate-400">·</span>
+                  <span className="text-slate-500">·</span>
                   <Link to={`/agents/${g.agentId}`} className="font-medium text-slate-700 hover:text-zen-700">{g.agentName}</Link>
                   <span className={STAGE_PILL[g.agentStage] || 'status-pending'}>{g.agentStage}</span>
                 </div>
-                <div className="mt-0.5 text-[13px] text-slate-500">
+                <div className="mt-0.5 text-[13px] text-slate-600">
                   Decided by {g.reviewerRole || 'the reviewer'}{g.reviewer ? ` (${g.reviewer})` : ''} · in review {waiting(g.since).replace('waiting ', 'for ')}
                 </div>
               </div>
@@ -122,23 +124,23 @@ export default function ApprovalsPage() {
       )}
 
       {show('discoveries') && counts.total > 0 && (
-        <QueueSection title="Discovered AI" count={counts.discoveries}
-          hint="AI found running in the enterprise that is not in the registry. Register it or dismiss it as a false positive on the Governance page."
-          empty="Nothing new discovered." testId="section-discoveries">
+        <QueueSection title="Governance findings" tip="governance_findings" count={counts.discoveries}
+          hint="Checks on registered agents that look off (for example stalled or unreviewed). Act on them or dismiss them on the Governance page. AI found in Phoenix is on the Discovered page."
+          empty="No governance findings waiting." testId="section-discoveries">
           {data.discoveries.map(d => (
             <li key={d.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3" data-testid="discovery-row">
               <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-orange-50 text-orange-600"><Radar size={18} /></div>
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-slate-900">{d.suspectedName}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ${
-                    d.confidence >= 85 ? 'bg-rose-50 text-rose-700 ring-rose-200' : d.confidence >= 70 ? 'bg-amber-50 text-amber-700 ring-amber-200' : 'bg-slate-100 text-slate-600 ring-slate-200'
+                  <span className={`rounded-full px-2 py-0.5 text-[12px] font-bold ring-1 ${
+                    d.confidence >= 85 ? 'bg-rose-50 text-rose-700 ring-rose-200' : d.confidence >= 70 ? 'bg-amber-50 text-amber-700 ring-amber-200' : 'bg-slate-100 text-slate-700 ring-slate-200'
                   }`}>{d.confidence}% confidence</span>
                 </div>
-                <div className="mt-0.5 text-[13px] text-slate-500">
+                <div className="mt-0.5 text-[13px] text-slate-600">
                   {d.suspectedDept || 'Unknown unit'} · found via {d.source} · first seen {fmtDate(d.firstSeen)}
                 </div>
-                {d.signal && <p className="mt-1 text-[13px] text-slate-600">{d.signal}</p>}
+                {d.signal && <p className="mt-1 text-[13px] text-slate-700">{d.signal}</p>}
               </div>
               <Link to="/governance"
                 className="inline-flex items-center gap-1 rounded-full border border-zen-200 bg-zen-50 px-3 py-1.5 text-[13px] font-semibold text-zen-700 hover:bg-zen-100">
@@ -171,14 +173,14 @@ function QueueTile({ active, onClick, icon, tone, count, label, sub, testId }: {
       <div className="min-w-0">
         <div className="text-[28px] font-extrabold leading-none text-slate-900">{count}</div>
         <div className="mt-1 text-sm font-semibold text-slate-800">{label}</div>
-        <div className="text-[12px] text-slate-500">{sub}</div>
+        <div className="text-[12px] text-slate-600">{sub}</div>
       </div>
     </button>
   )
 }
 
-function QueueSection({ title, count, hint, empty, testId, children }: {
-  title: string; count: number; hint: string; empty: string; testId: string; children: React.ReactNode
+function QueueSection({ title, tip, count, hint, empty, testId, children }: {
+  title: string; tip?: GlossaryKey; count: number; hint: string; empty: string; testId: string; children: React.ReactNode
 }) {
   return (
     <section className="rounded-2xl border border-slate-200/80 bg-slate-50/60 p-5 shadow-sm" data-testid={testId}>
@@ -186,14 +188,14 @@ function QueueSection({ title, count, hint, empty, testId, children }: {
         <span className="mt-1 h-4 w-1 shrink-0 rounded-full bg-gradient-to-b from-zen-400 to-zen-700" aria-hidden />
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h2 className="text-[16px] font-extrabold text-slate-900">{title}</h2>
-            <span className={`rounded-full px-2 py-0.5 text-[12px] font-bold ${count ? 'bg-zen-600 text-white' : 'bg-slate-200 text-slate-600'}`}>{count}</span>
+            <h2 className="text-[16px] font-extrabold text-slate-900">{title}{tip && <> <InfoTip term={tip} /></>}</h2>
+            <span className={`rounded-full px-2 py-0.5 text-[12px] font-bold ${count ? 'bg-zen-600 text-white' : 'bg-slate-200 text-slate-700'}`}>{count}</span>
           </div>
-          <p className="mt-0.5 text-[13px] text-slate-500">{hint}</p>
+          <p className="mt-0.5 text-[13px] text-slate-600">{hint}</p>
         </div>
       </div>
       {count === 0
-        ? <p className="mt-3 flex items-center gap-2 text-sm text-slate-500"><CheckCircle2 size={16} className="text-emerald-500" /> {empty}</p>
+        ? <p className="mt-3 flex items-center gap-2 text-sm text-slate-600"><CheckCircle2 size={16} className="text-emerald-500" /> {empty}</p>
         : <ul className="mt-3 space-y-2">{children}</ul>}
     </section>
   )
@@ -225,16 +227,16 @@ function AccessRequestRow({ req: r, selfAllowed, onDecided }: { req: ApprovalAcc
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[15px]">
             <span className="font-semibold text-slate-900">{r.team}</span>
-            <span className="text-slate-500">wants to use</span>
+            <span className="text-slate-600">wants to use</span>
             <Link to={`/agents/${r.agentId}?tab=integrate`} className="font-semibold text-zen-700 hover:underline">{r.agentName}</Link>
             {r.agentStage && <span className={STAGE_PILL[r.agentStage] || 'status-pending'}>{r.agentStage}</span>}
             {r.certified
-              ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200"><BadgeCheck size={12} /> Certified for reuse</span>
-              : <Link to={`/agents/${r.agentId}?tab=integrate`} className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100"
+              ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[12px] font-bold text-emerald-700 ring-1 ring-emerald-200"><BadgeCheck size={12} /> Certified for reuse</span>
+              : <Link to={`/agents/${r.agentId}?tab=integrate`} className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[12px] font-bold text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100"
                   title="See why on the agent's Integrate tab"><ShieldAlert size={12} /> Not certified for reuse</Link>}
           </div>
           <p className="mt-1 text-[14px] text-slate-700">“{r.purpose}”</p>
-          <p className="mt-0.5 text-[12.5px] text-slate-500">
+          <p className="mt-0.5 text-[12.5px] text-slate-600">
             Requested by {r.requesterName || r.requesterId} · {fmtDate(r.createdAt)} · {waiting(r.createdAt)}
           </p>
         </div>
@@ -251,7 +253,7 @@ function AccessRequestRow({ req: r, selfAllowed, onDecided }: { req: ApprovalAcc
         )}
       </div>
       {blocked && !rejecting && (
-        <p className="mt-2 ml-12 text-[12.5px] text-slate-500">You raised this request, so another approver has to approve it. You can still reject (withdraw) it.</p>
+        <p className="mt-2 ml-12 text-[12.5px] text-slate-600">You raised this request, so another approver has to approve it. You can still reject (withdraw) it.</p>
       )}
       {rejecting && (
         <div className="mt-3 ml-12 flex flex-wrap gap-2">

@@ -440,9 +440,127 @@ class PhoenixConfig(Base):
     org_id: Mapped[str] = mapped_column(String(64), ForeignKey("organizations.id"), nullable=False)
     api_key: Mapped[Optional[str]] = mapped_column(String(255))
     endpoint: Mapped[Optional[str]] = mapped_column(String(500))
+    # Where apps are hosted, with {project} for the Phoenix project name, e.g.
+    # https://{project}-be.<env>.azurecontainerapps.io — used to find an app's address.
+    app_url_template: Mapped[Optional[str]] = mapped_column(String(500))
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PhoenixProject(Base):
+    """One Phoenix project seen by the discovery job: what it is doing, not
+    its content. Names and counts only — never prompt or answer text."""
+    __tablename__ = "phoenix_projects"
+    __table_args__ = (
+        UniqueConstraint("org_id", "name", name="uq_phoenix_projects_org_name"),
+        Index("idx_phoenix_projects_org_id", "org_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(64), ForeignKey("organizations.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), default="new")  # new | dismissed
+    dismiss_reason: Mapped[Optional[str]] = mapped_column(String(500))
+    dismissed_by: Mapped[Optional[str]] = mapped_column(String(255))
+    span_count: Mapped[int] = mapped_column(Integer, default=0)
+    window_days: Mapped[int] = mapped_column(Integer, default=7)
+    last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    models: Mapped[Optional[list]] = mapped_column(JSON)
+    tools: Mapped[Optional[list]] = mapped_column(JSON)
+    mcp_servers: Mapped[Optional[list]] = mapped_column(JSON)
+    agent_names: Mapped[Optional[list]] = mapped_column(JSON)
+    retrievers: Mapped[Optional[list]] = mapped_column(JSON)
+    span_kinds: Mapped[Optional[list]] = mapped_column(JSON)
+    attribute_keys: Mapped[Optional[list]] = mapped_column(JSON)
+    scan_error: Mapped[Optional[str]] = mapped_column(String(500))
+    scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Insight(Base):
+    """One AI-written insight: what an insight agent found, the records it
+    cited and how it was produced. Holds registry facts and the agent's
+    wording only — never prompt or answer text of another team's agent."""
+    __tablename__ = "insights"
+    __table_args__ = (
+        Index("idx_insights_agent_kind", "agent_id", "kind"),
+        Index("idx_insights_org_id", "org_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(64), ForeignKey("organizations.id"), nullable=False)
+    agent_id: Mapped[Optional[str]] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(50), nullable=False)
+    subject: Mapped[Optional[str]] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(20), default="ok")  # ok | unavailable | error | nothing_to_read
+    output: Mapped[Optional[dict]] = mapped_column(JSON)
+    refs: Mapped[Optional[dict]] = mapped_column(JSON)
+    tools_used: Mapped[Optional[list]] = mapped_column(JSON)
+    checks: Mapped[Optional[dict]] = mapped_column(JSON)
+    model: Mapped[Optional[str]] = mapped_column(String(100))
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(20))
+    steps: Mapped[int] = mapped_column(Integer, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class InsightFeedback(Base):
+    __tablename__ = "insight_feedback"
+    __table_args__ = (Index("idx_insight_feedback_insight", "insight_id"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    insight_id: Mapped[str] = mapped_column(String(64), ForeignKey("insights.id"), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(20), nullable=False)  # useful | not_useful
+    note: Mapped[Optional[str]] = mapped_column(String(1000))
+    actor: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentFieldUpdate(Base):
+    """One field of an agent's record that the registry filled in or corrected
+    by itself, with what it was before, what it is based on, and whether a
+    person has since undone it. This is the record that makes an automatic
+    change visible and reversible."""
+    __tablename__ = "agent_field_updates"
+    __table_args__ = (Index("idx_agent_field_updates_agent", "agent_id", "field"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(64), ForeignKey("organizations.id"), nullable=False)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id"), nullable=False)
+    field: Mapped[str] = mapped_column(String(50), nullable=False)
+    old_value: Mapped[Optional[dict]] = mapped_column(JSON)       # {"v": <value>} so that "" and [] survive
+    new_value: Mapped[Optional[dict]] = mapped_column(JSON)
+    source: Mapped[str] = mapped_column(String(30), nullable=False)   # usage | traces | app_api | address_pattern | ai_draft
+    reason: Mapped[Optional[str]] = mapped_column(String(600))
+    applied_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reverted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    reverted_by: Mapped[Optional[str]] = mapped_column(String(255))
+
+
+class AgentRecordCheck(Base):
+    """When the registry last read an agent's evidence to keep its record filled
+    in, and for which sources. One row per agent; it decides when to look again."""
+    __tablename__ = "agent_record_checks"
+
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id"), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(64), ForeignKey("organizations.id"), nullable=False)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    link: Mapped[str] = mapped_column(String(800), nullable=False, default="")   # tracing project and address it was read for
+    complete: Mapped[bool] = mapped_column(Boolean, default=True)                # every source it has could be read
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict)                   # {realCalls, tracesRead, appRead, draftUsed, unread}
+
+
+class ContentAuditOptIn(Base):
+    """An owner's recorded permission for a sample of their agent's trace text
+    to be read and judged. Without a row here, trace text is never read."""
+    __tablename__ = "content_audit_opt_ins"
+
+    agent_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    opted_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class AgentMetric(Base):

@@ -395,20 +395,20 @@ async def test_refresh_agent_runs_chain_in_order(db, calls):
     calls.set("cost_rollup", result={"status": "not_configured"})
     result = await job_runner.refresh_agent("agent-a")
 
-    assert [c[0] for c in calls] == ["usage_ingestion", "cost_rollup", "risk_scan", "governance_checks"]
+    assert [c[0] for c in calls] == ["usage_ingestion", "record_autofill", "cost_rollup", "risk_scan", "governance_checks"]
     assert all(c[1] == "agent-a" for c in calls)
-    assert [r["status"] for r in result["results"]] == ["ok", "not_configured", "ok", "ok"]
+    assert [r["status"] for r in result["results"]] == ["ok", "ok", "not_configured", "ok", "ok"]
     assert result["status"] == "partial"
     [lock] = await _rows("refresh")
     assert lock.status == "partial" and lock.summary["steps"]["cost_rollup"]["status"] == "not_configured"
-    assert len(await _rows()) == 5
+    assert len(await _rows()) == 6
 
 
 @pytest.mark.asyncio
 async def test_refresh_agent_continues_after_a_failure(db, calls):
     calls.set("usage_ingestion", exc=ConnectionError("phoenix down"))
     result = await job_runner.refresh_agent("agent-a")
-    assert [r["status"] for r in result["results"]] == ["error", "ok", "ok", "ok"]
+    assert [r["status"] for r in result["results"]] == ["error", "ok", "ok", "ok", "ok"]
     assert result["status"] == "partial"
 
 
@@ -426,7 +426,7 @@ async def test_refresh_step_held_elsewhere_makes_it_partial(db, calls):
     by_job = {r["job"]: r for r in result["results"]}
     assert by_job["risk_scan"]["status"] == "skipped" and by_job["risk_scan"]["locked"]
     assert result["status"] == "partial"
-    assert [c[0] for c in calls] == ["usage_ingestion", "cost_rollup", "governance_checks"]
+    assert [c[0] for c in calls] == ["usage_ingestion", "record_autofill", "cost_rollup", "governance_checks"]
 
 
 def test_overall_status():
@@ -446,11 +446,14 @@ def _utc(h, m=0):
 
 
 def test_due_jobs_and_next_wake():
-    assert scheduler.due_jobs(_utc(0, 30)) == []
-    assert scheduler.due_jobs(_utc(2, 0)) == ["usage_ingestion", "infra_costs", "cost_rollup"]
+    assert scheduler.due_jobs(_utc(0, 15)) == []
+    assert scheduler.due_jobs(_utc(0, 30)) == ["phoenix_discovery"]
+    assert scheduler.due_jobs(_utc(2, 0)) == ["phoenix_discovery", "usage_ingestion", "record_autofill", "infra_costs", "cost_rollup"]
     assert scheduler.next_wake(_utc(0, 30)) == _utc(1, 0)
-    assert scheduler.next_wake(_utc(1, 0)) == _utc(1, 30)
-    assert scheduler.next_wake(_utc(3, 0)) == _utc(1, 0) + timedelta(days=1)
+    assert scheduler.next_wake(_utc(1, 0)) == _utc(1, 15)
+    assert scheduler.next_wake(_utc(1, 15)) == _utc(1, 30)
+    assert scheduler.next_wake(_utc(3, 0)) == _utc(3, 30)
+    assert scheduler.next_wake(_utc(3, 30)) == _utc(0, 30) + timedelta(days=1)
 
 
 @pytest.mark.asyncio
@@ -458,11 +461,11 @@ async def test_run_due_jobs_runs_each_job_once_per_day(db, calls):
     now = datetime.now(timezone.utc).replace(hour=2, minute=15)
 
     first = await scheduler.run_due_jobs(now)
-    assert [r["job"] for r in first] == ["usage_ingestion", "infra_costs", "cost_rollup"]
+    assert [r["job"] for r in first] == ["phoenix_discovery", "usage_ingestion", "record_autofill", "infra_costs", "cost_rollup"]
     assert all(r["trigger"] == "scheduled" and r["agentId"] is None for r in first)
 
     assert await scheduler.run_due_jobs(now) == []
-    assert len(calls) == 3
+    assert len(calls) == 5
 
 
 @pytest.mark.asyncio
@@ -580,7 +583,8 @@ async def _audit_rows():
 
 
 @pytest.mark.asyncio
-async def test_router_endpoints(db, calls, client):
+async def test_router_endpoints(db, calls, client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "scheduler_enabled", False)       # the test must not depend on the machine's .env
     r = await client.post("/api/v1/agents/agent-a/refresh")
     assert r.status_code == 200 and r.json()["status"] == "ok"
 

@@ -356,7 +356,7 @@ export default function TrajectoryDiagram({ nodes, edges, height = 440, selected
                 fill={i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent'}
               />
               <text x={12} y={laneTop[i] + 16}
-                fill={l.color} fontSize={10} fontFamily="inherit" fontWeight={600} opacity={0.85}>
+                fill={l.color} fontSize={11} fontFamily="inherit" fontWeight={600} opacity={0.85}>
                 {l.label}
               </text>
             </g>
@@ -376,13 +376,13 @@ export default function TrajectoryDiagram({ nodes, edges, height = 440, selected
       </div>
 
       {/* Quick stats */}
-      <div className="absolute top-2 right-2 text-[10px] text-gray-400 bg-gray-800/70 rounded px-2 py-1">
+      <div className="absolute top-2 right-2 text-[11px] text-gray-400 bg-gray-800/70 rounded px-2 py-1">
         {nodes.length} step(s){busiest ? ` · busiest: ${busiest.name} (×${busiest.count})` : ''}
         {errorCount > 0 ? ` · ${errorCount} with errors` : ''}
       </div>
 
       {showLegend && (
-        <div className="absolute top-2 left-2 text-[10px] text-gray-300 bg-gray-800/90 rounded-lg px-3 py-2 ring-1 ring-white/10 space-y-1">
+        <div className="absolute top-2 left-2 text-[11px] text-gray-300 bg-gray-800/90 rounded-lg px-3 py-2 ring-1 ring-white/10 space-y-1">
           {LANES.filter(l => activeLanes.some(a => a.role === l.role)).map(l => (
             <div key={l.role} className="flex items-center gap-1.5">
               <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: l.color }} />

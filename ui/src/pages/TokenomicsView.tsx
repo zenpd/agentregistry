@@ -32,7 +32,7 @@ export default function TokenomicsView() {
     }
   }
 
-  if (loading) return <div className="p-8 text-center text-gray-500">Loading...</div>
+  if (loading) return <div className="p-8 text-center text-slate-600">Loading...</div>
   if (error) return <div className="p-8 text-center text-red-500">Error: {error}</div>
 
   return (
@@ -41,30 +41,30 @@ export default function TokenomicsView() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg border p-4">
-          <div className="text-xs text-gray-500 uppercase">Agents in Production</div>
+        <div className="card p-4">
+          <div className="text-xs text-slate-600 uppercase">Agents in Production</div>
           <div className="text-2xl font-bold">{portfolioCost?.agentCount || 0}</div>
         </div>
-        <div className="bg-white rounded-lg border p-4">
-          <div className="text-xs text-gray-500 uppercase">Total Value/mo</div>
+        <div className="card p-4">
+          <div className="text-xs text-slate-600 uppercase">Total Value/mo</div>
           <div className="text-2xl font-bold">${((portfolioCost?.totalValue || 0) / 1000).toFixed(0)}K</div>
         </div>
-        <div className="bg-white rounded-lg border p-4">
-          <div className="text-xs text-gray-500 uppercase">Model Types</div>
+        <div className="card p-4">
+          <div className="text-xs text-slate-600 uppercase">Model Types</div>
           <div className="text-2xl font-bold">{modelPrices.length}</div>
         </div>
-        <div className="bg-white rounded-lg border p-4">
-          <div className="text-xs text-gray-500 uppercase">Optimization Opportunities</div>
+        <div className="card p-4">
+          <div className="text-xs text-slate-600 uppercase">Optimization Opportunities</div>
           <div className="text-2xl font-bold">{optimizations.length}</div>
         </div>
       </div>
 
       {/* Model Prices */}
-      <div className="bg-white rounded-lg border p-4">
+      <div className="card p-4">
         <h2 className="font-semibold mb-3">Model Pricing</h2>
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-gray-500 border-b">
+            <tr className="text-left text-slate-600 border-b">
               <th className="pb-2">Model</th>
               <th className="pb-2">Provider</th>
               <th className="pb-2">Tier</th>
@@ -103,11 +103,11 @@ export default function TokenomicsView() {
       )}
 
       {/* Per-Agent Costs */}
-      <div className="bg-white rounded-lg border p-4">
+      <div className="card p-4">
         <h2 className="font-semibold mb-3">Agent Cost Estimates</h2>
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-gray-500 border-b">
+            <tr className="text-left text-slate-600 border-b">
               <th className="pb-2">Agent</th>
               <th className="pb-2">Model</th>
               <th className="pb-2">Stage</th>

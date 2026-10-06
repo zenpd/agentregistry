@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = False
     # Days of Phoenix history to backfill the first time an agent is ingested.
     usage_backfill_days: int = 30
+    # Phoenix discovery: how far back each project's spans are read, how many
+    # pages of spans per project, and when a silent project counts as stale.
+    discovery_window_days: int = 7
+    discovery_span_pages: int = 3
+    discovery_stale_days: int = 30
+    # The daily insight refresh writes insights for at most this many agents (those with real traces).
+    insight_job_max_agents: int = 25
     # Azure Cost Management scope, e.g. /subscriptions/<id> or
     # /subscriptions/<id>/resourceGroups/<rg>. Empty = infra collector not configured.
     azure_cost_scope: str = ""

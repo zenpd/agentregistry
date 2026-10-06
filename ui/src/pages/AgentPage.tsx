@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { AlertTriangle, Bot, Building2, Coins, LayoutDashboard, Plug, ShieldCheck, Tag, TrendingUp, User, Waypoints } from 'lucide-react'
 import { getAgent, getGraphV2, type Agent, type GraphV2Response } from '../services/api'
+import InfoTip from '../components/InfoTip'
+import TabInsights from '../components/TabInsights'
 import { STAGE_PILL, TypeBadge } from './agent/shared'
 import OverviewTab from './agent/OverviewTab'
 import DiagramTab from './agent/DiagramTab'
@@ -30,6 +32,8 @@ export default function AgentPage() {
   const [graph, setGraph] = useState<GraphV2Response | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Goes up when the registry has updated the record or its figures, so the open tab reloads them in place.
+  const [dataVersion, setDataVersion] = useState(0)
 
   const requested = searchParams.get('tab') as Tab | null
   const tab: Tab = requested && (TABS as readonly string[]).includes(requested) ? requested : 'overview'
@@ -43,7 +47,8 @@ export default function AgentPage() {
       setGraph(graphRes.data)
       setError(null)
     } catch (e: any) {
-      setError(e.response?.data?.detail || e.message || 'Agent not found')
+      // A background reload that fails leaves the page as it is, with whatever a person has open.
+      if (!quiet) setError(e.response?.data?.detail || e.message || 'Agent not found')
     } finally {
       setLoading(false)
     }
@@ -53,19 +58,20 @@ export default function AgentPage() {
     if (id) load(id)
   }, [id, load])
 
-  if (loading) return <div className="p-8 text-center text-gray-500">Loading…</div>
+  if (loading) return <div className="p-8 text-center text-slate-600">Loading…</div>
   if (error || !agent || !id) return (
     <div className="p-8 text-center text-rose-500">
-      {error || 'Agent not found'} — <Link to="/agents" className="text-teal-600 underline">back to registry</Link>
+      {error || 'Agent not found'} — <Link to="/agents" className="text-zen-600 underline">back to registry</Link>
     </div>
   )
 
   const onChanged = () => load(id, true)
-  const tabProps = { agent, agentId: id, onChanged }
+  const tabProps = { agent, agentId: id, onChanged, dataVersion }
+  const recordChanged = () => { load(id, true); setDataVersion(v => v + 1) }
 
   return (
     <div className="space-y-4 animate-fade-in max-w-5xl">
-      <Link to="/agents" className="text-sm text-gray-400 hover:text-gray-600">&larr; AI Registry</Link>
+      <Link to="/agents" className="text-sm text-slate-500 hover:text-slate-700">&larr; AI Registry</Link>
 
       <div className="card p-0 overflow-hidden">
         <header className="px-6 pt-5 pb-4 bg-gradient-to-r from-zen-50 via-white to-white border-b border-slate-100">
@@ -84,7 +90,10 @@ export default function AgentPage() {
                 {agent.version && <MetaChip icon={<Tag size={12} />}>{agent.version}</MetaChip>}
               </div>
             </div>
-            <span className={`${STAGE_PILL[agent.stage] || 'status-pending'} !text-[13px] !px-3 !py-1`}>{agent.stage}</span>
+            <span className="inline-flex items-center gap-1">
+              <span className={`${STAGE_PILL[agent.stage] || 'status-pending'} !text-[13px] !px-3 !py-1`}>{agent.stage}</span>
+              <InfoTip term="stage" />
+            </span>
           </div>
 
           <div className="mt-4 flex gap-1 overflow-x-auto rounded-xl bg-slate-100/80 p-1" role="tablist">
@@ -100,10 +109,10 @@ export default function AgentPage() {
                   className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm whitespace-nowrap transition-colors ${
                     tab === t
                       ? 'bg-white font-semibold text-zen-700 shadow-sm ring-1 ring-slate-200'
-                      : 'font-medium text-slate-600 hover:bg-white/60 hover:text-slate-900'
+                      : 'font-medium text-slate-700 hover:bg-white/60 hover:text-slate-900'
                   }`}
                 >
-                  <Icon size={15} className={tab === t ? 'text-zen-600' : 'text-slate-400'} />
+                  <Icon size={15} className={tab === t ? 'text-zen-600' : 'text-slate-500'} />
                   {TAB_LABEL[t]}
                 </button>
               )
@@ -119,6 +128,7 @@ export default function AgentPage() {
         {tab === 'revenue' && <RevenueTab {...tabProps} />}
         {tab === 'risk' && <RiskTab {...tabProps} />}
         {tab === 'integrate' && <IntegrateTab {...tabProps} />}
+        <TabInsights key={`${id}:${tab}`} agentId={id} tab={tab} onRecordChanged={recordChanged} />
         </div>
       </div>
     </div>
@@ -130,7 +140,7 @@ function MetaChip({ icon, warn, children }: { icon: React.ReactNode; warn?: bool
     <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs whitespace-nowrap ${
       warn ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-200 bg-white text-slate-700'
     }`}>
-      <span className={warn ? 'text-amber-500' : 'text-slate-400'}>{icon}</span>
+      <span className={warn ? 'text-amber-500' : 'text-slate-500'}>{icon}</span>
       {children}
     </span>
   )

@@ -1,6 +1,6 @@
 import api from '../api'
 
-export type JobName = 'usage_ingestion' | 'infra_costs' | 'cost_rollup' | 'risk_scan' | 'governance_checks'
+export type JobName = 'phoenix_discovery' | 'usage_ingestion' | 'record_autofill' | 'infra_costs' | 'cost_rollup' | 'risk_scan' | 'governance_checks' | 'insight_refresh'
 
 // ok | partial | not_configured | skipped | error | unreachable come from the jobs;
 // running | stale | cancelled | unavailable are set by the runner. A job that
@@ -85,7 +85,7 @@ export interface RefreshResult {
   results: JobRun[]
 }
 
-// A refresh reads Phoenix and runs four jobs back to back.
+// A refresh reads Phoenix and the app's own API description, then runs five jobs back to back.
 const REFRESH_TIMEOUT_MS = 10 * 60_000
 
 export const getJobs = () => api.get<JobsResponse>('/jobs')

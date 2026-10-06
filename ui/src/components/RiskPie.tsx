@@ -20,7 +20,7 @@ export default function RiskPie({ data, size = 180 }: Props) {
 
   if (total === 0) {
     return (
-      <div style={{ width: size, height: size }} className="flex items-center justify-center rounded-full border-2 border-dashed border-gray-200 text-xs text-gray-400 text-center px-4">
+      <div style={{ width: size, height: size }} className="flex items-center justify-center rounded-full border-2 border-dashed border-gray-200 text-xs text-slate-500 text-center px-4">
         No open findings
       </div>
     )
@@ -57,14 +57,14 @@ export default function RiskPie({ data, size = 180 }: Props) {
         ))}
         <circle cx={cx} cy={cy} r={r * 0.45} fill="#ffffff" />
         <text x={cx} y={cy - 4} textAnchor="middle" fontSize={20} fontWeight={700} fill="#111827" fontFamily="inherit">{total}</text>
-        <text x={cx} y={cy + 14} textAnchor="middle" fontSize={9} fill="#9ca3af" fontFamily="inherit">findings</text>
+        <text x={cx} y={cy + 14} textAnchor="middle" fontSize={11} fill="#475569" fontFamily="inherit">findings</text>
       </svg>
       <div className="space-y-1.5">
         {data.map(d => (
           <div key={d.label} className="flex items-center gap-2 text-xs">
             <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
-            <span className="text-gray-600">{d.label}</span>
-            <span className="text-gray-400 font-mono">{d.count}</span>
+            <span className="text-slate-700">{d.label}</span>
+            <span className="text-slate-500 font-mono">{d.count}</span>
           </div>
         ))}
       </div>

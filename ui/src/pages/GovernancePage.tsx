@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import {
   getAgents, getGovernanceOverview, updateGate, getDiscoveries,
   registerDiscovery, dismissDiscovery, runGovernance,
   type Agent, type GovernanceOverview, type Discovery
 } from '../services/api'
+import InfoTip from '../components/InfoTip'
 import { errorMessage } from './agent/shared'
 
 export default function GovernancePage() {
@@ -96,37 +98,37 @@ export default function GovernancePage() {
   const blocked = agents.filter(a => ['arb', 'security', 'dp'].some(g => a.reviews?.[g] === 'Changes Requested')).length
   const inReview = agents.filter(a => ['arb', 'security', 'dp'].some(g => a.reviews?.[g] === 'In Review')).length
 
-  if (loading) return <div className="p-8 text-center text-gray-500">Loading...</div>
+  if (loading) return <div className="p-8 text-center text-slate-600">Loading...</div>
   if (error) return <div className="p-8 text-center text-red-500">Error: {error}</div>
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Governance & Discovery</h1>
-        <p className="text-gray-500 mt-0.5">Every agent’s path through Architecture, Security and Data Protection review, plus AI found running that isn’t registered yet.</p>
+        <h1 className="text-2xl font-bold gradient-text">Governance</h1>
+        <p className="text-slate-600 mt-0.5">Every agent’s path through Architecture, Security and Data Protection review, plus checks on registered agents that look off. New AI found in Phoenix is on the <Link to="/discovered" className="font-medium text-zen-700 hover:underline">Discovered</Link> page.</p>
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg border p-4">
+        <div className="card p-4">
           <div className="text-2xl font-bold text-green-600">{cleared}</div>
-          <div className="text-xs font-medium text-gray-700">Cleared for production</div>
-          <div className="text-[11px] text-gray-400 mt-0.5">All three reviews approved (with or without conditions)</div>
+          <div className="text-xs font-medium text-slate-700">Cleared for production</div>
+          <div className="text-[12px] text-slate-500 mt-0.5">All three reviews approved (with or without conditions)</div>
         </div>
-        <div className="bg-white rounded-lg border p-4">
+        <div className="card p-4">
           <div className="text-2xl font-bold text-red-600">{blocked}</div>
-          <div className="text-xs font-medium text-gray-700">Blocked</div>
-          <div className="text-[11px] text-gray-400 mt-0.5">Changes requested on at least one review</div>
+          <div className="text-xs font-medium text-slate-700">Blocked</div>
+          <div className="text-[12px] text-slate-500 mt-0.5">Changes requested on at least one review</div>
         </div>
-        <div className="bg-white rounded-lg border p-4">
+        <div className="card p-4">
           <div className="text-2xl font-bold text-amber-600">{inReview}</div>
-          <div className="text-xs font-medium text-gray-700">In active review</div>
-          <div className="text-[11px] text-gray-400 mt-0.5">At least one review awaiting a decision</div>
+          <div className="text-xs font-medium text-slate-700">In active review</div>
+          <div className="text-[12px] text-slate-500 mt-0.5">At least one review awaiting a decision</div>
         </div>
-        <div className="bg-white rounded-lg border p-4">
+        <div className="card p-4">
           <div className="text-2xl font-bold text-orange-600">{pendingDiscs.length}</div>
-          <div className="text-xs font-medium text-gray-700">Unregistered AI apps found</div>
-          <div className="text-[11px] text-gray-400 mt-0.5">Flagged by auto-discovery, not registered yet</div>
+          <div className="text-xs font-medium text-slate-700 flex items-center">Governance findings <InfoTip term="governance_findings" className="ml-1" /></div>
+          <div className="text-[12px] text-slate-500 mt-0.5">Checks on registered agents, waiting for a decision</div>
         </div>
       </div>
 
@@ -134,12 +136,12 @@ export default function GovernancePage() {
       {overview && (
         <div className="grid grid-cols-3 gap-4">
           {gates.map(gate => (
-            <div key={gate} className="bg-white rounded-lg border p-4">
+            <div key={gate} className="card p-4">
               <h3 className="font-semibold text-sm mb-2">{gateLabels[gate]}</h3>
               <div className="space-y-1">
                 {Object.entries(overview[gate] || {}).map(([status, count]) => (
                   <div key={status} className="flex justify-between text-xs">
-                    <span className="text-gray-600">{status}</span>
+                    <span className="text-slate-700">{status}</span>
                     <span className="font-mono">{count}</span>
                   </div>
                 ))}
@@ -157,10 +159,10 @@ export default function GovernancePage() {
       )}
 
       {/* Review Status Table */}
-      <div className="bg-white rounded-lg border overflow-x-auto">
+      <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-gray-500 border-b">
+            <tr className="text-left text-slate-600 border-b">
               <th className="p-3">Agent</th>
               <th className="p-3">Stage</th>
               {gates.map(g => <th key={g} className="p-3">{gateLabels[g]}</th>)}
@@ -187,7 +189,7 @@ export default function GovernancePage() {
                   <button
                     onClick={() => handleRunGovernance(a.id)}
                     disabled={running === a.id}
-                    className="text-xs bg-teal-50 text-teal-700 px-2 py-1 rounded hover:bg-teal-100 disabled:opacity-50"
+                    className="btn-secondary btn-sm whitespace-nowrap"
                     title="Runs rule-based checks and overwrites all three review statuses with the result"
                   >
                     {running === a.id ? 'Running…' : 'Run auto-review'}
@@ -202,14 +204,14 @@ export default function GovernancePage() {
       {/* Discovery Feed */}
       {pendingDiscs.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold mb-3">Auto-discovered unregistered AI</h2>
+          <h2 className="text-lg font-semibold mb-3 flex items-center">Governance findings <InfoTip term="governance_findings" className="ml-1" /></h2>
           <div className="grid grid-cols-2 gap-4">
             {pendingDiscs.map(d => (
-              <div key={d.id} className="bg-white rounded-lg border p-4">
+              <div key={d.id} className="card p-4">
                 <div className="flex justify-between items-start">
                   <div>
                     <div className="font-medium">{d.suspectedName}</div>
-                    <div className="text-xs text-gray-500 mt-1">{d.suspectedDept} · {d.source}</div>
+                    <div className="text-xs text-slate-600 mt-1">{d.suspectedDept} · {d.source}</div>
                   </div>
                   <span className={`text-xs px-2 py-1 rounded border ${
                     d.confidence >= 85 ? 'bg-green-50 text-green-700 border-green-200' :
@@ -219,17 +221,17 @@ export default function GovernancePage() {
                     {d.confidence}% confidence
                   </span>
                 </div>
-                {d.signal && <div className="text-xs text-gray-600 mt-2">{d.signal}</div>}
+                {d.signal && <div className="text-xs text-slate-700 mt-2">{d.signal}</div>}
                 <div className="flex gap-2 mt-3">
                   <button
                     onClick={() => handleRegister(d)}
-                    className="text-xs bg-teal-600 text-white px-3 py-1.5 rounded hover:bg-teal-700"
+                    className="text-xs bg-zen-600 text-white px-3 py-1.5 rounded hover:bg-zen-700"
                   >
                     Register agent
                   </button>
                   <button
                     onClick={() => handleDismiss(d)}
-                    className="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200"
+                    className="text-xs bg-gray-100 text-slate-700 px-3 py-1.5 rounded hover:bg-gray-200"
                   >
                     Dismiss
                   </button>

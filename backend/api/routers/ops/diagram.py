@@ -27,7 +27,7 @@ SAMPLE_TIMEOUT_SECONDS = 45.0
 MIN_TRACES_FOR_ABSENCE = 50
 
 _GRAPH_KEYS = ("status", "project", "reason", "spanCount", "traceCount", "nodes", "edges",
-               "cachedAt", "fromCache", "sampleWindow", "sampleLimit", "truncated", "orphanRate")
+               "cachedAt", "fromCache", "sampleWindow", "sampleLimit", "truncated", "orphanRate", "mode")
 
 
 def _empty_sample(status: str, project: str | None, reason: str | None = None) -> dict[str, Any]:

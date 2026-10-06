@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DataSet } from 'vis-data'
 import { Network } from 'vis-network'
 
+import InfoTip from '../components/InfoTip'
 import { getGraphV2, getImpact, type GraphNodeV2, type GraphV2Response } from '../services/api'
 
 // ── cobol visual vocabulary (raw hex — serialised into vis options) ─────────
@@ -431,15 +432,15 @@ export default function DependencyGraphView() {
 
   const selected = selectedId ? nodeById.get(selectedId) : null
 
-  if (loading) return <div className="p-8 text-center text-gray-500">Loading dependency graph…</div>
+  if (loading) return <div className="p-8 text-center text-slate-600">Loading dependency graph…</div>
   if (error) return <div className="p-8 text-center text-red-500">Error: {error}</div>
   if (!graph) return null
 
   return (
     <div className="space-y-3">
       <div>
-        <h1 className="text-2xl font-bold">Dependency Graph</h1>
-        <p className="text-gray-500 mt-0.5">Everything each agent depends on and feeds, as declared by its owner. Click a node for details; hover the totals for what they count.</p>
+        <h1 className="text-2xl font-bold gradient-text">Dependency Graph <InfoTip term="dependency_graph" /></h1>
+        <p className="text-slate-600 mt-0.5">Everything each agent depends on and feeds, as declared by its owner. Click a node for details; hover the totals for what they count.</p>
       </div>
       <div className="grid grid-cols-4 gap-2">
         {([
@@ -450,7 +451,7 @@ export default function DependencyGraphView() {
         ] as [string, number, string][]).map(([label, value, hint]) => (
           <div key={label} className="rounded-lg border bg-white p-2 text-center" title={hint}>
             <div className="text-lg font-bold text-slate-800">{value}</div>
-            <div className="text-[10px] uppercase text-slate-500">{label}</div>
+            <div className="text-[12px] uppercase text-slate-600">{label}{label === 'Production entry points' && <> <InfoTip term="stage" /></>}</div>
           </div>
         ))}
       </div>
@@ -479,13 +480,13 @@ export default function DependencyGraphView() {
         })}
         <button
           onClick={() => setHiddenKinds(new Set())}
-          className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-600 hover:bg-slate-50"
+          className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:bg-slate-50"
         >
           Show all
         </button>
         <button
           onClick={() => setHiddenKinds(new Set(graph.legend.map(i => i.kind)))}
-          className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-600 hover:bg-slate-50"
+          className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-700 hover:bg-slate-50"
         >
           Hide all
         </button>
@@ -497,7 +498,7 @@ export default function DependencyGraphView() {
             placeholder="Search & focus…"
             className="w-52 rounded-lg border px-3 py-1.5 text-sm"
           />
-          <button onClick={searchFocus} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50">
+          <button onClick={searchFocus} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">
             Go
           </button>
         </div>
@@ -543,27 +544,27 @@ export default function DependencyGraphView() {
             <div className="space-y-3">
               <div>
                 <h3 className="font-semibold text-slate-800">{selected.name}</h3>
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-slate-600">
                   {selected.kind.startsWith('group:')
                     ? `${selected.attrs.stage ?? ''} · ${selected.attrs.dept_name ?? selected.attrs.dept ?? ''}`
                     : selected.kind}
                 </div>
               </div>
               {selected.attrs.worst_gate && (
-                <div className="text-xs">Worst governance gate: <b>{selected.attrs.worst_gate}</b></div>
+                <div className="text-xs">Worst governance gate <InfoTip term="gate" />: <b>{selected.attrs.worst_gate}</b></div>
               )}
               {selected.attrs.at_risk && (
                 <div className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-700">▶ Flagged at risk</div>
               )}
               {selected.kind.startsWith('group:') && (
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-slate-600">
                   ${Math.round(selected.attrs.value_amount ?? 0).toLocaleString()}/mo value ·{' '}
                   {selected.attrs.hours_saved_monthly ?? 0} h/mo saved ·{' '}
                   {selected.attrs.token_cost != null ? `$${selected.attrs.token_cost} tokens/mo (30d)` : 'tokens unknown (30d)'}
                 </div>
               )}
               <div>
-                <h4 className="text-xs font-semibold uppercase text-slate-500">Outgoing</h4>
+                <h4 className="text-xs font-semibold uppercase text-slate-600">Outgoing</h4>
                 <ul className="mt-1 space-y-1 text-xs">
                   {graph.edges.filter(e => e.from === selected.id).map(e => {
                     const target = nodeById.get(e.to)
@@ -580,7 +581,7 @@ export default function DependencyGraphView() {
                 </ul>
               </div>
               <div>
-                <h4 className="text-xs font-semibold uppercase text-slate-500">Incoming</h4>
+                <h4 className="text-xs font-semibold uppercase text-slate-600">Incoming</h4>
                 <ul className="mt-1 space-y-1 text-xs">
                   {graph.edges.filter(e => e.to === selected.id).map(e => {
                     const source = nodeById.get(e.from)
@@ -608,7 +609,7 @@ export default function DependencyGraphView() {
               {impact && (
                 <div className="rounded-lg bg-red-50 p-3 text-xs">
                   <div className="mb-1 font-semibold text-red-700">
-                    Outage: {impact.target_name} — {impact.risk_level.toUpperCase()}
+                    Outage: {impact.target_name} — {impact.risk_level.toUpperCase()} <InfoTip term="blast_radius" />
                   </div>
                   <div>Revenue at risk: ${impact.revenue_at_risk.toLocaleString()}/mo</div>
                   <div>Hours at risk: {impact.efficiency_at_risk}/mo</div>
@@ -626,14 +627,14 @@ export default function DependencyGraphView() {
               )}
             </div>
           ) : (
-            <div className="text-xs text-slate-400">
+            <div className="text-xs text-slate-500">
               Click an agent node for details. Right-click a ▶ Production agent for the hierarchical view. Hover for tooltips.
             </div>
           )}
         </div>
       </div>
 
-      <div className="rounded-lg border bg-white p-3 text-xs leading-relaxed text-slate-600">
+      <div className="rounded-lg border bg-white p-3 text-xs leading-relaxed text-slate-700">
         <b>How to read this graph</b><br />
         🟢 Thick green border + ▶ = <b>Production agent</b> (right-click for the hierarchical tree) · 🟠 amber border = pipeline stage · circle fill = department (see toggles)<br />
         ⚪ Light hollow circle = <b>shadow-AI candidate</b> (referenced but unregistered) · 🔵 cylinder = enterprise system · 🟠 cylinder = database<br />

@@ -1,3 +1,4 @@
+import { clockTime } from '../lib/timeMode'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import {
   getAgentJobs, refreshAgent,
@@ -103,7 +104,7 @@ function detailLines(item: AgentJobItem, scheduler: SchedulerStatus | null, lock
   } else {
     lines.push('Never run')
   }
-  lines.push(`${item.schedule}${scheduler && !scheduler.enabled ? ' (scheduler off)' : ''}`)
+  lines.push(`${item.dailyAt ? `Daily at ${clockTime(item.dailyAt, 'local')}` : 'Daily'}${scheduler && !scheduler.enabled ? ' (scheduler off)' : ''}`)
   if (!item.inRefresh) lines.push('Not part of "Refresh all data": runs once a day for all agents.')
   if (!item.available) lines.push(`The job code is not available: ${item.unavailableReason || 'not deployed yet'}.`)
   return lines
@@ -133,11 +134,11 @@ function JobChip({ item, scheduler, lockMinutes, open, controls, onToggle }: {
       aria-controls={controls}
       title={detailLines(item, scheduler, lockMinutes).join('\n')}
       data-job={item.job}
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded px-1 -mx-1 hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 ${open ? 'bg-white' : ''}`}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded px-1 -mx-1 hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-zen-500 ${open ? 'bg-white' : ''}`}
     >
       <span className={`h-2 w-2 rounded-full shrink-0 ${dot}`} aria-hidden />
-      <span className="text-gray-600">{item.shortLabel}</span>
-      <span className={status && status !== 'ok' && status !== 'running' ? 'text-amber-700' : 'text-gray-400'}>{detail}</span>
+      <span className="text-slate-700">{item.shortLabel}</span>
+      <span className={status && status !== 'ok' && status !== 'running' ? 'text-amber-700' : 'text-slate-500'}>{detail}</span>
     </button>
   )
 }
@@ -267,13 +268,13 @@ export default function JobStatusBar({ agentId, onRefreshed }: { agentId: string
   return (
     <div className="rounded-lg border border-gray-100 bg-gray-50/60 px-3 py-2 text-xs space-y-1.5" data-testid="job-status-bar">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <span className="text-gray-400">Data jobs</span>
+        <span className="text-slate-500">Data jobs</span>
 
-        {jobs === null && !loadError && <span className="text-gray-400">Loading job status…</span>}
+        {jobs === null && !loadError && <span className="text-slate-500">Loading job status…</span>}
         {jobs === null && loadError && (
           <span className="text-rose-600">
             Job status unavailable ({loadError}){' '}
-            <button type="button" onClick={() => load()} className="text-teal-700 underline">Retry</button>
+            <button type="button" onClick={() => load()} className="text-zen-700 underline">Retry</button>
           </span>
         )}
         {jobs?.map(item => (
@@ -291,13 +292,13 @@ export default function JobStatusBar({ agentId, onRefreshed }: { agentId: string
         <span className="ml-auto flex items-center gap-3">
           {scheduler && (
             <span
-              className="text-gray-500 whitespace-nowrap"
+              className="text-slate-600 whitespace-nowrap"
               title={scheduler.enabled
-                ? `Daily jobs run in UTC.${scheduler.nextRunAt ? ` Next: ${new Date(scheduler.nextRunAt).toLocaleString()}` : ''}`
+                ? `Daily jobs run by themselves.${scheduler.nextRunAt ? ` Next: ${new Date(scheduler.nextRunAt).toLocaleString()}` : ''}`
                 : 'Daily jobs are off (SCHEDULER_ENABLED=false). Data changes only when someone refreshes it.'}
             >
               Scheduler:{' '}
-              <span className={scheduler.enabled ? 'font-semibold text-teal-700' : 'font-semibold text-gray-500'}>
+              <span className={scheduler.enabled ? 'font-semibold text-emerald-700' : 'font-semibold text-slate-600'}>
                 {scheduler.enabled ? (scheduler.running ? 'on' : 'on (not running)') : 'off'}
               </span>
             </span>
@@ -307,7 +308,7 @@ export default function JobStatusBar({ agentId, onRefreshed }: { agentId: string
             onClick={refresh}
             disabled={refreshing}
             className="btn-secondary btn-sm whitespace-nowrap"
-            title="Re-reads Phoenix usage, then reruns cost rollup, risk scan and governance checks for this agent. Nothing about the agent itself is changed."
+            title="Re-reads Phoenix usage, fills in what the record is missing from usage, traces and the app's own API description, then reruns cost rollup, risk scan and governance checks for this agent."
           >
             {refreshing ? 'Refreshing…' : 'Refresh all data'}
           </button>
@@ -319,17 +320,17 @@ export default function JobStatusBar({ agentId, onRefreshed }: { agentId: string
       )}
 
       {openItem && (
-        <ul id={detailId} className="rounded border border-gray-100 bg-white px-2 py-1.5 text-gray-600 space-y-0.5">
-          <li className="font-medium text-gray-700">{openItem.label}</li>
+        <ul id={detailId} className="rounded border border-gray-100 bg-white px-2 py-1.5 text-slate-700 space-y-0.5">
+          <li className="font-medium text-slate-700">{openItem.label}</li>
           {detailLines(openItem, scheduler, lockMinutes).map((line, i) => <li key={i}>{line}</li>)}
         </ul>
       )}
 
       {refreshing && (
-        <div className="text-teal-700" role="status">
+        <div className="text-zen-700" role="status">
           {current >= 0
             ? `Step ${current + 1} of ${refreshJobs.length}: ${refreshJobs[current].label}`
-            : 'Refreshing usage, cost, risk and governance data'}
+            : 'Refreshing usage, the record, cost, risk and governance data'}
           {' '}· {elapsed}s
         </div>
       )}
@@ -340,24 +341,24 @@ export default function JobStatusBar({ agentId, onRefreshed }: { agentId: string
         </div>
       )}
       {!refreshing && !detached && serverBusy && (
-        <div className="text-teal-700" role="status">
+        <div className="text-zen-700" role="status">
           Running now for this agent: {refreshJobs[current].label}. This bar updates when it finishes.
         </div>
       )}
 
       {!refreshing && refreshError && <div className="text-rose-600" role="alert">Refresh failed: {refreshError}</div>}
-      {!refreshing && !detached && notice && <div className="text-gray-600" role="status">{notice}</div>}
+      {!refreshing && !detached && notice && <div className="text-slate-700" role="status">{notice}</div>}
 
       {!refreshing && result && (
-        <div className={RESULT_TONE[result.status] || 'text-gray-600'} role="status">
+        <div className={RESULT_TONE[result.status] || 'text-slate-700'} role="status">
           {result.locked
             ? result.reason || 'A refresh is already running for this agent.'
             : `Refresh finished in ${Math.max(0, Math.round((Date.parse(result.finishedAt) - Date.parse(result.startedAt)) / 1000))}s: ${countBy(result.results)}.`}
           {notOk.length > 0 && (
-            <ul className="mt-0.5 space-y-0.5 text-gray-500">
+            <ul className="mt-0.5 space-y-0.5 text-slate-600">
               {notOk.map(r => (
                 <li key={r.job}>
-                  <span className="text-gray-600">{labelOf(r.job)}:</span>
+                  <span className="text-slate-700">{labelOf(r.job)}:</span>
                   {' '}{statusText(r, lockMinutes)}{runReason(r) ? `: ${runReason(r)}` : ''}
                 </li>
               ))}
@@ -367,7 +368,7 @@ export default function JobStatusBar({ agentId, onRefreshed }: { agentId: string
       )}
 
       {!refreshing && !result && !refreshError && !notice && neverRun && (
-        <div className="text-gray-400">No data jobs have run for this agent yet. Use "Refresh all data" to collect them now.</div>
+        <div className="text-slate-500">No data jobs have run for this agent yet. Use "Refresh all data" to collect them now.</div>
       )}
     </div>
   )

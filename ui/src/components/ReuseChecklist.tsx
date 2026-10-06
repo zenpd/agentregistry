@@ -1,12 +1,13 @@
 import { Link } from 'react-router-dom'
 import { ShieldCheck, ShieldAlert, CheckCircle2, CircleAlert, ArrowRight } from 'lucide-react'
+import InfoTip from './InfoTip'
 import type { ReuseCheck, ReuseStatus } from '../services/api'
 
 const tabHref = (agentId: string, tab: ReuseCheck['tab']) => `/agents/${encodeURIComponent(agentId)}?tab=${tab}`
 
 // Status pill per failing check, in the AssureAI / test-maker semantic tones.
 const PILL = {
-  muted: 'bg-slate-100 text-slate-600 ring-slate-200',
+  muted: 'bg-slate-100 text-slate-700 ring-slate-200',
   info: 'bg-sky-50 text-sky-700 ring-sky-200',
   warn: 'bg-[#fffbeb] text-[#b45309] ring-[#fde68a]',
   danger: 'bg-[#fef2f2] text-[#dc2626] ring-[#fecaca]',
@@ -64,22 +65,22 @@ export default function ReuseChecklist({ reuse, agentId }: { reuse: ReuseStatus;
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-[16px] font-extrabold text-gray-900">Reuse certification</h3>
+              <h3 className="text-[16px] font-extrabold text-slate-900">Reuse certification <InfoTip term="certified_for_reuse" /></h3>
               <span className={`inline-flex items-center rounded-full px-2.5 py-[3px] text-[12px] font-bold ring-1 ${ok ? PILL.success : PILL.warn}`}>
                 {ok ? 'Certified for reuse' : 'Not certified for reuse'}
               </span>
             </div>
-            <p className="mt-1 text-[13px] text-gray-500">
+            <p className="mt-1 text-[13px] text-slate-600">
               {ok
                 ? 'Another team can build on this agent: it is in Production, every review is approved and no serious risk is open.'
                 : 'Another team should not build on this agent yet. All five checks must pass — resolve the ones below.'}
             </p>
           </div>
           <div className="shrink-0 text-right">
-            <div className="text-[28px] font-extrabold leading-none text-gray-900">
-              {passed.length}<span className="text-[16px] font-bold text-gray-400">/{reuse.checks.length}</span>
+            <div className="text-[28px] font-extrabold leading-none text-slate-900">
+              {passed.length}<span className="text-[16px] font-bold text-slate-500">/{reuse.checks.length}</span>
             </div>
-            <div className="mt-1 text-[11px] font-semibold uppercase tracking-[.04em] text-gray-500">checks passed</div>
+            <div className="mt-1 text-[12px] font-semibold uppercase tracking-[.04em] text-slate-600">checks passed <InfoTip term="certification_checks" /></div>
           </div>
         </div>
         <div className="mt-3 flex gap-1" aria-hidden>
@@ -105,10 +106,10 @@ export default function ReuseChecklist({ reuse, agentId }: { reuse: ReuseStatus;
                       <CircleAlert size={18} className="shrink-0 text-amber-500" />
                       <div className="flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[14px] font-semibold text-gray-900">{c.label}</span>
-                          <span className={`inline-flex rounded-full px-2 py-[1px] text-[11px] font-bold ring-1 ${PILL[pill.tone]}`}>{pill.text}</span>
+                          <span className="text-[14px] font-semibold text-slate-900">{c.label}</span>
+                          <span className={`inline-flex rounded-full px-2 py-[1px] text-[12px] font-bold ring-1 ${PILL[pill.tone]}`}>{pill.text}</span>
                         </div>
-                        <div className="text-[13px] text-gray-600">{nextStep(c)}</div>
+                        <div className="text-[13px] text-slate-700">{nextStep(c)}</div>
                       </div>
                       <span className="hidden sm:inline-flex shrink-0 items-center gap-1 rounded-full border border-zen-200 bg-zen-50 px-3 py-1 text-[12px] font-semibold text-zen-700 group-hover:bg-zen-100">
                         {actionLabel(c)} <ArrowRight size={13} />
@@ -128,14 +129,14 @@ export default function ReuseChecklist({ reuse, agentId }: { reuse: ReuseStatus;
                 <li key={c.key} data-testid={`reuse-check-${c.key}`} data-met={true}
                   className="flex items-center gap-2.5 rounded-xl bg-emerald-50/50 px-3 py-2 ring-1 ring-emerald-100">
                   <CheckCircle2 size={16} className={`shrink-0 ${c.conditions ? 'text-amber-500' : 'text-emerald-600'}`} />
-                  <span className="text-[13px] font-semibold text-gray-800">{c.label}</span>
+                  <span className="text-[13px] font-semibold text-slate-800">{c.label}</span>
                   {c.conditions ? (
-                    <Link to={tabHref(agentId, c.tab)} className={`ml-auto inline-flex rounded-full px-2 py-[1px] text-[11px] font-bold ring-1 ${PILL.warn} hover:brightness-95`}
+                    <Link to={tabHref(agentId, c.tab)} className={`ml-auto inline-flex rounded-full px-2 py-[1px] text-[12px] font-bold ring-1 ${PILL.warn} hover:brightness-95`}
                       title="Approved with conditions — read them on the Governance tab">
                       With conditions
                     </Link>
                   ) : (
-                    <span className="ml-auto text-[12px] text-gray-500">{c.detail}</span>
+                    <span className="ml-auto text-[12px] text-slate-600">{c.detail}</span>
                   )}
                 </li>
               ))}

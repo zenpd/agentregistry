@@ -29,7 +29,7 @@ function CostPerCall({ agent }: { agent: RegistryAgent }) {
   const { costPerCallCents, source, pricing } = agent.card
   if (costPerCallCents == null) {
     return (
-      <span className="text-gray-400" title={pricing === 'missing'
+      <span className="text-slate-500" title={pricing === 'missing'
         ? 'The model this agent runs on has no price recorded, so cost per call is unknown.'
         : 'No usage recorded yet.'}>— /call</span>
     )
@@ -42,7 +42,7 @@ function CostPerCall({ agent }: { agent: RegistryAgent }) {
   return (
     <span title={title}>
       <span className="font-mono">{pricing === 'partial' && '≥'}{fmtCostPerCall(costPerCallCents)}</span>/call
-      {source === 'seed' && <span className="ml-1 text-[10px] uppercase text-gray-400">demo</span>}
+      {source === 'seed' && <span className="ml-1 text-[12px] uppercase text-slate-500">demo</span>}
     </span>
   )
 }
@@ -101,13 +101,13 @@ export default function AgentsPage() {
   })
   const certifiedCount = agents.filter(a => a.reuse.certified).length
 
-  if (loading && agents.length === 0) return <div className="p-8 text-center text-gray-500">Loading...</div>
+  if (loading && agents.length === 0) return <div className="p-8 text-center text-slate-600">Loading...</div>
   if (error) return <div className="p-8 text-center text-rose-500">Error: {error}</div>
 
   return (
     <div className="space-y-4 animate-fade-in">
       <div className="page-header">
-        <h1 className="page-title text-2xl">AI Registry</h1>
+        <h1 className="text-2xl font-bold gradient-text">AI Registry</h1>
         <button onClick={() => setShowOnboarding(true)} className="btn-primary">
           + Register new AI application
         </button>
@@ -163,8 +163,8 @@ export default function AgentsPage() {
             onClick={() => setCatFilter(cat.key)}
             className={`text-xs px-3 py-1 rounded-full border transition-colors ${
               catFilter === cat.key
-                ? 'bg-teal-600 text-white border-teal-600'
-                : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:text-gray-700'
+                ? 'bg-zen-600 text-white border-zen-600'
+                : 'bg-white text-slate-600 border-gray-200 hover:border-gray-300 hover:text-slate-700'
             }`}
           >
             {cat.label}
@@ -173,7 +173,7 @@ export default function AgentsPage() {
       </div>
 
       {search.trim() && (
-        <p className="text-xs text-gray-500" data-testid="search-summary">
+        <p className="text-xs text-slate-600" data-testid="search-summary">
           {filtered.length} agent{filtered.length === 1 ? '' : 's'} match “{search.trim()}”, best match first.
           {filtered.length === 0 && ' Nothing registered does this yet, so registering a new application is justified.'}
         </p>
@@ -189,7 +189,7 @@ export default function AgentsPage() {
             data-testid="registry-card"
           >
             <div className="flex justify-between items-start gap-2">
-              <h3 className="font-semibold text-gray-900">{a.name}</h3>
+              <h3 className="font-semibold text-slate-900">{a.name}</h3>
               <span className={`shrink-0 ${STAGE_PILL[a.stage] || 'status-pending'}`}>{a.stage}</span>
             </div>
             {a.reuse.certified ? (
@@ -197,7 +197,7 @@ export default function AgentsPage() {
                 <BadgeCheck size={13} /> Certified for reuse
               </span>
             ) : a.stage !== 'Deprecated' && <ReuseProgress reuse={a.reuse} />}
-            <p className="text-sm text-gray-500 mt-2 line-clamp-2">{a.description || 'No description yet.'}</p>
+            <p className="text-sm text-slate-600 mt-2 line-clamp-2">{a.description || 'No description yet.'}</p>
 
             {a.capabilities?.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
@@ -210,7 +210,7 @@ export default function AgentsPage() {
             {/* Dependency badges */}
             <div className="mt-2 flex flex-wrap gap-1">
               {a.enterpriseSystems?.slice(0, 2).map(s => (
-                <span key={s} className="text-xs bg-slate-50 text-slate-600 ring-1 ring-slate-200 px-1.5 py-0.5 rounded">{s}</span>
+                <span key={s} className="text-xs bg-slate-50 text-slate-700 ring-1 ring-slate-200 px-1.5 py-0.5 rounded">{s}</span>
               ))}
               {a.databases?.slice(0, 1).map(d => (
                 <span key={d} className="text-xs bg-amber-50 text-amber-700 ring-1 ring-amber-200 px-1.5 py-0.5 rounded">{d}</span>
@@ -224,20 +224,20 @@ export default function AgentsPage() {
             </div>
 
             {a.matchedTerms.length > 0 && (
-              <p className="mt-2 text-xs text-gray-400">Matched: {a.matchedTerms.join(', ')}</p>
+              <p className="mt-2 text-xs text-slate-500">Matched: {a.matchedTerms.join(', ')}</p>
             )}
 
-            <div className="mt-auto pt-3 space-y-1 text-xs text-gray-500">
+            <div className="mt-auto pt-3 space-y-1 text-xs text-slate-600">
               <div className="flex items-center justify-between gap-2">
                 <span>{a.aiType}</span>
                 {/* stopPropagation: the tile itself opens the agent. */}
                 <span className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
                   <button type="button" onClick={() => setEditing(a)} aria-label={`Edit ${a.name}`} title="Edit"
-                    className="p-1.5 rounded-lg text-gray-400 hover:text-teal-700 hover:bg-teal-50 transition-colors">
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-teal-700 hover:bg-teal-50 transition-colors">
                     <Pencil size={14} />
                   </button>
                   <button type="button" onClick={() => setDeleting(a)} aria-label={`Delete ${a.name}`} title="Delete"
-                    className="p-1.5 rounded-lg text-gray-400 hover:text-rose-700 hover:bg-rose-50 transition-colors">
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-rose-700 hover:bg-rose-50 transition-colors">
                     <Trash2 size={14} />
                   </button>
                 </span>
@@ -248,7 +248,7 @@ export default function AgentsPage() {
                 {a.valueAmount ? (
                   <span className="font-mono" title="Declared value per month">${(a.valueAmount / 1000).toFixed(0)}K/mo</span>
                 ) : (
-                  <span className="text-gray-400" title="No monthly value declared on the agent record">Not declared</span>
+                  <span className="text-slate-500" title="No monthly value declared on the agent record">Not declared</span>
                 )}
               </div>
             </div>

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import InfoTip from '../../components/InfoTip'
+import type { GlossaryKey } from '../../lib/glossary'
 import {
   addResourceLink,
   collectInfraCosts,
@@ -18,7 +20,7 @@ import {
   type ResourceLink,
   type TrendMonth,
 } from '../../services/ops/economics'
-import { Loading, FieldLabel, SectionLabel, SEVERITY_PILL, SourceBadge, fmtCents, fmtNumber, type TabProps } from './shared'
+import { Loading, FieldLabel, SectionLabel, SEVERITY_PILL, SourceBadge, fmtCents, fmtNumber, type TabProps, useReloadOn } from './shared'
 import Disclosure from '../../components/Disclosure'
 
 // Validated categorical slots 1-2 (blue, orange); value is neutral ink, not a series hue.
@@ -95,9 +97,16 @@ function Banner({ tone, children }: { tone: 'teal' | 'amber' | 'rose' | 'gray'; 
     teal: 'bg-teal-50 text-teal-800 border-teal-100',
     amber: 'bg-amber-50 text-amber-800 border-amber-100',
     rose: 'bg-rose-50 text-rose-700 border-rose-100',
-    gray: 'bg-gray-50 text-gray-600 border-gray-100',
+    gray: 'bg-gray-50 text-slate-700 border-gray-100',
   }[tone]
   return <div className={`rounded-lg border px-3 py-2 text-xs ${style}`}>{children}</div>
+}
+
+const TILE_TIPS: Record<string, GlossaryKey> = {
+  'Token cost': 'tokens',
+  'Declared value': 'declared_value',
+  'Total cost': 'cost_to_run',
+  'ROI': 'return_on_cost',
 }
 
 function Tile({ label, value, sub, accent, muted }: {
@@ -109,9 +118,9 @@ function Tile({ label, value, sub, accent, muted }: {
 }) {
   return (
     <div className="rounded-xl bg-white px-3.5 py-2.5 min-w-0 ring-1 ring-slate-200/80 shadow-sm">
-      <div className="text-[10.5px] font-semibold uppercase tracking-[.04em] text-slate-500">{label}</div>
-      <div className={`mt-1 ${muted ? 'text-sm font-medium text-slate-400' : `text-lg font-extrabold leading-tight ${accent || 'text-slate-900'}`}`}>{value}</div>
-      {sub && <div className="text-[11.5px] text-slate-500 mt-1 flex flex-wrap items-center gap-1">{sub}</div>}
+      <div className="text-[11.5px] font-semibold uppercase tracking-[.04em] text-slate-600">{label}{TILE_TIPS[label] && <> <InfoTip term={TILE_TIPS[label]} /></>}</div>
+      <div className={`mt-1 ${muted ? 'text-sm font-medium text-slate-500' : `text-lg font-extrabold leading-tight ${accent || 'text-slate-900'}`}`}>{value}</div>
+      {sub && <div className="text-[12.5px] text-slate-600 mt-1 flex flex-wrap items-center gap-1">{sub}</div>}
     </div>
   )
 }
@@ -122,7 +131,7 @@ function Swatch({ color }: { color: string }) {
 
 // ── Tab ──────────────────────────────────────────────────────────────────────
 
-export default function RevenueTab({ agentId }: TabProps) {
+export default function RevenueTab({ agentId, dataVersion }: TabProps) {
   const [econ, setEcon] = useState<AgentEconomicsDetail | null>(null)
   const [outcome, setOutcome] = useState<CostPerOutcome | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -146,6 +155,7 @@ export default function RevenueTab({ agentId }: TabProps) {
     setOutcome(null)
     load()
   }, [load])
+  useReloadOn(dataVersion, load)
 
   if (error && !econ) {
     return (
@@ -164,14 +174,14 @@ export default function RevenueTab({ agentId }: TabProps) {
       <PeriodStrip econ={econ} />
       {error && <p className="text-xs text-rose-600">Reload failed: {error}</p>}
       {econ.tokenSource === 'seed' && (
-        <Disclosure summary={<><span className="font-semibold text-gray-600">Demo data</span> — the token cost is a sample figure.</>}>
+        <Disclosure summary={<><span className="font-semibold text-slate-700">Demo data</span> — the token cost is a sample figure.</>}>
           The token cost comes from sample usage rows seeded with the registry, not from this agent's traces.{' '}
           {econ.token.phoenixLinked ? 'Refresh from Phoenix on the Tokenomics tab to replace it.' : 'Link a Phoenix project on the Diagram tab to measure it.'}
         </Disclosure>
       )}
       {nothingKnown && (
         <Banner tone="gray">
-          <span className="font-semibold text-gray-700">Nothing to compare yet.</span> This agent has no declared business
+          <span className="font-semibold text-slate-700">Nothing to compare yet.</span> This agent has no declared business
           value and no usage data. Declare its monthly value (and hours saved) on the agent record and link a Phoenix
           project to see value against cost. Hosting cost below uses {econ.infraSource === 'estimate' ? 'the stage estimate' : `the ${econ.infraSource} figure`} until then.
         </Banner>
@@ -190,8 +200,8 @@ export default function RevenueTab({ agentId }: TabProps) {
 function PeriodStrip({ econ }: { econ: AgentEconomicsDetail }) {
   const p = econ.period
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
-      <span className="font-medium text-gray-700">{fmtMonth(p.month)}</span>
+    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+      <span className="font-medium text-slate-700">{fmtMonth(p.month)}</span>
       <span>· day {p.daysElapsed} of {p.daysInPeriod}</span>
       <span title="Month to date projected to month end, so it compares with the monthly value">· monthly run rate</span>
       <span>· visibility only — nothing here pauses or changes the agent</span>
@@ -281,7 +291,7 @@ function CostBreakdown({ econ }: { econ: AgentEconomicsDetail }) {
     <section className="space-y-2">
       <SectionLabel>Where the money goes</SectionLabel>
       {cost <= 0 ? (
-        <p className="text-xs text-gray-400">No cost recorded this month{econ.tokenCostCents == null ? ' (token cost unknown)' : ''}.</p>
+        <p className="text-xs text-slate-500">No cost recorded this month{econ.tokenCostCents == null ? ' (token cost unknown)' : ''}.</p>
       ) : (
         <div className="space-y-1.5">
           <BarRow label="Cost">
@@ -298,18 +308,18 @@ function CostBreakdown({ econ }: { econ: AgentEconomicsDetail }) {
           )}
         </div>
       )}
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-700">
         {parts.map(p => (
           <span key={p.key} className="inline-flex items-center gap-1.5">
             <Swatch color={p.color} />
-            {p.label} <span className="font-medium text-gray-900">{p.known ? fmtCost(p.cents) : 'unknown'}</span>
-            {cost > 0 && p.known && <span className="text-gray-400">({Math.round((p.cents / cost) * 100)}%)</span>}
+            {p.label} <span className="font-medium text-slate-900">{p.known ? fmtCost(p.cents) : 'unknown'}</span>
+            {cost > 0 && p.known && <span className="text-slate-500">({Math.round((p.cents / cost) * 100)}%)</span>}
             <SourceBadge source={p.source} />
           </span>
         ))}
         {econ.valueDeclared && (
           <span className="inline-flex items-center gap-1.5">
-            <Swatch color={SERIES.value} /> Declared value <span className="font-medium text-gray-900">{fmtCents(econ.valueCents)}</span>
+            <Swatch color={SERIES.value} /> Declared value <span className="font-medium text-slate-900">{fmtCents(econ.valueCents)}</span>
           </span>
         )}
       </div>
@@ -320,7 +330,7 @@ function CostBreakdown({ econ }: { econ: AgentEconomicsDetail }) {
 function BarRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-10 shrink-0 text-[10px] uppercase text-gray-400">{label}</span>
+      <span className="w-10 shrink-0 text-[12px] uppercase text-slate-500">{label}</span>
       <div className="h-3 flex-1 rounded bg-gray-100 overflow-hidden flex gap-[2px]">{children}</div>
     </div>
   )
@@ -340,7 +350,7 @@ function Trend({ econ }: { econ: AgentEconomicsDetail }) {
     <section className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <SectionLabel>Last 6 months</SectionLabel>
-        <div className="flex flex-wrap gap-3 text-[11px] text-gray-500">
+        <div className="flex flex-wrap gap-3 text-[12px] text-slate-600">
           <span className="inline-flex items-center gap-1"><Swatch color={SERIES.token} />Token</span>
           <span className="inline-flex items-center gap-1"><Swatch color={SERIES.infra} />Infra</span>
           <span className="inline-flex items-center gap-1">
@@ -350,7 +360,7 @@ function Trend({ econ }: { econ: AgentEconomicsDetail }) {
         </div>
       </div>
       {!known ? (
-        <p className="text-xs text-gray-400">No monthly history yet.</p>
+        <p className="text-xs text-slate-500">No monthly history yet.</p>
       ) : (
         <>
           <div className="grid grid-cols-6 gap-2 h-28 items-end" onMouseLeave={() => setHover(null)}>
@@ -367,7 +377,7 @@ function Trend({ econ }: { econ: AgentEconomicsDetail }) {
                   aria-label={`${fmtMonth(m.month)}: cost ${fmtCost(m.totalCostCents)}, value ${fmtCents(m.valueCents)}`}
                   className={`relative h-full flex flex-col justify-end items-stretch rounded-sm px-2 ${hover === i ? 'bg-gray-50' : ''}`}
                 >
-                  {m.totalCostCents == null && <span className="text-[10px] text-gray-300 text-center pb-1">no data</span>}
+                  {m.totalCostCents == null && <span className="text-[12px] text-slate-400 text-center pb-1">no data</span>}
                   <div className={`flex flex-col justify-end gap-[2px] ${m.partial ? 'opacity-60' : ''}`} style={{ height: `${tokenH + infraH}%` }}>
                     {tokenH > 0 && <div className="rounded-t" style={{ height: `${(tokenH / (tokenH + infraH)) * 100}%`, background: SERIES.token, minHeight: 2 }} />}
                     {infraH > 0 && <div className={tokenH > 0 ? '' : 'rounded-t'} style={{ height: `${(infraH / (tokenH + infraH)) * 100}%`, background: SERIES.infra, minHeight: 2 }} />}
@@ -379,12 +389,12 @@ function Trend({ econ }: { econ: AgentEconomicsDetail }) {
               )
             })}
           </div>
-          <div className="grid grid-cols-6 gap-2 text-center text-[10px] text-gray-400">
+          <div className="grid grid-cols-6 gap-2 text-center text-[12px] text-slate-500">
             {months.map(m => <span key={m.month}>{fmtMonth(m.month)}{m.partial ? ' *' : ''}</span>)}
           </div>
           {focus && (
-            <p className="text-xs text-gray-600" aria-live="polite">
-              <span className="font-medium text-gray-800">{fmtMonth(focus.month)}{focus.partial ? ' (run rate)' : ''}</span>
+            <p className="text-xs text-slate-700" aria-live="polite">
+              <span className="font-medium text-slate-800">{fmtMonth(focus.month)}{focus.partial ? ' (run rate)' : ''}</span>
               {' '}— token {fmtCost(focus.tokenCostCents)}, infra {fmtCents(focus.infraCostCents)}
               {focus.infraSource ? ` (${focus.infraSource})` : ''}, value {fmtCents(focus.valueCents)}
               {focus.netCents != null && <>, net {fmtSigned(focus.netCents)}</>}
@@ -401,20 +411,20 @@ function Trend({ econ }: { econ: AgentEconomicsDetail }) {
 function TrendTable({ months }: { months: TrendMonth[] }) {
   return (
     <details className="text-xs">
-      <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Table view</summary>
+      <summary className="cursor-pointer text-slate-600 hover:text-slate-700">Table view</summary>
       <div className="overflow-x-auto mt-2">
         <table className="w-full text-left">
-          <thead className="text-[10px] uppercase text-gray-400">
+          <thead className="text-[12px] uppercase text-slate-500">
             <tr>
-              {['Month', 'Token', 'Infra', 'Total', 'Value', 'Net', 'ROI'].map(h => <th key={h} className="py-1 pr-3 font-medium">{h}</th>)}
+              {['Month', 'Token', 'Infra', 'Total', 'Value', 'Net', 'ROI'].map(h => <th key={h} className="py-1 pr-3 font-medium">{h}{h === 'ROI' && <> <InfoTip term="return_on_cost" /></>}</th>)}
             </tr>
           </thead>
-          <tbody className="text-gray-700">
+          <tbody className="text-slate-700">
             {months.map(m => (
               <tr key={m.month} className="border-t border-gray-100">
                 <td className="py-1 pr-3 whitespace-nowrap">{fmtMonth(m.month)}{m.partial ? ' (run rate)' : ''}</td>
                 <td className="py-1 pr-3">{fmtCost(m.tokenCostCents)}</td>
-                <td className="py-1 pr-3 whitespace-nowrap">{fmtCents(m.infraCostCents)}{m.infraSource && <span className="text-gray-400"> · {m.infraSource}</span>}</td>
+                <td className="py-1 pr-3 whitespace-nowrap">{fmtCents(m.infraCostCents)}{m.infraSource && <span className="text-slate-500"> · {m.infraSource}</span>}</td>
                 <td className="py-1 pr-3">{fmtCost(m.totalCostCents)}</td>
                 <td className="py-1 pr-3">{fmtCents(m.valueCents)}</td>
                 <td className="py-1 pr-3">{m.netCents == null ? '—' : fmtSigned(m.netCents)}</td>
@@ -435,24 +445,24 @@ function FlagList({ econ }: { econ: AgentEconomicsDetail }) {
     <section className="space-y-2">
       <SectionLabel>Financial flags</SectionLabel>
       {econ.stage !== 'Production' ? (
-        <p className="text-xs text-gray-400">Financial flags apply to Production agents.</p>
+        <p className="text-xs text-slate-500">Financial flags apply to Production agents.</p>
       ) : econ.financialFlags.length === 0 ? (
-        <p className="text-xs text-gray-400">No financial flags.</p>
+        <p className="text-xs text-slate-500">No financial flags.</p>
       ) : (
         <ul className="space-y-1.5">
           {econ.financialFlags.map(f => (
             <li key={f.rule_id} className="rounded-lg border border-gray-100 px-3 py-2">
               <div className="flex flex-wrap items-center gap-2">
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${SEVERITY_PILL[f.severity] || SEVERITY_PILL.LOW}`}>⚠ {f.severity}</span>
-                <span className="text-sm font-medium text-gray-800">{f.title}</span>
+                <span className={`text-[12px] px-1.5 py-0.5 rounded-full ring-1 ${SEVERITY_PILL[f.severity] || SEVERITY_PILL.LOW}`}>⚠ {f.severity}</span>
+                <span className="text-sm font-medium text-slate-800">{f.title}</span>
                 {f.source === 'seed' && <SourceBadge source="seed" />}
               </div>
-              <p className="text-xs text-gray-500 mt-1">{f.description}</p>
+              <p className="text-xs text-slate-600 mt-1">{f.description}</p>
             </li>
           ))}
         </ul>
       )}
-      <p className="text-[11px] text-gray-400">Flags are for review only; the registry never stops, pauses or throttles an agent.</p>
+      <p className="text-[12px] text-slate-500">Flags are for review only; the registry never stops, pauses or throttles an agent.</p>
     </section>
   )
 }
@@ -461,26 +471,26 @@ function OutcomePanel({ econ, outcome }: { econ: AgentEconomicsDetail; outcome: 
   const rating = outcome ? RATING[outcome.efficiency_rating] : undefined
   return (
     <section className="space-y-2">
-      <SectionLabel>Cost per $1 of declared value</SectionLabel>
+      <SectionLabel tip="declared_value">Cost per $1 of declared value</SectionLabel>
       {!outcome ? (
-        <p className="text-xs text-gray-400">Unavailable.</p>
+        <p className="text-xs text-slate-500">Unavailable.</p>
       ) : outcome.cost_per_outcome == null ? (
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-slate-500">
           {outcome.efficiency_rating === 'not_declared'
             ? 'Declare a monthly business value to compute this.'
             : 'Token cost is unknown, so the cost per outcome would be understated.'}
         </p>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-base font-bold text-gray-900">${outcome.cost_per_outcome.toFixed(4)}</span>
-          {rating && <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${rating.className}`}>{rating.label}</span>}
-          <span className="text-xs text-gray-500">
+          <span className="text-base font-bold text-slate-900">${outcome.cost_per_outcome.toFixed(4)}</span>
+          {rating && <span className={`text-[12px] px-1.5 py-0.5 rounded-full ring-1 ${rating.className}`}>{rating.label}</span>}
+          <span className="text-xs text-slate-600">
             {fmtDollarsExact(outcome.total_cost)} per month for {fmtCents(econ.valueCents)} of value
             {rating && <> · {rating.text}</>}
           </span>
         </div>
       )}
-      <p className="text-[11px] text-gray-400">
+      <p className="text-[12px] text-slate-500">
         Bands are an org convention, not an industry standard (McKinsey reports about $3.70 of value per $1 spent on gen AI on average).
       </p>
     </section>
@@ -508,16 +518,16 @@ function InfraPanel({ agentId, econ, onChanged }: { agentId: string; econ: Agent
   return (
     <section className="rounded-lg border border-gray-100 p-4 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-gray-900">Hosting &amp; infrastructure</h3>
-        <span className="text-[11px] text-gray-400">Used: metered (Azure) › declared by owner › stage estimate</span>
+        <h3 className="text-sm font-semibold text-slate-900">Hosting &amp; infrastructure</h3>
+        <span className="text-[12px] text-slate-500">Used: metered (Azure) › declared by owner › stage estimate</span>
       </div>
-      <p className="text-xs text-gray-600 flex flex-wrap items-center gap-1.5">
-        This month: <span className="font-semibold text-gray-900">{fmtCents(econ.infraCostCents)}/mo</span>
+      <p className="text-xs text-slate-700 flex flex-wrap items-center gap-1.5">
+        This month: <span className="font-semibold text-slate-900">{fmtCents(econ.infraCostCents)}/mo</span>
         <SourceBadge source={econ.infraSource} />
         {econ.infraSource === 'metered' && econ.infra.meteredThrough && (
-          <span className="text-gray-400">({fmtCents(econ.infra.meteredMonthToDateCents)} through {econ.infra.meteredThrough})</span>
+          <span className="text-slate-500">({fmtCents(econ.infra.meteredMonthToDateCents)} through {econ.infra.meteredThrough})</span>
         )}
-        {econ.infraSource === 'estimate' && <span className="text-gray-400">flat {econ.stage} estimate — declare or meter the real cost</span>}
+        {econ.infraSource === 'estimate' && <span className="text-slate-500">flat {econ.stage} estimate — declare or meter the real cost</span>}
       </p>
       <CollectorStatus agentId={agentId} status={status} error={statusError} onCollected={() => { loadStatus(); onChanged() }} />
       {econ.infra.byResource.length > 0 && <MeteredResources econ={econ} />}
@@ -538,18 +548,18 @@ function CollectorStatus({ agentId, status, error, onCollected }: {
   const [runError, setRunError] = useState<string | null>(null)
 
   if (error) return <Banner tone="rose">{error}</Banner>
-  if (!status) return <p className="text-xs text-gray-400">Loading collector status…</p>
+  if (!status) return <p className="text-xs text-slate-500">Loading collector status…</p>
 
   if (!status.configured) {
     return (
       <Banner tone="gray">
-        <p><span className="font-semibold text-gray-700">Metered cost (Azure Cost Management): not configured.</span> Until it is,
+        <p><span className="font-semibold text-slate-700">Metered cost (Azure Cost Management): not configured.</span> Until it is,
           infra cost is the owner's declared figure, else the stage estimate.</p>
         <ol className="list-decimal ml-4 mt-1.5 space-y-0.5 break-words">
           {status.setup.map(s => <li key={s}>{s}</li>)}
         </ol>
         {status.missing.length > 0 && (
-          <p className="mt-1.5 break-all">Missing: {status.missing.map(m => <code key={m} className="mr-1.5 font-mono text-gray-700">{m}</code>)}</p>
+          <p className="mt-1.5 break-all">Missing: {status.missing.map(m => <code key={m} className="mr-1.5 font-mono text-slate-700">{m}</code>)}</p>
         )}
       </Banner>
     )
@@ -572,10 +582,10 @@ function CollectorStatus({ agentId, status, error, onCollected }: {
   const last = result || status.lastRun
   return (
     <div className="space-y-1.5">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700">
         <span>
-          Azure Cost Management · scope <span className="font-mono text-gray-700">{status.scope}</span> · tag{' '}
-          <span className="font-mono text-gray-700">{status.tagKey}</span>
+          Azure Cost Management · scope <span className="font-mono text-slate-700">{status.scope}</span> · tag{' '}
+          <span className="font-mono text-slate-700">{status.tagKey}</span>
         </span>
         <button onClick={collect} disabled={running} className="btn-secondary btn-sm"
           title="Read the last 7 days of actual cost for this agent (admin)">
@@ -584,14 +594,14 @@ function CollectorStatus({ agentId, status, error, onCollected }: {
       </div>
       {runError && <Banner tone="rose">{runError}</Banner>}
       {last ? (
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-slate-600">
           Last run {fmtWhen(last.finishedAt || last.startedAt)}: {RUN_STATUS_TEXT[last.status] || last.status}
           {typeof last.summary?.reason === 'string' && <> — {last.summary.reason}</>}
           {typeof last.summary?.unallocated_cents === 'number' && last.summary.unallocated_cents > 0 &&
             <> · {fmtCents(last.summary.unallocated_cents)} unallocated</>}
         </p>
       ) : (
-        <p className="text-xs text-gray-400">Not collected yet. The daily job reads cost once a day; Azure data lags 8–72 hours.</p>
+        <p className="text-xs text-slate-500">Not collected yet. The daily job reads cost once a day; Azure data lags 8–72 hours.</p>
       )}
     </div>
   )
@@ -604,9 +614,9 @@ function MeteredResources({ econ }: { econ: AgentEconomicsDetail }) {
       <ul className="divide-y divide-gray-100 text-xs">
         {econ.infra.byResource.map(r => (
           <li key={r.resourceId} className="flex items-center justify-between gap-3 py-1">
-            <span className="min-w-0 truncate font-mono text-gray-600" title={r.resourceId}>{r.resourceId.split('/').slice(-1)[0]}</span>
-            <span className="shrink-0 text-gray-400">{r.serviceName || ''} · {r.allocation === 'link' ? 'linked' : 'tagged'}</span>
-            <span className="shrink-0 font-medium text-gray-800">{fmtCents(r.cents)}</span>
+            <span className="min-w-0 truncate font-mono text-slate-700" title={r.resourceId}>{r.resourceId.split('/').slice(-1)[0]}</span>
+            <span className="shrink-0 text-slate-500">{r.serviceName || ''} · {r.allocation === 'link' ? 'linked' : 'tagged'}</span>
+            <span className="shrink-0 font-medium text-slate-800">{fmtCents(r.cents)}</span>
           </li>
         ))}
       </ul>
@@ -685,54 +695,54 @@ function DeclaredInfraForm({ agentId, stage, estimateCents, onSaved }: {
     setComponents(cs => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)))
 
   if (loadError) return <Banner tone="rose">{loadError}</Banner>
-  if (!profile) return <p className="text-xs text-gray-400">Loading hosting profile…</p>
+  if (!profile) return <p className="text-xs text-slate-500">Loading hosting profile…</p>
 
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <FieldLabel>Declared by owner</FieldLabel>
-        <span className="text-[11px] text-gray-400">
+        <span className="text-[12px] text-slate-500">
           {profile.declared
             ? `${fmtCents(profile.monthlyCostCents)}/mo declared${profile.updatedBy ? ` by ${profile.updatedBy}` : ''}`
             : `Not declared — ${stage} estimate ${fmtCents(estimateCents)}/mo applies`}
         </span>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-        <label className="text-xs text-gray-500 space-y-1">
+        <label className="text-xs text-slate-600 space-y-1">
           <span>Platform</span>
           <input className="input w-full" value={platform} onChange={e => setPlatform(e.target.value)} placeholder="Azure Container Apps" maxLength={100} />
         </label>
-        <label className="text-xs text-gray-500 space-y-1">
+        <label className="text-xs text-slate-600 space-y-1">
           <span>Resource group</span>
           <input className="input w-full" value={resourceGroup} onChange={e => setResourceGroup(e.target.value)} placeholder="rg-onboarding" maxLength={255} />
         </label>
-        <label className="text-xs text-gray-500 space-y-1">
+        <label className="text-xs text-slate-600 space-y-1">
           <span>Monthly cost ($)</span>
           <input className="input w-full" type="number" min={0} step="0.01" value={monthly} onChange={e => setMonthly(e.target.value)} placeholder="blank = not declared" />
         </label>
-        <label className="text-xs text-gray-500 space-y-1">
+        <label className="text-xs text-slate-600 space-y-1">
           <span>Effective from</span>
           <input className="input w-full" type="date" value={effectiveFrom} onChange={e => setEffectiveFrom(e.target.value)} />
         </label>
       </div>
       <div className="space-y-1">
-        <span className="text-xs text-gray-500">Components</span>
-        {components.length === 0 && <p className="text-[11px] text-gray-400">None listed.</p>}
+        <span className="text-xs text-slate-600">Components</span>
+        {components.length === 0 && <p className="text-[12px] text-slate-500">None listed.</p>}
         {components.map((c, i) => (
           <div key={i} className="flex flex-wrap items-center gap-2">
             <input className="input flex-1 min-w-[10rem]" value={c.name} onChange={e => setComponent(i, { name: e.target.value })} placeholder="Component (e.g. Cosmos DB)" aria-label="Component name" maxLength={200} />
             <input className="input w-28" type="number" min={0} step="0.01" value={c.dollars} onChange={e => setComponent(i, { dollars: e.target.value })} placeholder="$" aria-label="Component cost in dollars" />
-            <label className="text-xs text-gray-500 inline-flex items-center gap-1">
+            <label className="text-xs text-slate-600 inline-flex items-center gap-1">
               <input type="checkbox" checked={!c.recurring} onChange={e => setComponent(i, { recurring: !e.target.checked })} /> one-time
             </label>
-            <button type="button" className="text-xs text-gray-400 hover:text-rose-600" onClick={() => setComponents(cs => cs.filter((_, j) => j !== i))}>Remove</button>
+            <button type="button" className="text-xs text-slate-500 hover:text-rose-600" onClick={() => setComponents(cs => cs.filter((_, j) => j !== i))}>Remove</button>
           </div>
         ))}
-        <button type="button" className="text-xs text-teal-700 hover:text-teal-800" onClick={() => setComponents(cs => [...cs, { name: '', dollars: '', recurring: true }])}>+ Add component</button>
+        <button type="button" className="text-xs text-zen-700 hover:text-zen-800" onClick={() => setComponents(cs => [...cs, { name: '', dollars: '', recurring: true }])}>+ Add component</button>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button onClick={save} disabled={saving} className="btn-primary btn-sm">{saving ? 'Saving…' : 'Save hosting cost'}</button>
-        <span className="text-[11px] text-gray-400">One-time components give the payback period; recurring ones are informational — the monthly cost is what counts.</span>
+        <span className="text-[12px] text-slate-500">One-time components give the payback period; recurring ones are informational — the monthly cost is what counts.</span>
       </div>
       {message && <Banner tone={message.tone}>{message.text}</Banner>}
     </div>
@@ -797,24 +807,24 @@ function ResourceLinks({ agentId, tagKey }: { agentId: string; tagKey: string })
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <FieldLabel>Linked Azure resources</FieldLabel>
-        <span className="text-[11px] text-gray-400">
+        <span className="text-[12px] text-slate-500">
           Resources tagged <span className="font-mono">{tagKey}={agentId}</span> are found without a link; link shared ones with a share %.
         </span>
       </div>
       {loadError && <Banner tone="rose">{loadError}</Banner>}
-      {!links && !loadError && <p className="text-xs text-gray-400">Loading…</p>}
-      {links && links.length === 0 && <p className="text-xs text-gray-400">No linked resources.</p>}
+      {!links && !loadError && <p className="text-xs text-slate-500">Loading…</p>}
+      {links && links.length === 0 && <p className="text-xs text-slate-500">No linked resources.</p>}
       {links && links.length > 0 && (
         <ul className="divide-y divide-gray-100 text-xs">
           {links.map(l => (
             <li key={l.id} className="flex flex-wrap items-center gap-2 py-1.5">
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full ring-1 bg-gray-50 text-gray-600 ring-gray-200">{LINK_KIND[l.kind] || l.kind}</span>
-              <span className="min-w-0 flex-1 truncate font-mono text-gray-700" title={l.resourceId}>{l.resourceId}</span>
-              <span className="text-gray-800 font-medium">{l.sharePct}%</span>
+              <span className="text-[12px] px-1.5 py-0.5 rounded-full ring-1 bg-gray-50 text-slate-700 ring-gray-200">{LINK_KIND[l.kind] || l.kind}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-slate-700" title={l.resourceId}>{l.resourceId}</span>
+              <span className="text-slate-800 font-medium">{l.sharePct}%</span>
               {l.totalClaimedPct > 100 && (
                 <span className="text-amber-700" title="Shares are scaled down so no more than the real cost is allocated">⚠ {l.totalClaimedPct}% claimed in total</span>
               )}
-              <button type="button" disabled={busy} className="text-gray-400 hover:text-rose-600" onClick={() => remove(l)}>Remove</button>
+              <button type="button" disabled={busy} className="text-slate-500 hover:text-rose-600" onClick={() => remove(l)}>Remove</button>
             </li>
           ))}
         </ul>
@@ -823,7 +833,7 @@ function ResourceLinks({ agentId, tagKey }: { agentId: string; tagKey: string })
         <input className="input flex-1 min-w-[16rem] font-mono text-xs" value={resourceId} onChange={e => setResourceId(e.target.value)}
           placeholder="/subscriptions/<id>/resourceGroups/<rg>[/providers/…]" aria-label="Azure resource id" maxLength={500} />
         <input className="input w-20" type="number" min={1} max={100} step={1} value={share} onChange={e => setShare(e.target.value)} aria-label="Share percent" />
-        <span className="text-xs text-gray-400">%</span>
+        <span className="text-xs text-slate-500">%</span>
         <button onClick={add} disabled={busy || !resourceId.trim()} className="btn-secondary btn-sm">Link resource</button>
       </div>
       {message && <Banner tone={message.tone}>{message.text}</Banner>}

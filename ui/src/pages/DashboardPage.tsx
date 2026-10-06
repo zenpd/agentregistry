@@ -32,8 +32,8 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900">Welcome to Agent Registry</h2>
-        <p className="text-gray-500 mt-1">
+        <h2 className="text-2xl font-bold text-slate-900">Welcome to Agent Registry</h2>
+        <p className="text-slate-600 mt-1">
           Your AI portfolio is live. Navigate the sidebar to explore agents, governance, tokenomics, and more.
         </p>
       </div>
@@ -42,16 +42,16 @@ export default function DashboardPage() {
         {stats.map(({ label, value, icon: Icon }) => (
           <div key={label} className="card p-5">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-500">{label}</span>
+              <span className="text-sm font-medium text-slate-600">{label}</span>
               <Icon size={18} className="text-zen-500" />
             </div>
-            <div className="text-2xl font-bold text-gray-900 mt-2">{value}</div>
+            <div className="text-2xl font-bold text-slate-900 mt-2">{value}</div>
           </div>
         ))}
       </div>
 
       <div className="card p-6">
-        <h3 className="font-semibold text-gray-900 mb-2">Quick Links</h3>
+        <h3 className="font-semibold text-slate-900 mb-2">Quick Links</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
           {[
             { label: 'AI Registry', to: '/agents' },
@@ -63,7 +63,7 @@ export default function DashboardPage() {
             { label: 'Agent Playground', to: '/playground' },
             { label: 'Settings', to: '/settings' },
           ].map(l => (
-            <a key={l.to} href={l.to} className="text-sm text-teal-600 hover:text-teal-700 border border-gray-200 rounded px-3 py-2 hover:bg-gray-50">
+            <a key={l.to} href={l.to} className="text-sm text-zen-600 hover:text-zen-700 border border-gray-200 rounded px-3 py-2 hover:bg-gray-50">
               → {l.label}
             </a>
           ))}

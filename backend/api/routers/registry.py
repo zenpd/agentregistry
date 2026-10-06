@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+from urllib.parse import urlparse
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List
 
@@ -19,6 +20,7 @@ from db.models import (
     Discovery, AgentTokenUsage, ModelTokenPrice, AgentBudget, WasteFinding,
     CostAnomaly, User, AuditLog, AgentIdentity, AgentMetric, PhoenixConfig, AgentRisk, AgentAccessRequest,
     ModelRouting, AgentInfraProfile, AgentResourceLink, AgentInfraCost, AgentContextVersion, AgentContextInsight,
+    Insight, InsightFeedback, ContentAuditOptIn, AgentFieldUpdate, AgentRecordCheck,
 )
 from api.auth import (
     hash_password, verify_password, create_access_token,
@@ -34,6 +36,7 @@ from shared.config import get_settings
 _AGENT_OWNED_TABLES = (
     AgentAccessRequest, GovernanceException, WasteFinding, CostAnomaly, AgentRisk, AgentMetric, ModelRouting,
     AgentInfraProfile, AgentResourceLink, AgentInfraCost, AgentContextVersion, AgentContextInsight,
+    Insight, ContentAuditOptIn, AgentFieldUpdate, AgentRecordCheck,
 )
 
 # ── Routers ──────────────────────────────────────────────────────────────────
@@ -83,7 +86,7 @@ class AgentCreate(BaseModel):
     api_endpoint: str = ""
     sla: str = ""
     tags: List[str] = []
-    model_name: str = "GPT-5"
+    model_name: str = ""          # left empty unless known: the registry fills it in from real usage
     risk_level: str = "LOW"
     phoenix_project: str = ""
     # "" means "use the common org-wide endpoint" (PhoenixConfig / Settings
@@ -503,6 +506,8 @@ async def delete_agent(agent_id: str, user=Depends(require_delete)):
         # Rows that reference the agent without an ORM cascade. Left behind
         # they would keep counting in portfolio totals (the risk summary reads
         # agent_risks directly), and on Postgres the FKs would refuse the delete.
+        await db.execute(delete(InsightFeedback).where(
+            InsightFeedback.insight_id.in_(select(Insight.id).where(Insight.agent_id == agent_id))))
         for model in _AGENT_OWNED_TABLES:
             await db.execute(delete(model).where(model.agent_id == agent_id))
         # A discovery is a record of detection and outlives the agent.
@@ -1230,9 +1235,27 @@ async def agent_graph(agent_id: str, _=Depends(require_read)):
 
 
 class PhoenixConfigUpdate(BaseModel):
-    endpoint: str = ""
-    api_key: str = ""
+    endpoint: str = Field("", max_length=500)
+    api_key: str = Field("", max_length=255)
     enabled: bool = True
+
+    @validator("endpoint")
+    def _endpoint(cls, v):
+        v = (v or "").strip()
+        if v:
+            parsed = urlparse(v)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+                raise ValueError("The Phoenix address must be a web address such as https://phoenix.example.com, without a user name or password")
+        return v
+    # None leaves the saved template as it is; "" clears it.
+    app_url_template: Optional[str] = Field(None, max_length=500)
+
+    @validator("app_url_template")
+    def _template(cls, v):
+        v = (v or "").strip() if v is not None else None
+        if v and (not v.lower().startswith(("http://", "https://")) or "{project}" not in v):
+            raise ValueError("The address pattern must start with https:// and contain {project}")
+        return v
 
 
 @phoenix_router.get("/config")
@@ -1247,22 +1270,35 @@ async def get_phoenix_config(_=Depends(require_read)):
         result = await db.execute(select(PhoenixConfig).where(PhoenixConfig.org_id == "org-default"))
         row = result.scalar_one_or_none()
         if row:
-            return {"endpoint": row.endpoint or "", "apiKeySet": bool(row.api_key), "enabled": row.enabled, "source": "saved"}
+            return {"endpoint": row.endpoint or "", "apiKeySet": bool(row.api_key), "enabled": row.enabled,
+                    "source": "saved", "appUrlTemplate": row.app_url_template or ""}
     return {
         "endpoint": _phoenix_rest_base_url_from_settings(settings) or "",
         "apiKeySet": bool(settings.arize_phoenix_api_key),
         "enabled": True,
         "source": "env_default",
+        "appUrlTemplate": "",
     }
 
 
 @phoenix_router.put("/config")
-async def update_phoenix_config(update: PhoenixConfigUpdate, _=Depends(require_admin)):
+async def update_phoenix_config(update: PhoenixConfigUpdate, user=Depends(require_admin)):
     """Upserts the one org-wide config row. Admin-only — this is the shared
     default every onboarding form falls back to, not a per-user preference."""
     async with get_db_session() as db:
         result = await db.execute(select(PhoenixConfig).where(PhoenixConfig.org_id == "org-default"))
         row = result.scalar_one_or_none()
+        # What discovery found belongs to the Phoenix it was read from: when the
+        # endpoint (or whether it is used) changes, that list is cleared so the
+        # Discovered page never shows another server's projects. Dismissals are kept.
+        before = ((row.endpoint or "").strip(), bool(row.enabled)) if row else None
+        repointed = before is not None and before[0] != update.endpoint
+        if before is not None and before != (update.endpoint, bool(update.enabled)):
+            from db.models import PhoenixProject
+            await db.execute(delete(PhoenixProject).where(
+                PhoenixProject.org_id == "org-default", PhoenixProject.state != "dismissed"))
+            # Dismissals stay, but they were made against the old server: nothing is "read" until a new scan.
+            await db.execute(sql_update(PhoenixProject).where(PhoenixProject.org_id == "org-default").values(scanned_at=None))
         if row:
             row.endpoint = update.endpoint or None
             # An empty api_key in the request means "leave it as-is" (the GET
@@ -1270,12 +1306,24 @@ async def update_phoenix_config(update: PhoenixConfigUpdate, _=Depends(require_a
             # — only overwrite when a real value is actually supplied.
             if update.api_key:
                 row.api_key = update.api_key
+            elif repointed:
+                # A saved key is never sent to a different address: it must be entered again.
+                row.api_key = None
             row.enabled = update.enabled
+            if update.app_url_template is not None:
+                row.app_url_template = update.app_url_template or None
         else:
             db.add(PhoenixConfig(
                 id=secrets.token_hex(8), org_id="org-default",
                 endpoint=update.endpoint or None, api_key=update.api_key or None, enabled=update.enabled,
+                app_url_template=update.app_url_template or None,
             ))
+        db.add(AuditLog(
+            org_id="org-default", actor=user.get("user_id", "unknown"), action="phoenix_config.update",
+            entity_type="phoenix_config", entity_id="org-default",
+            changes={"endpoint": update.endpoint, "enabled": update.enabled, "keyChanged": bool(update.api_key),
+                     "keyCleared": bool(row and repointed and not update.api_key),
+                     "appUrlTemplate": update.app_url_template}))
         return {"status": "saved"}
 
 

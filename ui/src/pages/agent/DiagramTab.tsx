@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
+import InfoTip from '../../components/InfoTip'
 import type { ReconstructedNode, ReconstructedEdge } from '../../services/api'
 import {
   getDiagramGraph, getDependencies, adoptDependencies, linkPhoenixProject, ADOPT_TARGET,
   type DiagramGraph, type DependenciesResponse, type DependencyComparison, type DeclaredDeps,
   type ObservedOnlyDep, type AdoptResponse, type BlastRadius, type UpstreamDep, type SharedResource,
 } from '../../services/ops/diagram'
-import { Loading, FieldLabel, SectionLabel, SourceBadge, MiniStat, STAGE_PILL, fmtDollars, fmtNumber, type TabProps } from './shared'
+import { Loading, FieldLabel, SectionLabel, SourceBadge, MiniStat, STAGE_PILL, fmtDollars, fmtNumber, type TabProps, useReloadOn } from './shared'
 import TraceNetworkGraph, { styleFor } from '../../components/TraceNetworkGraph'
 import TrajectoryDiagram from '../../components/TrajectoryDiagram'
 import PhoenixProjectPicker from '../../components/PhoenixProjectPicker'
@@ -33,7 +34,7 @@ const FIELD_LABEL: Record<string, string> = {
   mcp_servers: 'MCP servers', calls: 'Calls (agents)', model_name: 'Model',
 }
 
-const NEUTRAL_CHIP = 'bg-gray-50 text-gray-600 ring-gray-200'
+const NEUTRAL_CHIP = 'bg-gray-50 text-slate-700 ring-gray-200'
 
 type Settled<T> = { data: T; error: null } | { data: null; error: string }
 
@@ -69,7 +70,7 @@ const obsKey = (o: ObservedOnlyDep) => `${o.kind}:${o.name}`
 // not linked, Phoenix unreachable, linked but zero traces yet, and a real
 // diagram. Declared dependencies and blast radius come from the registry and
 // show in every state. Nothing here changes the agent without a person confirming.
-export default function DiagramTab({ agent, agentId, onChanged }: TabProps) {
+export default function DiagramTab({ agent, agentId, onChanged, dataVersion }: TabProps) {
   const [graph, setGraph] = useState<Settled<DiagramGraph> | null>(null)
   const [deps, setDeps] = useState<Settled<DependenciesResponse> | null>(null)
   const [loading, setLoading] = useState(true)
@@ -99,6 +100,7 @@ export default function DiagramTab({ agent, agentId, onChanged }: TabProps) {
   }, [agentId])
 
   useEffect(() => { setLoading(true); load() }, [load])
+  useReloadOn(dataVersion, load)
 
   async function linkProject() {
     if (!linkValue.trim()) return
@@ -122,7 +124,7 @@ export default function DiagramTab({ agent, agentId, onChanged }: TabProps) {
     return (
       <div className="py-6 text-center">
         <p className="text-sm text-rose-600">Couldn't load this agent's diagram.</p>
-        <p className="text-xs text-gray-400 mt-1 break-all">{graph.error}</p>
+        <p className="text-xs text-slate-500 mt-1 break-all">{graph.error}</p>
         <button onClick={() => { setLoading(true); load() }} className="btn-secondary btn-sm mt-3">Retry</button>
       </div>
     )
@@ -138,7 +140,7 @@ export default function DiagramTab({ agent, agentId, onChanged }: TabProps) {
       <section>
         {status === 'not_linked' && (
           <div className="py-2">
-            <p className="text-sm text-gray-500 mb-3">This agent isn't linked to a Phoenix project yet — no trace data. Link one to reconstruct its real dependency diagram from actual traces.</p>
+            <p className="text-sm text-slate-600 mb-3">This agent isn't linked to a Phoenix project yet — no trace data. Link one to reconstruct its real dependency diagram from actual traces.</p>
             <div className="flex gap-2 items-start">
               <div className="flex-1">
                 <PhoenixProjectPicker id="link-phoenix-projects" value={linkValue} onChange={setLinkValue} />
@@ -153,17 +155,17 @@ export default function DiagramTab({ agent, agentId, onChanged }: TabProps) {
 
         {status === 'phoenix_unreachable' && (
           <div className="py-4 text-center">
-            <p className="text-sm text-gray-500">Linked to <span className="font-mono text-gray-700">{project}</span>, but Phoenix couldn't be reached.</p>
-            {(g?.reason || d?.reason) && <p className="text-xs text-gray-400 mt-1 break-all">{g?.reason || d?.reason}</p>}
+            <p className="text-sm text-slate-600">Linked to <span className="font-mono text-slate-700">{project}</span>, but Phoenix couldn't be reached.</p>
+            {(g?.reason || d?.reason) && <p className="text-xs text-slate-500 mt-1 break-all">{g?.reason || d?.reason}</p>}
             <button onClick={() => load()} disabled={refreshing} className="btn-secondary btn-sm mt-3">{refreshing ? 'Retrying…' : 'Retry'}</button>
           </div>
         )}
 
         {status === 'no_traces_yet' && (
           <div className="py-4 text-center">
-            <p className="text-sm text-gray-500">Linked to <span className="font-mono text-gray-700">{project}</span> — no traces seen yet.</p>
-            {(g?.reason || d?.reason) && <p className="text-xs text-gray-400 mt-1">{g?.reason || d?.reason}.</p>}
-            <p className="text-xs text-gray-400 mt-1">Once this app runs and exports real traces, its diagram reconstructs here. Checked {fmtWhen(g?.cachedAt ?? d?.cachedAt)}.</p>
+            <p className="text-sm text-slate-600">Linked to <span className="font-mono text-slate-700">{project}</span> — no traces seen yet.</p>
+            {(g?.reason || d?.reason) && <p className="text-xs text-slate-500 mt-1">{g?.reason || d?.reason}.</p>}
+            <p className="text-xs text-slate-500 mt-1">Once this app runs and exports real traces, its diagram reconstructs here. Checked {fmtWhen(g?.cachedAt ?? d?.cachedAt)}.</p>
             <button onClick={() => load(true)} disabled={refreshing} className="btn-secondary btn-sm mt-3">{refreshing ? 'Refreshing…' : 'Refresh'}</button>
           </div>
         )}
@@ -182,7 +184,7 @@ export default function DiagramTab({ agent, agentId, onChanged }: TabProps) {
       )}
 
       <div className="text-right">
-        <Link to="/dependencies" className="text-xs text-teal-600 hover:text-teal-700">Open full dependency graph →</Link>
+        <Link to="/dependencies" className="text-xs text-zen-600 hover:text-zen-700">Open full dependency graph →</Link>
       </div>
     </div>
   )
@@ -208,16 +210,16 @@ function TraceGraph({ graph, refreshing, onRefresh }: { graph: DiagramGraph; ref
     <div>
       <div className="flex items-center justify-between gap-3 mb-2">
         <p
-          className="text-xs text-gray-500 truncate cursor-help"
+          className="text-xs text-slate-600 truncate cursor-help"
           title={`${graph.truncated ? `Newest ${fmtNumber(graph.sampleLimit)} spans` : 'Full sample'}, window ${fmtWhen(graph.sampleWindow?.from)} → ${fmtWhen(graph.sampleWindow?.to)} · cached ${fmtWhen(graph.cachedAt)}${graph.fromCache ? ' (served from cache)' : ''}`}
         >
-          Reconstructed from <b className="text-gray-700">{fmtNumber(graph.spanCount)}</b> span(s) across{' '}
-          <b className="text-gray-700">{fmtNumber(graph.traceCount)}</b> trace(s) — project <span className="font-mono">{graph.project}</span>
-          <span className="text-gray-400 ml-1" title="Hover for sample window and cache details">ⓘ</span>
+          Reconstructed from <b className="text-slate-700">{fmtNumber(graph.spanCount)}</b> span(s) across{' '}
+          <b className="text-slate-700">{fmtNumber(graph.traceCount)}</b> trace(s) — project <span className="font-mono">{graph.project}</span>
+          <span className="text-slate-500 ml-1" title="Hover for sample window and cache details">ⓘ</span>
         </p>
         <div className="flex items-center gap-2 flex-shrink-0">
           <SourceBadge source="phoenix" />
-          <button onClick={onRefresh} disabled={refreshing} className="text-xs text-teal-600 hover:text-teal-700 disabled:opacity-50">
+          <button onClick={onRefresh} disabled={refreshing} className="text-xs text-zen-600 hover:text-zen-700 disabled:opacity-50">
             {refreshing ? 'Refreshing…' : '↻ Refresh'}
           </button>
         </div>
@@ -229,13 +231,26 @@ function TraceGraph({ graph, refreshing, onRefresh }: { graph: DiagramGraph; ref
         </p>
       )}
 
+      {graph.mode === 'operations' && (
+        <p className="text-xs text-sky-800 bg-sky-50 ring-1 ring-sky-200 rounded-lg px-3 py-2 mb-2" data-testid="operations-note">
+          This app sends plain trace spans, without agent, tool or knowledge-base types, so the diagram shows the operations named in its traces.
+          For its agent steps, tools and calls, add OpenInference tracing to the app.
+        </p>
+      )}
+      {graph.nodes.length === 0 && graph.spanCount > 0 && (
+        <p className="text-xs text-sky-800 bg-sky-50 ring-1 ring-sky-200 rounded-lg px-3 py-2 mb-2" data-testid="no-steps-note">
+          The {fmtNumber(graph.spanCount)} span(s) in this sample are model calls or carry no step name, so there is nothing to draw yet.
+          Usage and cost still come from them (Tokenomics tab).
+        </p>
+      )}
+
       <div className="flex gap-1 border-b border-gray-100 mb-3">
         {GRAPH_VIEWS.map(v => (
           <button
             key={v}
             onClick={() => setView(v)}
             className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors ${
-              view === v ? 'border-teal-600 text-teal-700' : 'border-transparent text-gray-500 hover:text-gray-700'
+              view === v ? 'border-zen-600 text-zen-700' : 'border-transparent text-slate-600 hover:text-slate-700'
             }`}
           >
             {GRAPH_VIEW_LABEL[v]}
@@ -257,13 +272,13 @@ function TrajectoryView({ graph }: { graph: DiagramGraph }) {
       <div className="rounded-xl border border-gray-100 bg-gray-900/95 overflow-hidden">
         <TrajectoryDiagram nodes={graph.nodes} edges={graph.edges} height={440} selectedId={selectedId} onSelect={setSelectedId} />
       </div>
-      <p className="text-[10px] text-gray-400 mt-1">left → right is call order, top → bottom is step / tool / resource / check · solid line = calls (real nesting), dashed = sequence (ran next, recovered from timing) · scroll to zoom, drag canvas to pan, drag a node to nudge it (it springs back) · click "?" for the legend</p>
+      <p className="text-[12px] text-slate-500 mt-1">left → right is call order, top → bottom is step / tool / resource / check · solid line = calls (real nesting), dashed = sequence (ran next, recovered from timing) · scroll to zoom, drag canvas to pan, drag a node to nudge it (it springs back) · click "?" for the legend</p>
       {selected && (
         <div className={`mt-2 text-xs rounded-lg ring-1 px-3 py-2 ${nodeTone(selected)}`}>
           <span className="font-medium">{selected.name}</span>
-          <span className="text-gray-400"> · {selected.kind} · ×{selected.count}{selected.errorCount > 0 ? ` · ${selected.errorCount} err` : ''}
+          <span className="text-slate-500"> · {selected.kind} · ×{selected.count}{selected.errorCount > 0 ? ` · ${selected.errorCount} err` : ''}
             {selected.avgLatencyMs != null ? ` · ${Math.round(selected.avgLatencyMs)}ms avg` : ''}</span>
-          <button onClick={() => setSelectedId(null)} className="ml-2 text-teal-700 hover:text-teal-800">clear</button>
+          <button onClick={() => setSelectedId(null)} className="ml-2 text-zen-700 hover:text-zen-800">clear</button>
         </div>
       )}
     </div>
@@ -344,8 +359,8 @@ function ConnectedGraphView({ graph }: { graph: DiagramGraph }) {
           ['Errors', errorCount],
         ] as [string, number][]).map(([label, value]) => (
           <div key={label} className="rounded-lg border bg-white p-2 text-center">
-            <div className="text-lg font-bold text-gray-800">{value}</div>
-            <div className="text-[10px] uppercase text-gray-500">{label}</div>
+            <div className="text-lg font-bold text-slate-800">{value}</div>
+            <div className="text-[12px] uppercase text-slate-600">{label}</div>
           </div>
         ))}
       </div>
@@ -373,16 +388,16 @@ function ConnectedGraphView({ graph }: { graph: DiagramGraph }) {
         })}
         {legend.length > 0 && (
           <>
-            <button onClick={() => setHiddenKinds(new Set())} className="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">
+            <button onClick={() => setHiddenKinds(new Set())} className="rounded-full border border-gray-200 px-3 py-1 text-xs text-slate-700 hover:bg-gray-50">
               Show all
             </button>
-            <button onClick={() => setHiddenKinds(new Set(legend.map(i => i.kind)))} className="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-gray-50">
+            <button onClick={() => setHiddenKinds(new Set(legend.map(i => i.kind)))} className="rounded-full border border-gray-200 px-3 py-1 text-xs text-slate-700 hover:bg-gray-50">
               Hide all
             </button>
           </>
         )}
         {byCount.length > GRAPH_NODE_CAP && (
-          <button onClick={() => setShowAll(!showAll)} className="text-xs text-teal-600 hover:text-teal-700 px-1">
+          <button onClick={() => setShowAll(!showAll)} className="text-xs text-zen-600 hover:text-zen-700 px-1">
             {showAll ? `Show ${GRAPH_NODE_CAP} busiest only` : `+${byCount.length - GRAPH_NODE_CAP} quieter — show all`}
           </button>
         )}
@@ -394,7 +409,7 @@ function ConnectedGraphView({ graph }: { graph: DiagramGraph }) {
             placeholder="Search & focus…"
             className="w-44 rounded-lg border px-3 py-1.5 text-xs"
           />
-          <button onClick={searchFocus} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50">
+          <button onClick={searchFocus} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-slate-700 hover:bg-gray-50">
             Go
           </button>
         </div>
@@ -403,53 +418,53 @@ function ConnectedGraphView({ graph }: { graph: DiagramGraph }) {
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 rounded-lg border bg-white overflow-hidden relative">
           <TraceNetworkGraph nodes={drawn} edges={nwEdges} hiddenKinds={hiddenKinds} height={540} selectedId={selectedId} onSelect={setSelectedId} focusSignal={focusSignal} />
-          <p className="absolute bottom-1.5 right-2 text-[10px] text-gray-400">drag to move · scroll to zoom · click a node to trace its calls</p>
+          <p className="absolute bottom-1.5 right-2 text-[12px] text-slate-500">drag to move · scroll to zoom · click a node to trace its calls</p>
         </div>
 
         <div className="rounded-lg border border-gray-100 bg-white p-3 text-xs" style={{ maxHeight: 540, overflowY: 'auto' }}>
           {selected ? (
             <div className="space-y-3">
               <div>
-                <h4 className="font-semibold text-gray-800">{selected.name}</h4>
-                <span className={`inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full ring-1 ${nodeTone(selected)}`}>
+                <h4 className="font-semibold text-slate-800">{selected.name}</h4>
+                <span className={`inline-block mt-1 text-[12px] px-2 py-0.5 rounded-full ring-1 ${nodeTone(selected)}`}>
                   {SHAPE_GLYPH[selected.kind] || '●'} {KIND_LABEL[selected.kind] || selected.kind} · ×{fmtNumber(selected.count)}
                 </span>
               </div>
               {selected.errorCount > 0 && (
                 <p className="text-rose-600">{selected.errorCount} error(s) in this sample ({Math.round((selected.errorCount / selected.count) * 1000) / 10}%).</p>
               )}
-              {selected.avgLatencyMs != null && <p className="text-gray-500">{Math.round(selected.avgLatencyMs)}ms avg latency</p>}
+              {selected.avgLatencyMs != null && <p className="text-slate-600">{Math.round(selected.avgLatencyMs)}ms avg latency</p>}
               <div>
-                <h5 className="text-[10px] font-semibold uppercase text-gray-400">Calls / runs next</h5>
+                <h5 className="text-[12px] font-semibold uppercase text-slate-500">Calls / runs next</h5>
                 <ul className="mt-1 space-y-1">
                   {nwEdges.filter(e => e.from === selected.id).map(e => (
-                    <li key={`${e.to}-${e.kind}`} className="cursor-pointer text-teal-700 hover:underline" onClick={() => setSelectedId(e.to)}>
+                    <li key={`${e.to}-${e.kind}`} className="cursor-pointer text-zen-700 hover:underline" onClick={() => setSelectedId(e.to)}>
                       {e.kind === 'sequence' ? '⇢' : '→'} {nodeById.get(e.to)?.name ?? e.to}
                     </li>
                   ))}
-                  {nwEdges.filter(e => e.from === selected.id).length === 0 && <li className="text-gray-400">none</li>}
+                  {nwEdges.filter(e => e.from === selected.id).length === 0 && <li className="text-slate-500">none</li>}
                 </ul>
               </div>
               <div>
-                <h5 className="text-[10px] font-semibold uppercase text-gray-400">Called by</h5>
+                <h5 className="text-[12px] font-semibold uppercase text-slate-500">Called by</h5>
                 <ul className="mt-1 space-y-1">
                   {nwEdges.filter(e => e.to === selected.id).map(e => (
                     <li key={`${e.from}-${e.kind}`} className="cursor-pointer text-emerald-700 hover:underline" onClick={() => setSelectedId(e.from)}>
                       ← {nodeById.get(e.from)?.name ?? e.from}
                     </li>
                   ))}
-                  {nwEdges.filter(e => e.to === selected.id).length === 0 && <li className="text-gray-400">none</li>}
+                  {nwEdges.filter(e => e.to === selected.id).length === 0 && <li className="text-slate-500">none</li>}
                 </ul>
               </div>
-              <button onClick={() => setSelectedId(null)} className="text-[11px] text-teal-700 hover:text-teal-800">clear selection</button>
+              <button onClick={() => setSelectedId(null)} className="text-[12px] text-zen-700 hover:text-zen-800">clear selection</button>
             </div>
           ) : (
-            <p className="text-gray-400">Click a step for details — its calls, callers and error rate. Hover any node for a quick tooltip.</p>
+            <p className="text-slate-500">Click a step for details — its calls, callers and error rate. Hover any node for a quick tooltip.</p>
           )}
         </div>
       </div>
 
-      <div className="mt-2 rounded-lg border bg-gray-50 p-3 text-[11px] leading-relaxed text-gray-600">
+      <div className="mt-2 rounded-lg border bg-gray-50 p-3 text-[12px] leading-relaxed text-slate-700">
         <b>How to read this graph</b><br />
         ● solid blue circle = agent · ⬭ grey ellipse = workflow step (a framework graph node — a wait, an interrupt, a terminal state — not an agent) · ▭ amber box = tool · ▭ purple box = MCP server · ⛁ green cylinder = retriever · ▭ rose box = guardrail — busier steps are drawn larger, with bigger type<br />
         Amber/red border = error rate above {ERROR_AMBER_RATE * 100}%/{ERROR_RED_RATE * 100}% (at {ERROR_MIN_CALLS}+ calls only — thin sample sizes aren't coloured)<br />
@@ -473,12 +488,12 @@ function DeclaredList({ declared, upstream }: { declared: DeclaredDeps; upstream
     ['Model', declared.modelName ? [declared.modelName] : []],
   ]
   const filled = groups.filter(([, items]) => items.length > 0)
-  if (filled.length === 0) return <p className="text-xs text-gray-400">Nothing declared for this agent yet.</p>
+  if (filled.length === 0) return <p className="text-xs text-slate-500">Nothing declared for this agent yet.</p>
   return (
     <div className="grid grid-cols-2 gap-3">
       {filled.map(([label, items]) => (
         <div key={label}>
-          <FieldLabel>{label}</FieldLabel>
+          <FieldLabel tip={label === 'Consumers' ? 'consumers' : label === 'MCP servers' ? 'mcp_servers' : undefined}>{label}</FieldLabel>
           <div className="flex flex-wrap gap-1 mt-1">
             {items.map(item => (
               <span key={item} className={`text-xs px-2 py-0.5 rounded-full ring-1 ${NEUTRAL_CHIP}`}>{item}</span>
@@ -499,7 +514,7 @@ function DeclaredVsObserved({ deps, agentId, onAdopted }: { deps: DependenciesRe
   return (
     <div className="card p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-800">Declared vs observed dependencies</h3>
+        <h3 className="text-sm font-semibold text-slate-800">Declared vs observed dependencies <InfoTip term="dependency_graph" /></h3>
         <div className="flex gap-1.5">
           <SourceBadge source="declared" />
           {deps.comparison && <SourceBadge source="phoenix" />}
@@ -509,7 +524,7 @@ function DeclaredVsObserved({ deps, agentId, onAdopted }: { deps: DependenciesRe
         <ComparisonTable comparison={deps.comparison} traceCount={deps.traceCount} agentId={agentId} onAdopted={onAdopted} />
       ) : (
         <>
-          <p className="text-xs text-gray-400 mb-3">{note[deps.status] || ''}</p>
+          <p className="text-xs text-slate-500 mb-3">{note[deps.status] || ''}</p>
           <DeclaredList declared={deps.declared} upstream={deps.upstream} />
         </>
       )}
@@ -529,12 +544,13 @@ function ComparisonTable({ comparison, traceCount, agentId, onAdopted }: {
 
   const { confirmed, declared_only: declaredOnly, observed_only: observedOnly } = comparison
   const chosen = observedOnly.filter(o => selected.has(obsKey(o)))
+  // Steps inside the app's own graph are how it works, not dependencies: they are listed apart and never "undeclared".
   const agentSteps = observedOnly.filter(o => o.kind === 'agent')
+  // The record holds one model name and has no field for an embedding model, so those are information, not gaps.
+  const otherModels = observedOnly.filter(o => o.kind === 'model' || o.kind === 'embedding')
+  const notOnRecord = observedOnly.filter(o => o.kind !== 'agent' && !otherModels.includes(o))
   const hiddenSteps = showAllSteps ? 0 : Math.max(0, agentSteps.length - AGENT_STEPS_SHOWN)
-  const observedRows = [
-    ...observedOnly.filter(o => o.kind !== 'agent'),
-    ...agentSteps.slice(0, agentSteps.length - hiddenSteps),
-  ]
+  const shownSteps = agentSteps.slice(0, agentSteps.length - hiddenSteps)
 
   function toggle(o: ObservedOnlyDep) {
     const next = new Set(selected)
@@ -560,15 +576,15 @@ function ComparisonTable({ comparison, traceCount, agentId, onAdopted }: {
   }
 
   if (!confirmed.length && !declaredOnly.length && !observedOnly.length) {
-    return <p className="text-xs text-gray-400">Nothing declared and nothing recognisable observed in this sample.</p>
+    return <p className="text-xs text-slate-500">Nothing declared and nothing recognisable observed in this sample.</p>
   }
 
   const th = 'py-1.5 pr-3 font-normal'
   const td = 'py-1.5 pr-3 align-top'
   const groupRow = (label: string, count: number, hint?: string) => (
     <tr className="border-t border-gray-100">
-      <td colSpan={6} className="pt-3 pb-1 text-[11px] font-semibold text-gray-500 uppercase tracking-wide">
-        {label} <span className="text-gray-400 font-normal normal-case">({count}){hint ? ` — ${hint}` : ''}</span>
+      <td colSpan={6} className="pt-3 pb-1 text-[12px] font-semibold text-slate-600 uppercase tracking-wide">
+        {label} <span className="text-slate-500 font-normal normal-case">({count}){hint ? ` — ${hint}` : ''}</span>
       </td>
     </tr>
   )
@@ -578,7 +594,7 @@ function ComparisonTable({ comparison, traceCount, agentId, onAdopted }: {
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="text-left text-gray-400">
+            <tr className="text-left text-slate-500">
               <th className={`${th} w-6`} />
               <th className={th}>Dependency</th>
               <th className={th}>Kind</th>
@@ -592,11 +608,11 @@ function ComparisonTable({ comparison, traceCount, agentId, onAdopted }: {
             {confirmed.map(c => (
               <tr key={`c:${c.declaredAs}:${c.name}`}>
                 <td className={td}><span className="inline-block w-2 h-2 rounded-full bg-emerald-500" title="Declared and seen" /></td>
-                <td className={`${td} text-gray-800`}>{c.name}</td>
-                <td className={`${td} text-gray-500`}>{KIND_LABEL[c.kind] || c.kind}</td>
-                <td className={`${td} text-gray-500`}>{FIELD_LABEL[c.declaredAs] || c.declaredAs}</td>
-                <td className={`${td} font-mono text-gray-600`}>{c.observedName}</td>
-                <td className={`${td} text-gray-600`}>×{fmtNumber(c.count)}</td>
+                <td className={`${td} text-slate-800`}>{c.name}</td>
+                <td className={`${td} text-slate-600`}>{KIND_LABEL[c.kind] || c.kind}</td>
+                <td className={`${td} text-slate-600`}>{FIELD_LABEL[c.declaredAs] || c.declaredAs}</td>
+                <td className={`${td} font-mono text-slate-700`}>{c.observedName}</td>
+                <td className={`${td} text-slate-700`}>×{fmtNumber(c.count)}</td>
               </tr>
             ))}
 
@@ -606,23 +622,25 @@ function ComparisonTable({ comparison, traceCount, agentId, onAdopted }: {
             {declaredOnly.map(o => (
               <tr key={`d:${o.declaredAs}:${o.name}`}>
                 <td className={td}><span className="inline-block w-2 h-2 rounded-full bg-amber-400" title="Declared, not seen" /></td>
-                <td className={`${td} text-gray-800`}>{o.name}</td>
-                <td className={`${td} text-gray-500`}>{KIND_LABEL[o.kind] || o.kind}</td>
-                <td className={`${td} text-gray-500`}>{FIELD_LABEL[o.declaredAs] || o.declaredAs}</td>
-                <td className={`${td} text-gray-400`}>not seen</td>
-                <td className={`${td} text-gray-400`}>—</td>
+                <td className={`${td} text-slate-800`}>{o.name}</td>
+                <td className={`${td} text-slate-600`}>{KIND_LABEL[o.kind] || o.kind}</td>
+                <td className={`${td} text-slate-600`}>{FIELD_LABEL[o.declaredAs] || o.declaredAs}</td>
+                <td className={`${td} text-slate-500`}>not seen</td>
+                <td className={`${td} text-slate-500`}>—</td>
               </tr>
             ))}
 
-            {groupRow('Observed only', observedOnly.length, 'seen in traces but not declared')}
-            {observedRows.map(o => {
+            {groupRow('Seen in traces, not on the record', notOnRecord.length, notOnRecord.length
+              ? 'tools and knowledge sources are added by the registry itself at its next check'
+              : 'nothing is missing from the record')}
+            {notOnRecord.map(o => {
               const target = ADOPT_TARGET[o.kind]
               return (
                 <tr key={`o:${obsKey(o)}`}>
                   <td className={td}>
                     <input
                       type="checkbox"
-                      className="accent-teal-600"
+                      className="accent-zen-600"
                       aria-label={`Select ${o.name}`}
                       disabled={!target || adopting}
                       checked={selected.has(obsKey(o))}
@@ -630,22 +648,45 @@ function ComparisonTable({ comparison, traceCount, agentId, onAdopted }: {
                       title={target ? `Add to ${target}` : 'Only tools, MCP servers and retrievers can be added to the declaration'}
                     />
                   </td>
-                  <td className={`${td} font-mono text-gray-800`}>{o.name}</td>
-                  <td className={`${td} text-gray-500`}>{o.kind === 'agent' ? 'Agent step' : KIND_LABEL[o.kind] || o.kind}</td>
-                  <td className={`${td} text-gray-400`}>{target ? `not declared → ${target}` : 'not declared'}</td>
-                  <td className={`${td} text-gray-600`}>seen</td>
-                  <td className={`${td} text-gray-600`}>×{fmtNumber(o.count)}</td>
+                  <td className={`${td} font-mono text-slate-800`}>{o.name}</td>
+                  <td className={`${td} text-slate-600`}>{KIND_LABEL[o.kind] || o.kind}</td>
+                  <td className={`${td} text-slate-500`}>{target ? `not declared → ${target}` : 'not declared'}</td>
+                  <td className={`${td} text-slate-700`}>seen</td>
+                  <td className={`${td} text-slate-700`}>×{fmtNumber(o.count)}</td>
                 </tr>
               )
             })}
+
+            {otherModels.length > 0 && groupRow('Other models seen', otherModels.length, 'for information; the record holds one model name')}
+            {otherModels.map(o => (
+              <tr key={`m:${obsKey(o)}`}>
+                <td className={td}><span className="inline-block w-2 h-2 rounded-full bg-slate-300" title="Seen in traces" /></td>
+                <td className={`${td} font-mono text-slate-800`}>{o.name}</td>
+                <td className={`${td} text-slate-600`}>{KIND_LABEL[o.kind] || o.kind}</td>
+                <td className={`${td} text-slate-500`}>—</td>
+                <td className={`${td} text-slate-700`}>seen</td>
+                <td className={`${td} text-slate-700`}>×{fmtNumber(o.count)}</td>
+              </tr>
+            ))}
+
+            {agentSteps.length > 0 && groupRow('Steps inside this app', agentSteps.length, 'how it works, from its traces; nothing to declare')}
+            {shownSteps.map(o => (
+              <tr key={`s:${obsKey(o)}`}>
+                <td className={td}><span className="inline-block w-2 h-2 rounded-full bg-slate-300" title="A step inside this app" /></td>
+                <td className={`${td} font-mono text-slate-800`}>{o.name}</td>
+                <td className={`${td} text-slate-600`}>Agent step</td>
+                <td className={`${td} text-slate-500`}>—</td>
+                <td className={`${td} text-slate-700`}>seen</td>
+                <td className={`${td} text-slate-700`}>×{fmtNumber(o.count)}</td>
+              </tr>
+            ))}
             {agentSteps.length > AGENT_STEPS_SHOWN && (
               <tr>
                 <td />
                 <td colSpan={5} className="py-1.5">
-                  <button onClick={() => setShowAllSteps(!showAllSteps)} className="text-xs text-teal-600 hover:text-teal-700">
-                    {showAllSteps ? 'Show fewer agent steps' : `Show ${hiddenSteps} more agent step(s)`}
+                  <button onClick={() => setShowAllSteps(!showAllSteps)} className="text-xs text-zen-600 hover:text-zen-700">
+                    {showAllSteps ? 'Show fewer steps' : `Show ${hiddenSteps} more step(s)`}
                   </button>
-                  <span className="text-xs text-gray-400 ml-2">Usually steps inside this app's own graph. A call to another registered agent belongs in this agent's Calls field.</span>
                 </td>
               </tr>
             )}
@@ -657,8 +698,8 @@ function ComparisonTable({ comparison, traceCount, agentId, onAdopted }: {
         <div className="mt-3 border-t border-gray-100 pt-3">
           {confirming ? (
             <div className="rounded-lg bg-teal-50/60 ring-1 ring-teal-200 p-3">
-              <p className="text-xs text-gray-700 mb-1">Add {chosen.length} item(s) to this agent's declared dependencies?</p>
-              <ul className="text-xs text-gray-600 mb-2 list-disc pl-4">
+              <p className="text-xs text-slate-700 mb-1">Add {chosen.length} item(s) to this agent's declared dependencies?</p>
+              <ul className="text-xs text-slate-700 mb-2 list-disc pl-4">
                 {chosen.map(o => <li key={obsKey(o)}><span className="font-mono">{o.name}</span> → {ADOPT_TARGET[o.kind]}</li>)}
               </ul>
               <div className="flex gap-2">
@@ -668,7 +709,7 @@ function ComparisonTable({ comparison, traceCount, agentId, onAdopted }: {
             </div>
           ) : (
             <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-400">Nothing is added until you confirm.</span>
+              <span className="text-xs text-slate-500">Nothing is added until you confirm.</span>
               <button onClick={() => { setResult(null); setConfirming(true) }} disabled={chosen.length === 0} className="btn-secondary btn-sm">
                 Adopt selected{chosen.length ? ` (${chosen.length})` : ''}
               </button>
@@ -676,7 +717,7 @@ function ComparisonTable({ comparison, traceCount, agentId, onAdopted }: {
           )}
           {adoptError && <p className="text-xs text-rose-600 mt-2">{adoptError}</p>}
           {result && (
-            <p className="text-xs text-teal-700 mt-2">
+            <p className="text-xs text-zen-700 mt-2">
               {result.added.length ? `Added ${result.added.map(a => a.name).join(', ')}.` : 'Nothing new to add.'}
               {result.skipped.length ? ` Skipped ${result.skipped.map(s => s.name).join(', ')} (already declared).` : ''}
             </p>
@@ -696,28 +737,28 @@ function BlastRadiusCard({ blast, upstream, shared }: { blast: BlastRadius; upst
   return (
     <div className="card p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-800">Blast radius</h3>
+        <h3 className="text-sm font-semibold text-slate-800">Blast radius</h3>
         <SourceBadge source="declared" />
       </div>
       <div className="grid grid-cols-2 gap-5">
         <div>
-          <SectionLabel>If this agent goes down</SectionLabel>
+          <SectionLabel tip="blast_radius">If this agent goes down</SectionLabel>
           <div className="grid grid-cols-3 gap-2 mt-1 mb-3">
             <MiniStat label="Downstream" value={fmtNumber(blast.downstreamCount)} accent={blast.downstreamCount ? 'text-rose-600' : undefined} />
             <MiniStat label="Agents" value={fmtNumber(blast.agents.length)} />
-            <MiniStat label="Consumers" value={fmtNumber(blast.consumers.length)} />
+            <MiniStat label="Consumers" tip="consumers" value={fmtNumber(blast.consumers.length)} />
           </div>
           {blast.downstreamCount === 0 ? (
-            <p className="text-xs text-gray-400">No registered agent calls this one and no consumers are declared.</p>
+            <p className="text-xs text-slate-500">No registered agent calls this one and no consumers are declared.</p>
           ) : (
             <>
               <ul className="space-y-1">
                 {blast.agents.map(a => (
                   <li key={a.id} className="flex items-center gap-2 text-xs">
-                    <Link to={`/agents/${encodeURIComponent(a.id)}?tab=diagram`} className="text-gray-800 hover:text-teal-700 truncate">{a.name}</Link>
+                    <Link to={`/agents/${encodeURIComponent(a.id)}?tab=diagram`} className="text-slate-800 hover:text-zen-700 truncate">{a.name}</Link>
                     {a.stage && <span className={STAGE_PILL[a.stage] || 'status-pending'}>{a.stage}</span>}
-                    {a.atRisk && <span className="text-[10px] text-rose-600">at risk</span>}
-                    <span className="text-gray-400 ml-auto whitespace-nowrap">{hopLabel(a.hops)}</span>
+                    {a.atRisk && <span className="text-[12px] text-rose-600">at risk</span>}
+                    <span className="text-slate-500 ml-auto whitespace-nowrap">{hopLabel(a.hops)}</span>
                   </li>
                 ))}
               </ul>
@@ -729,7 +770,7 @@ function BlastRadiusCard({ blast, upstream, shared }: { blast: BlastRadius; upst
                 </div>
               )}
               {blast.revenueAtRisk > 0 && (
-                <p className="text-xs text-gray-500 mt-2">Declared value on the affected path (incl. this agent): <b className="text-gray-700">{fmtDollars(blast.revenueAtRisk)}/mo</b></p>
+                <p className="text-xs text-slate-600 mt-2">Declared value on the affected path (incl. this agent): <b className="text-slate-700">{fmtDollars(blast.revenueAtRisk)}/mo</b></p>
               )}
             </>
           )}
@@ -738,21 +779,21 @@ function BlastRadiusCard({ blast, upstream, shared }: { blast: BlastRadius; upst
         <div>
           <SectionLabel>Depends on (agents this one calls)</SectionLabel>
           {upstream.length === 0 ? (
-            <p className="text-xs text-gray-400 mt-1">No agent dependencies declared.</p>
+            <p className="text-xs text-slate-500 mt-1">No agent dependencies declared.</p>
           ) : (
             <ul className="space-y-1 mt-1">
               {upstream.map(u => (
                 <li key={u.id} className="flex items-center gap-2 text-xs">
                   {u.registered ? (
-                    <Link to={`/agents/${encodeURIComponent(u.id)}?tab=diagram`} className="text-gray-800 hover:text-teal-700 truncate">{u.name}</Link>
+                    <Link to={`/agents/${encodeURIComponent(u.id)}?tab=diagram`} className="text-slate-800 hover:text-zen-700 truncate">{u.name}</Link>
                   ) : (
-                    <span className="text-gray-800 truncate">{u.name}</span>
+                    <span className="text-slate-800 truncate">{u.name}</span>
                   )}
                   {u.registered
                     ? u.stage && <span className={STAGE_PILL[u.stage] || 'status-pending'}>{u.stage}</span>
-                    : <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${NEUTRAL_CHIP}`}>unregistered</span>}
-                  {u.atRisk && <span className="text-[10px] px-1.5 py-0.5 rounded-full ring-1 bg-rose-50 text-rose-700 ring-rose-200">at risk</span>}
-                  {u.worstGate && u.worstGate !== 'Approved' && <span className="text-gray-400 ml-auto whitespace-nowrap">gate: {u.worstGate}</span>}
+                    : <span className={`text-[12px] px-1.5 py-0.5 rounded-full ring-1 ${NEUTRAL_CHIP}`}>unregistered</span>}
+                  {u.atRisk && <span className="text-[12px] px-1.5 py-0.5 rounded-full ring-1 bg-rose-50 text-rose-700 ring-rose-200">at risk</span>}
+                  {u.worstGate && u.worstGate !== 'Approved' && <span className="text-slate-500 ml-auto whitespace-nowrap">gate: {u.worstGate}</span>}
                 </li>
               ))}
             </ul>
@@ -760,12 +801,12 @@ function BlastRadiusCard({ blast, upstream, shared }: { blast: BlastRadius; upst
 
           {shared.length > 0 && (
             <div className="mt-3">
-              <SectionLabel>Shared resources</SectionLabel>
+              <SectionLabel tip="concentration_risk">Shared resources</SectionLabel>
               <ul className="space-y-1 mt-1">
                 {shared.map(r => (
                   <li key={r.id} className="flex items-center gap-2 text-xs">
-                    <span className="text-gray-700 truncate">{r.name}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${r.concentrated ? 'bg-amber-50 text-amber-700 ring-amber-200' : NEUTRAL_CHIP}`}>
+                    <span className="text-slate-700 truncate">{r.name}</span>
+                    <span className={`text-[12px] px-1.5 py-0.5 rounded-full ring-1 ${r.concentrated ? 'bg-amber-50 text-amber-700 ring-amber-200' : NEUTRAL_CHIP}`}>
                       {r.alsoUsedBy ? `also used by ${r.alsoUsedBy} agent(s)` : 'only this agent'}
                     </span>
                   </li>

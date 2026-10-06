@@ -255,6 +255,18 @@ def checklist_item_ids(gate: str) -> set[str]:
     return {item["id"] for item in CHECKLISTS[gate]}
 
 
+# The record fields each automatic check reads. When the registry itself filled one in, the check
+# says so, so a reviewer can tell the owner's words from an automatic entry.
+ITEM_FIELDS: dict[str, tuple[str, ...]] = {
+    "arb.purpose": ("description",),
+    "arb.model": ("model_name",),
+    "arb.dependencies": ("mcp_servers", "knowledge_bases"),
+    "arb.endpoint": ("api_endpoint",),
+    "security.tools": ("mcp_servers",),
+    "security.endpoint": ("api_endpoint",),
+}
+
+
 def evaluate_checklist(gate: str, facts: Mapping[str, Any], ticks: Mapping[str, str] | None = None) -> list[dict]:
     """Each item: auto ('pass'|'fail'|'n/a'|'manual'), the reviewer's tick
     (if any) and the effective result. A reviewer's tick overrides the auto
@@ -263,6 +275,11 @@ def evaluate_checklist(gate: str, facts: Mapping[str, Any], ticks: Mapping[str, 
     items = []
     for spec in CHECKLISTS[gate]:
         auto, detail = spec["auto_check"](facts) if spec["auto_check"] else ("manual", None)
+        filled = facts.get("auto_filled") or {}
+        sources = sorted({filled[f] for f in ITEM_FIELDS.get(spec["id"], ()) if f in filled})
+        if sources and auto == "pass":
+            note = f"Some or all of this was filled in automatically from {' and '.join(sources)} — confirm it is right"
+            detail = f"{detail} · {note}" if detail else note
         tick = ticks.get(spec["id"]) if ticks.get(spec["id"]) in TICK_VALUES else None
         if tick:
             result = tick

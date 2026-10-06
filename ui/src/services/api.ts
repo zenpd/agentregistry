@@ -315,11 +315,13 @@ export interface PhoenixConfigResponse {
   apiKeySet: boolean
   enabled: boolean
   source: 'saved' | 'env_default'
+  // Where apps are hosted, with {project} for the Phoenix project name.
+  appUrlTemplate: string
 }
 
 export const getPhoenixConfig = () => api.get<PhoenixConfigResponse>('/phoenix/config')
 
-export const updatePhoenixConfig = (update: { endpoint: string; api_key?: string; enabled: boolean }) =>
+export const updatePhoenixConfig = (update: { endpoint: string; api_key?: string; enabled: boolean; app_url_template?: string }) =>
   api.put<{ status: string }>('/phoenix/config', update)
 
 // ── Risk register (governance/risk_categories.py) ────────────────────────────

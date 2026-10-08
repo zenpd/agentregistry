@@ -32,17 +32,17 @@ ok('top bar shows the signed-in person and role', /Registry Admin/.test(await pa
 ok('notification bell is in the top bar', await page.locator('[data-testid=notification-bell]').count() === 1)
 await page.screenshot({ path: `${SP}/shots/p0-exec-default.png`, fullPage: false })
 
-// 3. Agents page: 18 agents with the demo ones by default (12 labelled Demo), then 6 with demo hidden in Settings.
+// 3. Agents page: only the 6 real agents by default, then 18 (12 labelled Demo) after the box is ticked in Settings.
+await page.goto(`${B}/agents`); await page.waitForSelector('h3', { timeout: 30000 }); await page.waitForTimeout(800)
+const realCards = await page.locator('h3').count()
+ok('by default the list shows only the 6 real agents', realCards === 6, `cards: ${realCards}`)
+await page.goto(`${B}/settings`); await page.waitForSelector('[data-testid=demo-toggle]', { timeout: 30000 })
+ok('Settings says the demo agents are hidden and the box is not ticked', !(await page.isChecked('[data-testid=demo-toggle]')) && /hidden on every page/.test(await page.textContent('[data-testid=demo-agents]')))
+await page.click('[data-testid=demo-toggle]'); await page.waitForSelector('[data-testid=demo-toggle]', { timeout: 30000 }); await page.waitForTimeout(1000)
 await page.goto(`${B}/agents`); await page.waitForSelector('h3', { timeout: 30000 }); await page.waitForTimeout(800)
 const allCards = await page.locator('h3').count()
 const demoBadges = await page.locator('h3 >> text=Demo').count()
-ok('by default the list shows 18 agents, 12 labelled Demo', allCards === 18 && demoBadges === 12, `cards ${allCards}, badges ${demoBadges}`)
-await page.goto(`${B}/settings`); await page.waitForSelector('[data-testid=demo-toggle]', { timeout: 30000 })
-await page.click('[data-testid=demo-toggle]'); await page.waitForSelector('[data-testid=demo-toggle]', { timeout: 30000 }); await page.waitForTimeout(1000)
-ok('Settings now says the demo agents are hidden', !(await page.isChecked('[data-testid=demo-toggle]')) && /hidden on every page/.test(await page.textContent('[data-testid=demo-agents]')))
-await page.goto(`${B}/agents`); await page.waitForSelector('h3', { timeout: 30000 }); await page.waitForTimeout(800)
-const realCards = await page.locator('h3').count()
-ok('with demo hidden the list shows only the 6 real agents', realCards === 6, `cards: ${realCards}`)
+ok('after ticking the box the list shows 18 agents, 12 labelled Demo', allCards === 18 && demoBadges === 12, `cards ${allCards}, badges ${demoBadges}`)
 
 // 4. A demo agent's own page opens while demo is hidden, labelled.
 await page.goto(`${B}/agents/inv-recon`); await page.waitForSelector('[data-testid=demo-badge]', { timeout: 30000 }).catch(() => {})

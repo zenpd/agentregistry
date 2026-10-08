@@ -31,7 +31,8 @@ export function clearAuthToken() {
 const INCLUDE_DEMO_KEY = 'airegistry_include_demo'
 
 export function includingDemo(): boolean {
-  try { return localStorage.getItem(INCLUDE_DEMO_KEY) !== '0' } catch { return true }
+  // Off until someone ticks the box in Settings → Demo agents. The choice is kept per browser.
+  try { return localStorage.getItem(INCLUDE_DEMO_KEY) === '1' } catch { return false }
 }
 
 export function setIncludingDemo(on: boolean) {

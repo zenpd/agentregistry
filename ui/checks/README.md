@@ -18,7 +18,7 @@ them, because the API allows 1,000 requests a minute per person by default and t
 Each prints PASS or FAIL per check and ends with ALL PASSED or SOME FAILED. Screenshots go to `<folder>/shots/`.
 Phase 1 reads Phoenix (VPN) and GitHub.
 
-Phases 0 and 1 expect the development data: 6 real agents and 12 demo agents shown (10 more demo agents are
+Phases 0 and 1 expect the development data: 6 real agents, with the 12 demo agents hidden until ticked in Settings (10 more demo agents are
 archived), and the agents Iso Mapper and Digital Onboarding Test. `demo_agents.mjs` opens every tab of every demo
 agent and checks the archived ones stay out of the pages.
 

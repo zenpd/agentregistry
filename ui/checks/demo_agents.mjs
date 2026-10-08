@@ -1,4 +1,4 @@
-// Demo agents check: the seeded example agents are shown by default without a label in the top bar,
+// Demo agents check (run with the box ticked in Settings, as set here): the seeded example agents are shown without a label in the top bar,
 // the 10 archived ones (repeats, archived 2026-10-08) are left out everywhere and listed in Settings,
 // and every tab of every shown demo agent opens. Also Executive, Business Impact and the dependency
 // graph. Changes nothing.
@@ -12,7 +12,7 @@ const ARCHIVED = ['Employee Onboarding Concierge', 'Expense Report Auditor', 'Tr
   'Refund Adjudication Agent', 'Change Request Validator', 'Code Review Copilot', 'Market Intelligence Digest', 'Dynamic Pricing Optimizer', 'Supplier Risk Monitor']
 const browser = await chromium.launch()
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
-await ctx.addInitScript(([k, t]) => localStorage.setItem(k, t), ['airegistry_token', TOKEN])
+await ctx.addInitScript(([k, t]) => { localStorage.setItem(k, t); localStorage.setItem('airegistry_include_demo', '1') }, ['airegistry_token', TOKEN])
 const page = await ctx.newPage()
 const errs = []
 page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errs.push(m.text().slice(0, 160)) })

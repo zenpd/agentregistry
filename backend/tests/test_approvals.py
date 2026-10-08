@@ -80,7 +80,7 @@ async def test_pending_access_requests_oldest_first_with_what_an_approver_needs(
 async def test_only_gates_waiting_on_a_reviewer_and_never_for_retired_agents(client):
     reviews = (await client.get("/api/v1/approvals")).json()["reviews"]
     assert [(r["agentId"], r["gate"]) for r in reviews] == [("draft", "arb")]
-    assert reviews[0]["gateLabel"] == "Architecture Review Board" and reviews[0]["reviewerRole"] == "ARB chair"
+    assert reviews[0]["gateLabel"] == "Architecture Review Board" and reviews[0]["reviewerRole"] == "Architect Steward (ARB chair)"
 
 
 @pytest.mark.asyncio
@@ -88,7 +88,7 @@ async def test_pending_discoveries_most_confident_first(client):
     inbox = (await client.get("/api/v1/approvals")).json()
     assert [d["id"] for d in inbox["discoveries"]] == ["d-high", "d-low"]
     assert inbox["discoveries"][0]["firstSeen"] == "2026-09-01"
-    assert inbox["counts"] == {"accessRequests": 2, "reviews": 1, "discoveries": 2, "total": 5}
+    assert inbox["counts"] == {"accessRequests": 2, "reviews": 1, "classifications": 0, "discoveries": 2, "total": 5}
 
 
 @pytest.mark.asyncio

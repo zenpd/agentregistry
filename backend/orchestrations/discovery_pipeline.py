@@ -17,47 +17,23 @@ async def scan_sources(org_id: str) -> dict:
     raw_findings = []
 
     async with get_db_session() as db:
-        # Source 1: Scan agents table for stalled agents
-        result = await db.execute(
-            select(Agent.id, Agent.name, Agent.lifecycle_stage, Agent.time_in_stage_weeks)
-            .where(Agent.org_id == org_id)
-        )
-        agents = result.all()
+        # Source 1: stalled agents, by the same rule and limits as Executive (Settings, "Stalled after").
+        from api.routers.ops.portfolio import stalled_agents
         sources_scanned.append("agents_table")
-        for agent in agents:
-            if agent.lifecycle_stage == "Ideation" and agent.time_in_stage_weeks and agent.time_in_stage_weeks > 12:
-                confidence = min(90, 50 + (agent.time_in_stage_weeks - 12) * 2)
-                raw_findings.append({
-                    "source": "agents_table",
-                    "name": agent.name,
-                    "suspected_dept": "Unknown",
-                    "suspected_type": "Autonomous Agent",
-                    "confidence": confidence,
-                    "signal": f"Agent stalled in Ideation for {agent.time_in_stage_weeks} weeks",
-                    "shadow_ai_risk": "HIGH" if agent.time_in_stage_weeks > 20 else "MEDIUM",
-                })
-
-        # Source 2: Scan for concentration risks (portable: aggregate JSON arrays in Python)
-        result = await db.execute(
-            select(Agent.enterprise_systems, Agent.databases).where(Agent.org_id == org_id)
-        )
-        sys_counts: dict = {}
-        for systems, databases in result.all():
-            for name in list(systems or []) + list(databases or []):
-                sys_counts[name] = sys_counts.get(name, 0) + 1
-        concentration_risks = [(name, cnt) for name, cnt in sys_counts.items() if cnt >= 2]
-        sources_scanned.append("concentration_risk")
-        for risk_name, risk_count in concentration_risks:
-            confidence = min(95, 60 + risk_count * 5)
+        for row in await stalled_agents(db):
+            over = row["weeks"] - row["limit"]
             raw_findings.append({
-                "source": "concentration_risk",
-                "name": f"Concentration risk: {risk_name}",
-                "suspected_dept": "IT Operations",
-                "suspected_type": "Infrastructure",
-                "confidence": confidence,
-                "signal": f"System {risk_name} has {risk_count} dependent agents",
-                "shadow_ai_risk": "HIGH" if risk_count >= 4 else "MEDIUM",
+                "source": "agents_table",
+                "name": row["name"],
+                "suspected_dept": "Unknown",
+                "suspected_type": "Autonomous Agent",
+                "confidence": min(90, 60 + over * 2),
+                "signal": f"Agent stalled: {row['text']}",
+                "shadow_ai_risk": "HIGH" if over > 8 else "MEDIUM",
             })
+
+        # Source 2 (concentration risk) is no longer written as a governance finding: it is about a shared
+        # system, not an agent, and the Platform page shows it. Earlier rows of that source can still be dismissed.
 
         # Source 3: Scan for agents with no governance reviews
         result = await db.execute(text("""

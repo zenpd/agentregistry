@@ -1,9 +1,11 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
+import { VALUE_STATE_SHORT } from '../services/ops/value'
+import ValueSpendSection from '../components/ValueSpendSection'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, CircleDashed, Coins, Hourglass, Pencil, Rocket, TrendingUp, X,
 } from 'lucide-react'
-import { getAgents, getPortfolioEconomics, type AgentEconomics, type RegistryAgent } from '../services/api'
+import { getAgents, getGovernanceSummary, getPortfolioEconomics, requiredReviewsOf, type AgentEconomics, type GovernanceSummary, type RegistryAgent } from '../services/api'
 import InfoTip from '../components/InfoTip'
 import type { GlossaryKey } from '../lib/glossary'
 import EditAgentModal from '../components/EditAgentModal'
@@ -50,16 +52,18 @@ const ORDER: Blocker[] = ['changes', 'reviewing', 'unsubmitted', 'ready']
 
 // The single thing most in the way, so each agent's value is counted once.
 // Review expiry is not in the registry list, so an expired approval reads as approved here.
-function blockerOf(a: RegistryAgent): { kind: Blocker; detail: string } {
+// Only the reviews the agent's risk level requires (Settings → Governance rules) can hold it back.
+function blockerOf(a: RegistryAgent, rules: GovernanceSummary | null): { kind: Blocker; detail: string } {
   const status = (g: string) => a.reviews?.[g] || 'Not Submitted'
-  const named = (test: (s: string) => boolean) => GATES.filter(g => test(status(g))).map(g => GATE_NAME[g])
+  const required = requiredReviewsOf(rules, a.riskLevel)
+  const named = (test: (s: string) => boolean) => GATES.filter(g => required.includes(g) && test(status(g))).map(g => GATE_NAME[g])
   const changes = named(s => s === 'Changes Requested')
   if (changes.length) return { kind: 'changes', detail: `${changes.join(', ')} review: changes requested` }
   const reviewing = named(s => s === 'In Review')
   if (reviewing.length) return { kind: 'reviewing', detail: `${reviewing.join(', ')} review: in review` }
   const open = named(s => !APPROVED.includes(s))
   if (open.length) return { kind: 'unsubmitted', detail: `${open.join(', ')} review: not submitted` }
-  return { kind: 'ready', detail: 'All three reviews approved' }
+  return { kind: 'ready', detail: required.length === GATES.length ? 'All three reviews approved' : 'Every required review approved' }
 }
 
 // ── Numbers the owners have not filled in ───────────────────────────────────
@@ -86,15 +90,17 @@ export default function BusinessView() {
   const dept = searchParams.get('dept') || ''
   const [agents, setAgents] = useState<RegistryAgent[]>([])
   const [econ, setEcon] = useState<Map<string, AgentEconomics>>(new Map())
+  const [rules, setRules] = useState<GovernanceSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [focus, setFocus] = useState<Focus>(null)
   const [open, setOpen] = useState<string | null>(null)
   const [fixing, setFixing] = useState<RegistryAgent | null>(null)
 
-  const reload = useCallback(() => Promise.all([loadAllAgents(), getPortfolioEconomics().catch(() => null)])
-    .then(([list, e]) => {
+  const reload = useCallback(() => Promise.all([loadAllAgents(), getPortfolioEconomics().catch(() => null), getGovernanceSummary().catch(() => null)])
+    .then(([list, e, g]) => {
       setAgents(list)
+      setRules(g?.data ?? null)
       setEcon(new Map((e?.data.agents || []).map(x => [x.agentId, x])))
       setError(null)
     })
@@ -117,27 +123,30 @@ export default function BusinessView() {
   const unit = units.find(u => u.key === dept)
   const list = unit ? agents.filter(a => deptKey(a) === unit.key) : agents
 
+  // The value used everywhere: attested or adjusted by finance when checked, else declared (dollars a month).
+  const valueOf = (a: RegistryAgent) => { const v = econ.get(a.id)?.valueCents; return v != null ? v / 100 : (a.valueAmount || 0) }
+
   // Retired agents stay in the table but produce and cost nothing now.
   const running = list.filter(a => a.stage !== 'Deprecated')
   const live = running.filter(a => a.stage === 'Production')
-  const realized = live.reduce((s, a) => s + (a.valueAmount || 0), 0)
-  const projected = running.filter(isPipeline).reduce((s, a) => s + (a.valueAmount || 0), 0)
+  const realized = live.reduce((s, a) => s + valueOf(a), 0)
+  const projected = running.filter(isPipeline).reduce((s, a) => s + valueOf(a), 0)
   const hours = live.reduce((s, a) => s + (a.hoursSavedMonthly || 0), 0)
   const costCents = running.reduce((s, a) => s + (econ.get(a.id)?.totalCostCents || 0), 0)
   const costUnknown = running.filter(a => econ.get(a.id)?.costComplete === false).length
   const valueCents = (realized + projected) * 100
 
-  const pipeline = running.filter(isPipeline).map(a => ({ a, ...blockerOf(a) }))
-  const pipelineValue = pipeline.reduce((s, r) => s + (r.a.valueAmount || 0), 0)
+  const pipeline = running.filter(isPipeline).map(a => ({ a, ...blockerOf(a, rules) }))
+  const pipelineValue = pipeline.reduce((s, r) => s + valueOf(r.a), 0)
   const groups = ORDER.map(kind => {
     const inKind = pipeline.filter(r => r.kind === kind)
-    return { kind, count: inKind.length, value: inKind.reduce((s, r) => s + (r.a.valueAmount || 0), 0) }
+    return { kind, count: inKind.length, value: inKind.reduce((s, r) => s + valueOf(r.a), 0) }
   }).filter(g => g.count)
   const gapCount = (g: Gap) => running.filter(a => gapsOf(a).includes(g)).length
 
   const shown = list.filter(a =>
     !focus ? true
-      : focus.kind === 'blocker' ? isPipeline(a) && blockerOf(a).kind === focus.blocker
+      : focus.kind === 'blocker' ? isPipeline(a) && blockerOf(a, rules).kind === focus.blocker
         : a.stage !== 'Deprecated' && gapsOf(a).includes(focus.gap))
   const focusLabel = !focus ? '' : focus.kind === 'blocker' ? BLOCKER[focus.blocker].label.toLowerCase() : focus.gap.toLowerCase()
 
@@ -166,16 +175,19 @@ export default function BusinessView() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="bu-kpis">
         <Kpi label="Agents running" value={running.length.toLocaleString()}
-          sub={`${live.length} live in production${list.length > running.length ? ` · ${list.length - running.length} retired not counted` : ''}`} />
+          sub={`${live.length} live in production${list.length > running.length ? ` · ${list.length - running.length} retired (Deprecated) not counted` : ''}`} />
         <Kpi label="Value / month" tip="declared_value" value={fmtMoney(realized + projected)} accent="text-zen-600"
-          sub={`${fmtMoney(realized)} realized · ${fmtMoney(projected)} projected`} />
+          sub={`${fmtMoney(realized)} from agents in Production · ${fmtMoney(projected)} from agents not yet in Production`} />
         <Kpi label="Cost to run / month" tip="cost_to_run" value={`${costUnknown ? '≥' : ''}${fmtCents(costCents)}`} accent="text-rose-600"
-          sub={`token + infra${costUnknown ? ` · ${costUnknown} agent${costUnknown === 1 ? '' : 's'} with no usage data` : ''}`} />
+          sub={`tokens + hosting${costUnknown ? ` · ${costUnknown} agent${costUnknown === 1 ? '' : 's'} with no usage data` : ''}`} />
         <Kpi label="Return on cost" tip="return_on_cost" accent="text-zen-700"
           value={costCents > 0 && valueCents > 0 ? fmtTimes(valueCents / costCents) : '—'}
-          sub={costCents > 0 && valueCents > 0 ? `declared value ÷ cost · ${hours.toLocaleString()} h saved (≈ ${Math.round(hours / FTE_HOURS_PER_MONTH)} FTE)`
+          sub={costCents > 0 && valueCents > 0 ? `value ÷ cost to run · ${hours.toLocaleString()} h saved (≈ ${Math.round(hours / FTE_HOURS_PER_MONTH)} FTE)`
             : valueCents > 0 ? 'no cost recorded yet' : 'no value declared yet'} />
       </div>
+
+      <ValueSpendSection unitKey={unit && unit.key !== UNASSIGNED ? unit.key : null} unitLabel={unit ? unit.label : 'all business units'}
+        unitAgentIds={unit ? list.map(a => a.id) : null} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
         <SummaryCard icon={<Rocket size={18} />} tone="bg-zen-50 text-zen-600" title="Value waiting to go live" tip="value_waiting"
@@ -208,8 +220,8 @@ export default function BusinessView() {
           )}
         </SummaryCard>
 
-        <SummaryCard icon={<AlertTriangle size={18} />} tone="bg-amber-50 text-amber-600" title="Missing numbers" tip="missing_numbers"
-          sub="Owners have not declared these, so the totals above leave the agent out. Click one to see which agents."
+        <SummaryCard icon={<AlertTriangle size={18} />} tone="bg-amber-50 text-amber-600" title="Missing details" tip="missing_numbers"
+          sub="Agents with no value, outcome or owner recorded. An agent with no value adds nothing to the totals above. Click one to see which agents."
           figure={String(running.filter(a => gapsOf(a).length).length)} figureSub="agents with gaps" testId="gaps-summary">
           {GAPS.every(g => !gapCount(g)) ? (
             <p className="flex items-center gap-2 text-sm text-slate-700"><CheckCircle2 size={16} className="text-emerald-500" /> Every agent here has a value, an outcome and an owner.</p>
@@ -254,7 +266,7 @@ export default function BusinessView() {
           <table className="w-full text-sm" data-testid="bu-table">
             <thead>
               <tr className="text-left text-[12.5px] font-bold uppercase tracking-[.06em] text-slate-700 whitespace-nowrap bg-gradient-to-r from-zen-50 to-slate-50">
-                <th className="py-3 pl-3 pr-3 rounded-l-lg">Initiative</th>
+                <th className="py-3 pl-3 pr-3 rounded-l-lg">Agent</th>
                 <th className="py-3 pr-3">AI type <InfoTip term="ai_type" /></th>
                 <th className="py-3 pr-3">Owner</th>
                 <th className="py-3 pr-3">Stage <InfoTip term="stage" /></th>
@@ -285,7 +297,14 @@ export default function BusinessView() {
                       <td className="py-3 pr-3"><TypeBadge type={a.aiType} /></td>
                       <td className="py-3 pr-3 text-[13px] text-slate-700">{a.owner && a.owner !== 'Unassigned' ? a.owner : <span className="text-slate-500">—</span>}</td>
                       <td className="py-3 pr-3"><span className={STAGE_PILL[a.stage] || 'status-pending'}>{a.stage}</span></td>
-                      <td className="py-3 pr-3 text-right font-mono text-[14px] font-bold text-emerald-700">{a.valueAmount ? fmtMoney(a.valueAmount) : '—'}</td>
+                      <td className="py-3 pr-3 text-right font-mono text-[14px] font-bold text-emerald-700">
+                        {valueOf(a) ? fmtMoney(valueOf(a)) : '—'}
+                        {e?.valueState && e.valueState !== 'none' && (
+                          <span className={`block font-sans text-[11px] font-semibold ${e.valueState === 'attested' || e.valueState === 'adjusted' ? 'text-emerald-700' : 'text-slate-500'}`}>
+                            {VALUE_STATE_SHORT[e.valueState]}
+                          </span>
+                        )}
+                      </td>
                       <td className="py-3 pr-3 text-right font-mono text-[13.5px] font-semibold text-rose-600">{e?.totalCostCents != null ? fmtCents(e.totalCostCents) : '—'}</td>
                       <td className="py-3 pr-3 text-slate-500">
                         <button type="button" aria-expanded={isOpen} aria-label={`${isOpen ? 'Hide' : 'Show'} details for ${a.name}`}
@@ -297,7 +316,7 @@ export default function BusinessView() {
                     {isOpen && (
                       <tr className="bg-zen-50/40" data-testid="bu-detail">
                         <td colSpan={7} className="px-3 pb-4 pt-1">
-                          <AgentDetail agent={a} econ={e} gaps={gaps} onFix={() => setFixing(a)} />
+                          <AgentDetail agent={a} econ={e} gaps={gaps} rules={rules} onFix={() => setFixing(a)} />
                         </td>
                       </tr>
                     )}
@@ -350,12 +369,12 @@ function SummaryCard({ icon, tone, title, tip, sub, figure, figureSub, testId, c
 
 // One agent, opened from the table: value against cost, what is holding it
 // back, and what its owner still has to fill in.
-function AgentDetail({ agent: a, econ: e, gaps, onFix }: {
-  agent: RegistryAgent; econ: AgentEconomics | undefined; gaps: Gap[]; onFix: () => void
+function AgentDetail({ agent: a, econ: e, gaps, rules, onFix }: {
+  agent: RegistryAgent; econ: AgentEconomics | undefined; gaps: Gap[]; rules: GovernanceSummary | null; onFix: () => void
 }) {
-  const value = (a.valueAmount || 0) * 100
+  const value = e?.valueCents ?? (a.valueAmount || 0) * 100
   const cost = e?.totalCostCents
-  const blocker = isPipeline(a) ? blockerOf(a) : null
+  const blocker = isPipeline(a) ? blockerOf(a, rules) : null
   const B = blocker ? BLOCKER[blocker.kind] : null
   return (
     <div className="rounded-xl border border-zen-100 bg-white p-4 shadow-sm">
@@ -373,11 +392,11 @@ function AgentDetail({ agent: a, econ: e, gaps, onFix }: {
       <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
         <DetailBlock icon={<Coins size={15} />} title="Value vs cost">
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[13px]">
-            <dt className="text-slate-600">Declared value <InfoTip term="declared_value" /></dt>
-            <dd className="text-right font-semibold text-slate-900">{a.valueAmount ? `${fmtMoney(a.valueAmount)}/mo` : '—'}</dd>
+            <dt className="text-slate-600">{e?.valueState === 'attested' || e?.valueState === 'adjusted' ? 'Attested value' : 'Declared value'} <InfoTip term="declared_value" /></dt>
+            <dd className="text-right font-semibold text-slate-900">{value ? `${fmtMoney(value / 100)}/mo` : '—'}</dd>
             <dt className="text-slate-600 flex items-center gap-1">Token {e?.tokenSource && <SourceBadge source={e.tokenSource} />}</dt>
             <dd className="text-right text-slate-900">{e?.tokenCostCents != null ? fmtCents(e.tokenCostCents) : 'unknown'}</dd>
-            <dt className="text-slate-600 flex items-center gap-1">Infra {e?.infraSource && <SourceBadge source={e.infraSource} />}</dt>
+            <dt className="text-slate-600 flex items-center gap-1">Hosting {e?.infraSource && <SourceBadge source={e.infraSource} />}</dt>
             <dd className="text-right text-slate-900">{e?.infraCostCents != null ? fmtCents(e.infraCostCents) : '—'}</dd>
             <dt className="text-slate-600">Return <InfoTip term="return_on_cost" /></dt>
             <dd className="text-right font-semibold text-zen-700">{value > 0 && cost ? fmtTimes(value / cost) : '—'}</dd>
@@ -401,7 +420,7 @@ function AgentDetail({ agent: a, econ: e, gaps, onFix }: {
           )}
         </DetailBlock>
 
-        <DetailBlock icon={<AlertTriangle size={15} />} title="Missing numbers">
+        <DetailBlock icon={<AlertTriangle size={15} />} title="Missing details">
           {gaps.length === 0 ? (
             <p className="flex items-center gap-2 text-[13px] text-slate-700"><CheckCircle2 size={15} className="text-emerald-500" /> Value, outcome and owner declared</p>
           ) : (

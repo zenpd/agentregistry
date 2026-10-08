@@ -82,6 +82,9 @@ async def _fetch_sample(project: str, base_url: str, api_key: str | None) -> dic
         "status": "ok" if graph["spanCount"] else "no_traces_yet",
         "project": project,
         "observed": observed_deps.observed_from_spans(spans),
+        "toolCalls": observed_deps.tool_calls(spans),
+        "callers": [{**c, "firstSeen": c["firstSeen"].isoformat() if c["firstSeen"] else None,
+                     "lastSeen": c["lastSeen"].isoformat() if c["lastSeen"] else None} for c in observed_deps.callers(spans)],
         "sampleWindow": {"from": stats["from"], "to": stats["to"]},
         "sampleLimit": SAMPLE_SPAN_LIMIT,
         "truncated": len(spans) >= SAMPLE_SPAN_LIMIT,
@@ -213,3 +216,35 @@ async def adopt_dependencies(agent_id: str, body: AdoptRequest, user=Depends(req
         "skipped": plan["skipped"],
         "declared": declared,
     }
+
+
+@router.get("/agents/{agent_id}/tool-calls")
+async def tool_call_share(agent_id: str, refresh: bool = False, _=Depends(require_read)):
+    """Gate evidence: the share of traced tool calls that go to tools, systems or MCP
+    servers approved at the last Security Review (the record as it was then)."""
+    from db.models import GovernanceReview
+
+    agent, base_url, api_key = await _load_agent(agent_id)
+    async with get_db_session() as db:
+        review = (await db.execute(select(GovernanceReview).where(GovernanceReview.agent_id == agent_id,
+                                                                  GovernanceReview.gate == "security"))).scalar_one_or_none()
+    snap = (review.approved_snapshot or {}) if review is not None else {}
+    fields = snap.get("fields") or {}
+    if not fields:
+        return {"status": "no_approval", "message": "No Security Review approval with a recorded copy of the record yet, "
+                "so there is no approved tool set to compare with."}
+    approved = [n for k in ("mcp_servers", "knowledge_bases", "databases", "enterprise_systems") for n in (fields.get(k) or [])]
+    sample = await _sample(agent, base_url, api_key, refresh)
+    if sample["status"] != "ok":
+        plain = {"not_linked": "Not linked to a Phoenix project, so there are no traced tool calls to compare.",
+                 "no_traces_yet": "Phoenix has no traces for this agent yet."}
+        return {"status": sample["status"], "message": sample.get("reason") or plain.get(sample["status"], "No traces to read."),
+                "approvedSet": approved}
+    calls = sample.get("toolCalls")
+    if calls is None:      # a sample cached before tool calls were kept
+        sample = await _sample(agent, base_url, api_key, True)
+        calls = sample.get("toolCalls") or []
+    share = observed_deps.approved_call_share(calls, approved)
+    return {"status": "ok" if share["total"] else "no_tool_calls", **share, "approvedSet": approved,
+            "approvedAt": review.reviewed_at.isoformat() if review is not None and review.reviewed_at else None,
+            "sampleWindow": sample.get("sampleWindow"), "sampleLimit": sample.get("sampleLimit"), "truncated": sample.get("truncated")}

@@ -88,6 +88,11 @@ def _clip(text: Any, limit: int = MAX_TEXT) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def _no_names(text: Any) -> Any:
+    """People's names stay out of what the model reads: 'confirmed ..., by Ana on 2026-10-08' loses the name."""
+    return re.sub(r",? by [^,]+? on (\d{4}-\d{2}-\d{2})", r" on \1", text) if isinstance(text, str) else text
+
+
 def _usd(cents: Any) -> float | None:
     return None if cents is None else round(float(cents) / 100, 4)
 
@@ -161,14 +166,23 @@ async def get_reviews(agent_id: str, book: RefBook) -> dict:
             "checklist": [{
                 "ref": book.ref("check", agent_id, c["id"], label=c["label"]),
                 "item": c["label"], "result": c.get("result"), "automatic": c.get("auto"),
-                "ticked": c.get("tick"), "detail": c.get("detail"),
+                "ticked": c.get("tick"), "detail": _no_names(c.get("detail")),
             } for c in gate.get("checklist") or []],
+            # Model, tools or endpoint changed after this review was approved.
+            "changedSinceApproval": [{"what": ch.get("label"), "added": ch.get("added"), "removed": ch.get("removed"),
+                                      "before": ch.get("before") if "added" not in ch else None,
+                                      "after": ch.get("after") if "added" not in ch else None}
+                                     for ch in gate.get("changedSinceApproval") or []],
         })
     return {
         "stage": g["stage"], "riskTier": g.get("riskTier"), "euAiActCategory": g.get("euAiActCategory"),
         "enforcement": g.get("enforcement"), "gates": gates,
         "recertification": g.get("recertification"), "readiness": g.get("readiness"),
-        "openExceptions": len(g.get("exceptions") or []),
+        "activeWaivers": len(g.get("exceptions") or []),
+        "waiversWaitingForASecondSigner": len(g.get("pendingWaivers") or []),
+        "classificationConfirmed": any(c.get("id") == "arb.eu_tier" and c.get("result") == "pass"
+                                       for gate in g["gates"] for c in gate.get("checklist") or []),
+        "weeksInStage": g.get("weeksInStage"), "stalledInStage": g.get("stalled"),
     }
 
 
@@ -184,7 +198,20 @@ async def get_risks(agent_id: str, book: RefBook) -> dict:
             "firstDetected": f.get("detectedAt"), "mitigation": _clip(f.get("mitigation"), 200) or None,
         } for f in r.get("findings") or []][:40],
         "financial": r.get("financial"),
+        "incidents": await _incidents(agent_id, book),
     }
+
+
+async def _incidents(agent_id: str, book: RefBook) -> list[dict]:
+    """Open incidents linked to the agent, and whether its owner was asked to stop it."""
+    from sqlalchemy import select
+    from db.base import get_db_session
+    from db.models import Incident
+    async with get_db_session() as db:
+        rows = (await db.execute(select(Incident).where(Incident.agent_id == agent_id, Incident.status == "open"))).scalars().all()
+    return [{"ref": book.ref("incident", agent_id, i.id, label=f"Incident: {i.title}"), "title": _clip(i.title, 200),
+             "severity": i.severity, "openedAt": i.opened_at.isoformat() if i.opened_at else None,
+             "ownerAskedToStop": bool(i.stop_requested_at), "stopAcknowledged": bool(i.stop_acknowledged_at)} for i in rows]
 
 
 def _ratio(now: float, before: float) -> float | None:
@@ -245,7 +272,10 @@ async def get_economics(agent_id: str, book: RefBook) -> dict:
         "ref": book.ref("economics", agent_id, label="Value against cost"),
         "month": e["period"]["month"], "valueDeclared": e["valueDeclared"],
         # No figure rather than a zero when nobody declared one: a zero invites comparing it with peers.
-        "declaredValueUsd": _usd(e["valueCents"]) if e["valueDeclared"] else None,
+        # valueUsd is the figure every page uses: the finance figure when finance attested or adjusted it, else the owner's.
+        "valueUsd": _usd(e["valueCents"]) if e["valueDeclared"] else None,
+        "valueIs": e.get("valueStateLabel"), "declaredByOwnerUsd": _usd(e.get("valueDeclaredCents")) if e.get("valueDeclaredCents") else None,
+        "valueMethod": e.get("valueMethodLabel"),
         "tokenCostUsd": _usd(e["tokenCostCents"]), "tokenCostSource": e["tokenSource"],
         "infraCostUsd": _usd(e["infraCostCents"]), "infraCostSource": e["infraSource"],
         "totalCostUsd": _usd(e["totalCostCents"]), "costComplete": e["costComplete"], "roiPct": e.get("roiPct"),
@@ -359,7 +389,7 @@ async def get_contract(agent_id: str, book: RefBook) -> dict:
 async def list_agent_catalog(book: RefBook) -> dict:
     """Every registered agent, briefly — for comparing purposes by meaning."""
     from api.routers import registry
-    page = await registry.list_agents(page=1, limit=200, dept="", stage="", type="", q="", certified=False, _=_USER)
+    page = await registry.list_agents(page=1, limit=200, dept="", stage="", type="", q="", certified=False, user=_USER)
     agents = page.get("agents") or page.get("data") or []
     return {"count": len(agents), "agents": [{
         "ref": book.ref("agent", a["id"], label=a["name"]),
@@ -394,7 +424,7 @@ async def get_portfolio_overview(book: RefBook) -> dict:
         anomalies = list((await db.execute(select(CostAnomaly.agent_id, CostAnomaly.anomaly_type)
                                            .where(CostAnomaly.resolved_at.is_(None)))).all())
         used = list((await db.execute(select(AgentTokenUsage.agent_id, AgentTokenUsage.model_name)
-                                      .where(AgentTokenUsage.source == "phoenix").distinct())).all())
+                                      .where(AgentTokenUsage.source.in_(("phoenix", "langfuse"))).distinct())).all())
         aliases = await load_aliases(db)
     rows = []
     for a in agents:
@@ -423,7 +453,7 @@ async def get_peer_figures(book: RefBook, ai_type: str = "") -> dict:
     so a claimed value can be put in context."""
     from api.routers.ops import economics
     from api.routers import registry
-    page = await registry.list_agents(page=1, limit=200, dept="", stage="", type="", q="", certified=False, _=_USER)
+    page = await registry.list_agents(page=1, limit=200, dept="", stage="", type="", q="", certified=False, user=_USER)
     types = {a["id"]: a["aiType"] for a in (page.get("agents") or page.get("data") or [])}
     rows = (await economics.portfolio_economics(_=_USER))["agents"]
     peers = [r for r in rows if not ai_type or types.get(r["agentId"], "").lower() == ai_type.lower()]

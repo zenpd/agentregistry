@@ -131,3 +131,7 @@ export const tryAgent = (agentId: string, method: 'POST' | 'GET', body: unknown,
 
 export const getApiOperations = (agentId: string) =>
   api.get<ApiOperations>(`${agentPath(agentId)}/api-operations`)
+
+// The agent's A2A card. Published once it is certified for reuse; preview shows it before that.
+export const getAgentCard = (agentId: string) =>
+  api.get<Record<string, unknown> & { 'x-preview'?: boolean }>(`/catalog/agents/${encodeURIComponent(agentId)}/agent-card.json`, { params: { preview: true } })

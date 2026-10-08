@@ -328,7 +328,7 @@ async def client(db, monkeypatch):
     integrate._recent_calls.clear()
     calls = []
 
-    async def fake_run(spec, *, agent_id, request, data_block="", book=None, model=None):
+    async def fake_run(spec, *, agent_id, request, data_block="", book=None, model=None, **_):
         calls.append({"kind": spec.kind, "agent_id": agent_id, "tools": spec.tools, "data": data_block, "scope": spec.scope})
         return {"kind": spec.kind, "status": "ok", "promptVersion": spec.version, "model": "fake", "steps": 2, "durationMs": 5,
                 "refs": {"agent:a1": "Invoice Matcher"}, "toolsUsed": ["get_record"], "checks": {"findingsWritten": 1},

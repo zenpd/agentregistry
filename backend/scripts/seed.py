@@ -59,10 +59,17 @@ SEED_MODEL_PRICES = [
 
 
 async def seed_database():
-    """Seed the database with prototype data if empty."""
+    """Seed the database with prototype data if empty. The agents are demo agents."""
+    from db.scope import unfiltered
+    from shared.config import get_settings
+
+    if not get_settings().demo_agents_enabled:
+        print("DEMO_AGENTS_ENABLED is false: the demo agents are not seeded.")
+        return
     async with get_db_session() as db:
-        # Check if already seeded
-        result = await db.execute(select(func.count(Agent.id)))
+        # Check if already seeded: every agent row counts, demo or archived ones included.
+        with unfiltered():
+            result = await db.execute(select(func.count(Agent.id)))
         if result.scalar() > 0:
             print("Database already seeded, skipping.")
             return
@@ -83,7 +90,7 @@ async def seed_database():
         for agent_data in SEED_AGENTS:
             reviews = agent_data.pop("reviews", {})
             agent_id = agent_data["id"]
-            db.add(Agent(org_id="org-default", **agent_data))
+            db.add(Agent(org_id="org-default", is_demo=True, **agent_data))
             for gate, status in reviews.items():
                 db.add(GovernanceReview(id=secrets.token_hex(8), agent_id=agent_id, gate=gate, status=status))
             # Seed token usage

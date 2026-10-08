@@ -326,12 +326,62 @@ async def _load_links_and_agents() -> tuple[list[dict], list[str]]:
     return [{"agent_id": l.agent_id, "resource_id": l.resource_id, "share_pct": l.share_pct} for l in links], agent_ids
 
 
+SETTING_KEY = "azure_cost"
+
+
+async def effective_settings() -> Any:
+    """The Azure Cost Management settings: what an admin saved in Settings, else the
+    backend environment. The client secret is stored sealed and never returned."""
+    from types import SimpleNamespace
+
+    from connectors.base import unseal
+    from services.ai_meter import get_setting
+
+    env = get_settings()
+    saved = await get_setting(SETTING_KEY) or {}
+    secret = ""
+    if saved.get("secret"):
+        try:
+            secret = unseal(saved["secret"]).get("clientSecret", "")
+        except Exception:
+            secret = ""
+    return SimpleNamespace(
+        azure_tenant_id=saved.get("tenantId") or env.azure_tenant_id,
+        azure_client_id=saved.get("clientId") or env.azure_client_id,
+        azure_client_secret=secret or env.azure_client_secret,
+        azure_cost_scope=saved.get("scope") or env.azure_cost_scope,
+        azure_cost_tag_key=saved.get("tagKey") or env.azure_cost_tag_key,
+        source="settings" if saved else "environment",
+    )
+
+
+async def test_connection() -> dict:
+    """Signs in and runs a one-day query: says whether the setup works, without storing anything."""
+    settings = await effective_settings()
+    missing = missing_settings(settings)
+    if missing:
+        return {"ok": False, "status": "not_configured", "message": "Missing: " + ", ".join(missing) + "."}
+    end = _utcnow().date()
+    scope = "/" + settings.azure_cost_scope.strip().strip("/")
+    try:
+        async with _http_client() as client:
+            token = await _access_token(client, settings)
+            payload = await fetch_query_pages(client, token, scope, query_body((settings.azure_cost_tag_key or "agent-id").strip(), end, end))
+    except CostApiError as exc:
+        return {"ok": False, "status": exc.status, "message": exc.reason}
+    except httpx.RequestError as exc:
+        return {"ok": False, "status": "unreachable", "message": f"Azure did not answer ({type(exc).__name__})."}
+    rows = len((payload.get("properties") or {}).get("rows") or [])
+    return {"ok": True, "status": "ok", "message": f"Signed in and read cost for {end.isoformat()} at {mask_scope(scope)}: {rows} rows.",
+            "rows": rows}
+
+
 async def collect_infra_costs(agent_id: str | None = None, trigger: str = "manual", days: int = 7) -> dict:
     """Pull the last `days` of daily ActualCost for AZURE_COST_SCOPE and store
     what can be allocated to agents. Never raises for an Azure failure: the
     status says what happened (ok | partial | not_configured | forbidden |
     throttled | unreachable | error)."""
-    settings = get_settings()
+    settings = await effective_settings()
     missing = missing_settings(settings)
     if missing:
         return {"status": "not_configured", "trigger": trigger, "missing": missing,

@@ -1,11 +1,22 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import axios from 'axios'
 import { login } from '../services/api'
+
+const DEMO_EMAIL = 'admin@airegistry.local'
+const DEMO_PASSWORD = 'admin123'
 
 export default function LoginPage() {
   const navigate = useNavigate()
-  const [email, setEmail] = useState('admin@airegistry.local')
-  const [password, setPassword] = useState('admin123')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  // The local demo account is shown only when the server runs in development.
+  const [showDemo, setShowDemo] = useState(false)
+  useEffect(() => {
+    axios.get('/api/v1/auth/config').then(r => {
+      if (r.data?.showDemoLogin) { setShowDemo(true); setEmail(DEMO_EMAIL); setPassword(DEMO_PASSWORD) }
+    }).catch(() => {})
+  }, [])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -45,7 +56,7 @@ export default function LoginPage() {
               value={email}
               onChange={e => setEmail(e.target.value)}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zen-400"
-              placeholder="admin@airegistry.local"
+              placeholder="you@company.com"
             />
           </div>
           <div>
@@ -55,7 +66,6 @@ export default function LoginPage() {
               value={password}
               onChange={e => setPassword(e.target.value)}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zen-400"
-              placeholder="admin123"
             />
           </div>
           {error && <div className="text-sm text-red-600 bg-red-50 rounded p-2">{error}</div>}
@@ -68,10 +78,12 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-4 text-xs text-slate-500">
-          <div>Demo credentials:</div>
-          <div>admin@airegistry.local / admin123</div>
-        </div>
+        {showDemo && (
+          <div className="mt-4 text-xs text-slate-500" data-testid="demo-login">
+            <div>Local development account:</div>
+            <div>{DEMO_EMAIL} / {DEMO_PASSWORD}</div>
+          </div>
+        )}
       </div>
     </div>
   )

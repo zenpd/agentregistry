@@ -18,6 +18,7 @@ from api.auth import require_admin, require_read, require_update
 from db.base import get_db_session
 from db.models import Agent, AgentBudget, AgentTokenUsage, CostAnomaly, JobRun, ModelAlias
 from governance.cost_anomalies import anomaly_cost_share, spike_days
+from governance import costing
 from governance.costing import (
     budget_status, by_model, cost_per_call_cents, daily_series, forecast_monthly_cents,
     month_to_date_cents, normalize_model, period_end, period_start, projected_period_end_cents,
@@ -197,7 +198,7 @@ async def agent_tokenomics(agent_id: str, days: int = Query(30, ge=7, le=90), _=
     daily = daily_series(rows, window_start, today)
     spikes: set[str] = set()
     anomaly_share = None
-    if usage["source"] == "phoenix":
+    if usage["source"] in costing.REAL_SOURCES:
         history = daily_series(rows, window_start - timedelta(days=SPIKE_BASELINE_DAYS), today)
         spikes = {s["date"] for s in spike_days(history, window_start)}
         share = anomaly_cost_share(history, window_start)
@@ -428,7 +429,7 @@ async def list_model_aliases(_=Depends(require_read)):
         prices = await load_prices(db)
         alias_map = await load_aliases(db)
         observed = set((await db.execute(
-            select(AgentTokenUsage.model_name).where(AgentTokenUsage.source == "phoenix").distinct()
+            select(AgentTokenUsage.model_name).where(AgentTokenUsage.source.in_(costing.REAL_SOURCES)).distinct()
         )).scalars().all())
     return {
         "aliases": [{"alias": a.alias, "modelName": a.model_name, "priced": a.model_name.strip().lower() in prices}

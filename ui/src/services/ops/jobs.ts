@@ -1,6 +1,6 @@
 import api from '../api'
 
-export type JobName = 'phoenix_discovery' | 'usage_ingestion' | 'record_autofill' | 'infra_costs' | 'cost_rollup' | 'risk_scan' | 'governance_checks' | 'insight_refresh'
+export type JobName = 'phoenix_discovery' | 'usage_ingestion' | 'record_autofill' | 'infra_costs' | 'cost_rollup' | 'risk_scan' | 'governance_checks' | 'insight_refresh' | 'notifications' | 'connector_sync' | 'consumer_observation' | 'spend_review'
 
 // ok | partial | not_configured | skipped | error | unreachable come from the jobs;
 // running | stale | cancelled | unavailable are set by the runner. A job that

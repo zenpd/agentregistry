@@ -74,6 +74,8 @@ async def portfolio_economics(_=Depends(require_read)):
         "totalNetCents": round(value - cost, 2),
         "totalValueCents": value,
         "totalRealizedValueCents": sum(e["realizedValueCents"] for e in rows),
+        # The part of the value a finance reviewer attested or adjusted.
+        "totalAttestedValueCents": sum(e["valueCents"] for e in rows if e.get("valueState") in ("attested", "adjusted")),
         "totalTokenCostCents": round(sum(e["tokenCostCents"] or 0 for e in rows), 2),
         "totalInfraCostCents": round(sum(e["infraCostCents"] for e in rows), 2),
         "totalCostCents": cost,
@@ -280,7 +282,12 @@ async def delete_resource_link(agent_id: str, link_id: str, user=Depends(require
 
 @router.get("/infra-costs/status")
 async def infra_costs_status(_=Depends(require_read)):
-    status = config_status(get_settings())
+    from costs.azure_cost_collector import effective_settings
+
+    settings = await effective_settings()
+    status = {**config_status(settings), "configSource": settings.source,
+              "tenantId": settings.azure_tenant_id or None, "clientId": settings.azure_client_id or None,
+              "secretSet": bool(settings.azure_client_secret)}
     async with get_db_session() as db:
         last = (await db.execute(
             select(JobRun).where(JobRun.job == INFRA_JOB).order_by(JobRun.started_at.desc(), JobRun.id.desc()).limit(1)
@@ -308,3 +315,36 @@ async def collect_infra_costs_now(
         _audit(db, user, "infra_costs.collect", "job", INFRA_JOB,
                {"agentId": agent_id, "days": days, "runId": result["runId"], "status": result["status"]})
     return job_runner.for_display(result)
+
+
+
+class AzureCostConfig(BaseModel):
+    tenantId: str = Field("", max_length=100)
+    clientId: str = Field("", max_length=100)
+    clientSecret: Optional[str] = Field(None, max_length=500)
+    scope: str = Field("", max_length=500)
+    tagKey: str = Field("agent-id", max_length=100)
+
+
+@router.put("/infra-costs/config")
+async def save_infra_cost_config(body: AzureCostConfig, user=Depends(require_admin)):
+    """Saves the Azure Cost Management setup. An empty client secret keeps the saved one."""
+    from connectors.base import seal
+    from costs.azure_cost_collector import SETTING_KEY
+    from services.ai_meter import get_setting, set_setting
+
+    saved = await get_setting(SETTING_KEY) or {}
+    secret = seal({"clientSecret": body.clientSecret}) if body.clientSecret else saved.get("secret")
+    value = {"tenantId": body.tenantId.strip(), "clientId": body.clientId.strip(), "scope": body.scope.strip(),
+             "tagKey": body.tagKey.strip() or "agent-id", "secret": secret}
+    await set_setting(SETTING_KEY, value, user["user_id"])
+    async with get_db_session() as db:
+        _audit(db, user, "settings.update", "infra_costs", "azure",
+               {k: v for k, v in value.items() if k != "secret"} | {"secretChanged": bool(body.clientSecret)})
+    return await infra_costs_status()
+
+
+@router.post("/infra-costs/test")
+async def test_infra_cost_config(_=Depends(require_admin)):
+    from costs.azure_cost_collector import test_connection
+    return await test_connection()

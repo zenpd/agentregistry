@@ -115,6 +115,45 @@ async def sync_missing_columns() -> list[str]:
     return added
 
 
+async def ensure_audit_append_only() -> None:
+    """Audit rows cannot be changed or deleted, in the database itself (the same
+    triggers migration 0005 creates). Idempotent."""
+    from sqlalchemy import text
+
+    async with engine.begin() as conn:
+        if conn.dialect.name == "sqlite":
+            await conn.execute(text("CREATE TRIGGER IF NOT EXISTS audit_log_no_update BEFORE UPDATE ON audit_log "
+                                    "BEGIN SELECT RAISE(ABORT, 'audit_log rows cannot be changed'); END"))
+            await conn.execute(text("CREATE TRIGGER IF NOT EXISTS audit_log_no_delete BEFORE DELETE ON audit_log "
+                                    "BEGIN SELECT RAISE(ABORT, 'audit_log rows cannot be deleted'); END"))
+            # The hash chain over decisions is append-only too (services/decision_chain.py).
+            await conn.execute(text("CREATE TRIGGER IF NOT EXISTS decision_chain_no_update BEFORE UPDATE ON decision_chain "
+                                    "BEGIN SELECT RAISE(ABORT, 'decision_chain rows cannot be changed'); END"))
+            await conn.execute(text("CREATE TRIGGER IF NOT EXISTS decision_chain_no_delete BEFORE DELETE ON decision_chain "
+                                    "BEGIN SELECT RAISE(ABORT, 'decision_chain rows cannot be deleted'); END"))
+        elif conn.dialect.name == "postgresql":
+            await conn.execute(text("CREATE OR REPLACE FUNCTION audit_log_append_only() RETURNS trigger AS $$ "
+                                    "BEGIN RAISE EXCEPTION 'audit_log rows cannot be changed or deleted'; END; $$ LANGUAGE plpgsql"))
+            exists = (await conn.execute(text("SELECT 1 FROM pg_trigger WHERE tgname = 'audit_log_append_only'"))).scalar()
+            if not exists:
+                await conn.execute(text("CREATE TRIGGER audit_log_append_only BEFORE UPDATE OR DELETE ON audit_log "
+                                        "FOR EACH ROW EXECUTE FUNCTION audit_log_append_only()"))
+            await conn.execute(text("CREATE OR REPLACE FUNCTION decision_chain_append_only() RETURNS trigger AS $$ "
+                                    "BEGIN RAISE EXCEPTION 'decision_chain rows cannot be changed or deleted'; END; $$ LANGUAGE plpgsql"))
+            if not (await conn.execute(text("SELECT 1 FROM pg_trigger WHERE tgname = 'decision_chain_append_only'"))).scalar():
+                await conn.execute(text("CREATE TRIGGER decision_chain_append_only BEFORE UPDATE OR DELETE ON decision_chain "
+                                        "FOR EACH ROW EXECUTE FUNCTION decision_chain_append_only()"))
+
+
+async def mark_seed_agents_as_demo() -> None:
+    """Run once, when the is_demo column is first added: the agents this script
+    seeded are the demo ones. Agents registered by people stay real."""
+    from sqlalchemy import update
+
+    async with get_db_session() as db:
+        await db.execute(update(Agent).where(Agent.id.in_([a["id"] for a in SEED_AGENTS])).values(is_demo=True))
+
+
 async def ensure_reference_data() -> None:
     """Idempotent: prices and aliases for the models actually seen in traces."""
     from db.models import ModelAlias
@@ -135,16 +174,25 @@ async def init_db():
     added = await sync_missing_columns()
     if added:
         print(f"Added missing columns: {', '.join(added)}")
+    if "agents.is_demo" in added:
+        await mark_seed_agents_as_demo()
+    await ensure_audit_append_only()
     await ensure_reference_data()
 
+    from db.scope import unfiltered
+    from shared.config import get_settings
+    seed_demo = get_settings().demo_agents_enabled
+
     async with get_db_session() as db:
-        # Check if already seeded
-        result = await db.execute(select(func.count(Agent.id)))
-        if result.scalar() > 0:
+        # Check if already seeded: the organisation row, or any agent row (demo or archived
+        # ones included). With DEMO_AGENTS_ENABLED=false a seeded database can have no agents.
+        with unfiltered():
+            result = await db.execute(select(func.count(Agent.id)))
+        if result.scalar() > 0 or await db.get(Organization, "org-default") is not None:
             print("Database already seeded, skipping.")
             return
 
-        print("Seeding database...")
+        print("Seeding database..." + ("" if seed_demo else " (DEMO_AGENTS_ENABLED=false: no demo agents or demo discoveries)"))
 
         try:
             # Create default org, flushed alone before ANYTHING that
@@ -163,14 +211,14 @@ async def init_db():
                 db.add(Department(id=dept["id"], org_id="org-default", name=dept["name"], cost_center=dept.get("cost_center", "")))
             await db.flush()
 
-            # Create agents
-            for agent_data in SEED_AGENTS:
+            # Create the demo agents (only when DEMO_AGENTS_ENABLED is true)
+            for agent_data in (SEED_AGENTS if seed_demo else []):
                 reviews = agent_data.pop("reviews", {})
                 agent_id = agent_data["id"]
                 # Use id as slug if not provided
                 if "slug" not in agent_data:
                     agent_data["slug"] = agent_id
-                db.add(Agent(org_id="org-default", **agent_data))
+                db.add(Agent(org_id="org-default", is_demo=True, **agent_data))
                 for gate, status in reviews.items():
                     db.add(GovernanceReview(id=secrets.token_hex(8), agent_id=agent_id, gate=gate, status=status))
                 # Seed token usage
@@ -179,8 +227,8 @@ async def init_db():
                     invocation_count=1000, input_tokens=2400000, output_tokens=850000, cached_tokens=912000, cost_cents=3700
                 ))
 
-            # Create discoveries
-            for disc in SEED_DISCOVERIES:
+            # Create the demo discoveries (only with the demo agents)
+            for disc in (SEED_DISCOVERIES if seed_demo else []):
                 db.add(Discovery(org_id="org-default", **disc))
 
             # Create model prices
@@ -194,15 +242,15 @@ async def init_db():
                 name="Registry Admin", role="Registry Admin", password_hash=hash_password(admin_password)
             ))
 
-            # Create agent identities
-            for agent_data in SEED_AGENTS:
+            # Create agent identities of the demo agents
+            for agent_data in (SEED_AGENTS if seed_demo else []):
                 agent_id = agent_data["id"]
                 db.add(AgentIdentity(
                     agent_id=agent_id, service_account=f"svc-{agent_id}@airegistry.local",
                     entra_agent_id=f"entra-{agent_id}", permissions=["read", "write", "execute"]
                 ))
 
-            print(f"Seeded {len(SEED_AGENTS)} agents, {len(SEED_DISCOVERIES)} discoveries, {len(SEED_DEPARTMENTS)} departments")
+            print(f"Seeded {len(SEED_AGENTS) if seed_demo else 0} demo agents, {len(SEED_DISCOVERIES) if seed_demo else 0} discoveries, {len(SEED_DEPARTMENTS)} departments")
             print(f"Admin login: admin@airegistry.local / {admin_password}")
         except Exception as e:
             print(f"ERROR during seeding: {e}")

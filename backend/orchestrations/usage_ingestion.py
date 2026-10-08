@@ -169,6 +169,16 @@ async def ingest_usage(agent_id: str | None = None, trigger: str = "manual", day
     """Ingest Phoenix LLM usage for one agent, or every agent with a linked
     project. Never raises for a Phoenix failure: each agent reports its own
     status (ok | partial | unreachable | auth_failed | not_configured | error)."""
+    if agent_id:
+        # An agent whose traces are in a Langfuse project is read from there instead.
+        from db.models import Agent
+        async with get_db_session() as db:
+            a = await db.get(Agent, agent_id)
+        if a is not None and a.trace_connector_id:
+            from services.connectors import ingest_langfuse_usage
+            r = await ingest_langfuse_usage(agent_id)
+            return {"status": "ok" if not r["errors"] else "unreachable", "trigger": trigger, "source": "langfuse",
+                    "reason": "; ".join(r["errors"])[:300] or None, "agents": [], "rows": 0, "calls": 0}
     try:
         targets, aliases, prices = await _load_targets(agent_id, days)
     except _NothingToIngest as nothing:

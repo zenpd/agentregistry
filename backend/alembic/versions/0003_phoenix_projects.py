@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = '0003_phoenix_projects'
-down_revision = '0002_agent_registry'
+down_revision = '0002a_catch_up_schema'
 branch_labels = None
 depends_on = None
 

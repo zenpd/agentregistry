@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm'
 import {
   LIFECYCLE_STAGES,
   changeStage,
-  createGovernanceException,
+  createGovernanceException, signWaiver,
   draftReviewNotes,
   getGovernance,
   getStageReadiness,
@@ -26,7 +26,12 @@ import {
   type StageReadiness,
   type Tick,
 } from '../../services/ops/governance'
+import ClassificationPanel from './ClassificationPanel'
+import RetirementPanel from './RetirementPanel'
+import { AssureAiLine, ToolCallsLine } from './EvidenceLines'
+import EvidencePackLine from './EvidencePackLine'
 import { Loading, FieldLabel, SectionLabel, SourceBadge, STAGE_PILL, fmtNumber, type TabProps, useReloadOn } from './shared'
+import { can, canDecide, notAllowed, useMe } from '../../lib/me'
 
 const STATUS_PILL: Record<GateStatus, string> = {
   'Not Submitted': 'bg-gray-100 text-slate-700 ring-gray-200',
@@ -139,16 +144,18 @@ export default function GovernanceTab({ agentId, onChanged, dataVersion }: TabPr
     <div className="space-y-5">
       <EnforcementBanner state={state} />
       {error && <ErrorLine text={`Refresh failed: ${error}`} />}
-      <EvidenceSignals state={state} />
+      <EvidenceSignals state={state} agentId={agentId} onDone={refresh} />
       <RecertificationBox state={state} agentId={agentId} onDone={refresh} />
       <ReadinessPanel state={state} agentId={agentId} onDone={refresh} />
+      <ClassificationPanel agentId={agentId} onDone={refresh} />
       <div className="space-y-3">
         {state.gates.map(g => (
           <GateCard key={g.gate} gate={g} agentId={agentId} onDone={refresh} />
         ))}
       </div>
       <ExceptionsPanel state={state} agentId={agentId} onDone={refresh} />
-      <HistoryPanel history={state.history} />
+      <RetirementPanel agentId={agentId} onDone={refresh} />
+      <HistoryPanel history={state.history} agentId={agentId} />
     </div>
   )
 }
@@ -161,7 +168,7 @@ function TelemetryLine({ telemetry }: { telemetry: GovernanceState['telemetry'] 
     <span className="inline-flex items-center gap-1 text-slate-500"><SourceBadge source="seed" /> ignored as evidence</span>
   )
   if (!phoenixProject) {
-    return <span className="text-slate-600">No usage data — no Phoenix project linked. {demoNote}</span>
+    return <span className="text-slate-600">No usage data: no tracing is linked (Diagram tab). {demoNote}</span>
   }
   if (!usage) {
     return (
@@ -181,9 +188,12 @@ function TelemetryLine({ telemetry }: { telemetry: GovernanceState['telemetry'] 
   )
 }
 
-function EvidenceSignals({ state }: { state: GovernanceState }) {
+function EvidenceSignals({ state, agentId, onDone }: { state: GovernanceState; agentId: string; onDone: () => Promise<void> }) {
   return (
     <div className="rounded-xl ring-1 ring-gray-100 px-3 py-2.5 space-y-1 text-xs">
+      <AssureAiLine agentId={agentId} onRecorded={onDone} />
+      <ToolCallsLine agentId={agentId} />
+      <EvidencePackLine agentId={agentId} />
       <div className="flex flex-wrap items-baseline gap-x-2">
         <span className="text-slate-500 w-20 shrink-0">Telemetry</span>
         <TelemetryLine telemetry={state.telemetry} />
@@ -192,7 +202,7 @@ function EvidenceSignals({ state }: { state: GovernanceState }) {
         <span className="text-slate-500 w-20 shrink-0">context.md</span>
         <span className="text-slate-600">
           {state.contextPresent
-            ? 'Present. Review-note drafts read it as data only; nothing in it changes a gate.'
+            ? 'Present. Review-note drafts read it as data only; nothing in it changes a review.'
             : 'Not provided (optional). Checklists and drafts work without it.'}
         </span>
       </div>
@@ -200,8 +210,9 @@ function EvidenceSignals({ state }: { state: GovernanceState }) {
   )
 }
 
-function HistoryPanel({ history }: { history: GovernanceState['history'] }) {
+function HistoryPanel({ history, agentId }: { history: GovernanceState['history']; agentId: string }) {
   const [open, setOpen] = useState(false)
+  const me = useMe()
   if (history.length === 0) {
     return <p className="text-xs text-slate-500">No governance decisions recorded for this agent yet.</p>
   }
@@ -219,6 +230,9 @@ function HistoryPanel({ history }: { history: GovernanceState['history'] }) {
               <span className="text-slate-500 truncate max-w-[10rem]" title={h.actor}>{h.actor}</span>
             </li>
           ))}
+          {can(me, 'audit') && (
+            <li className="py-1.5 text-xs"><a href={`/audit?kind=all&entity=${encodeURIComponent(agentId)}`} className="text-zen-700 hover:underline">Everything recorded for this agent, in the audit trail</a></li>
+          )}
         </ul>
       )}
     </div>
@@ -228,18 +242,32 @@ function HistoryPanel({ history }: { history: GovernanceState['history'] }) {
 // ── Banner, recertification ─────────────────────────────────────────────────
 
 function EnforcementBanner({ state }: { state: GovernanceState }) {
-  const warn = state.enforcement === 'warn'
+  const t = state.template
+  const warn = t.mode === 'warn'
   return (
-    <Disclosure summary={<>Stage rules: <span className="font-semibold">{warn ? 'warn' : 'block'} mode</span> · approvals valid {state.validityDays} days</>}>
-      <p>
-        {warn
-          ? 'Gaps are reported as warnings; a stage change still goes ahead. Set GOVERNANCE_ENFORCEMENT=block to require the rules (an admin can then override with a reason).'
-          : 'A stage change that breaks an entry rule is refused unless an admin gives an override reason.'}
-        {' '}Approvals stay valid for {state.validityDays} days (risk tier {state.riskTier}). Every decision here is made by a person; the registry never approves, pauses or stops an agent.
-      </p>
-    </Disclosure>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-[13px]" data-testid="governance-summary">
+        <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-semibold text-slate-800" title="Share of the record's important fields that are filled in">Record {state.completeness.score}% complete</span>
+        {state.weeksInStage != null && (
+          <span className={`rounded-full px-2.5 py-0.5 font-semibold ${state.stalled ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-300' : 'bg-slate-100 text-slate-800'}`} data-testid="time-in-stage">
+            In {state.stage} for {state.weeksInStage} week{state.weeksInStage === 1 ? '' : 's'}{state.stalled ? ' — stalled' : ''}
+          </span>
+        )}
+        {state.completeness.missing.length > 0 && <span className="text-slate-600">Missing: {state.completeness.missing.join(', ')}.</span>}
+      </div>
+      <Disclosure summary={<>Rules for {t.tier} risk: <span className="font-semibold">{warn ? 'warn' : 'block'} mode</span> · {t.gates.length === 3 ? 'all three reviews' : t.gates.map(g => GATE_SHORT[g]).join(' and ')} before Production · approvals valid {t.validityDays} days</>}>
+        <p>
+          {warn
+            ? 'Gaps are reported as warnings; a stage change still goes ahead.'
+            : 'A stage change that breaks an entry rule is refused unless an admin gives an override reason.'}
+          {' '}These rules come from the template for {t.tier} risk in Settings → Governance rules. Every decision here is made by a person; the registry never approves, pauses or stops an agent. When the model, tools or systems change after an approval, the daily check reopens the reviews that change touches.
+        </p>
+      </Disclosure>
+    </div>
   )
 }
+
+const GATE_SHORT: Record<string, string> = { arb: 'Architecture', security: 'Security', dp: 'Data Protection' }
 
 function RecertificationBox({ state, agentId, onDone }: { state: GovernanceState; agentId: string; onDone: () => Promise<void> }) {
   const [confirming, setConfirming] = useState(false)
@@ -286,7 +314,7 @@ function RecertificationBox({ state, agentId, onDone }: { state: GovernanceState
       )}
       {confirming ? (
         <div className="space-y-2">
-          <p className="text-xs text-slate-700">Recertify moves all three gates back to In Review and clears their approval expiry dates. Reviewers then decide again.</p>
+          <p className="text-xs text-slate-700">Recertify moves all three reviews back to In Review and clears their approval expiry dates. Reviewers then decide again.</p>
           <input className="input text-xs" placeholder="Reason (optional)" value={reason} onChange={e => setReason(e.target.value)} />
           <div className="flex gap-2">
             <button onClick={submit} disabled={busy} className="btn-primary btn-sm">{busy ? 'Recertifying…' : 'Confirm recertify'}</button>
@@ -314,7 +342,7 @@ function ReadinessSummary({ title, readiness }: { title: string; readiness: Stag
       </div>
       {readiness.warnings.length > 0 && <WarningList warnings={readiness.warnings} />}
       {readiness.exceptionsApplied.length > 0 && (
-        <p className="text-[12px] text-slate-600">Covered by an active exception: {readiness.exceptionsApplied.map(g => g.toUpperCase()).join(', ')}</p>
+        <p className="text-[12px] text-slate-600">Covered by an active waiver: {readiness.exceptionsApplied.map(g => GATE_SHORT[g] ?? g).join(', ')}</p>
       )}
     </div>
   )
@@ -382,8 +410,11 @@ function ReadinessPanel({ state, agentId, onDone }: { state: GovernanceState; ag
           <span className="text-xs text-slate-600">Change stage to</span>
           <select className="input !w-auto text-xs py-1" value={target} onChange={e => check(e.target.value)} disabled={busy}>
             <option value="">Select…</option>
-            {LIFECYCLE_STAGES.filter(s => s !== current).map(s => <option key={s} value={s}>{s}</option>)}
+            {LIFECYCLE_STAGES.filter(s => s !== current && s !== 'Deprecated').map(s => <option key={s} value={s}>{s}</option>)}
           </select>
+          {current !== 'Deprecated' && (
+            <a href="#retirement" className="text-xs text-slate-600 hover:text-zen-700">To retire it, use Retire this agent below.</a>
+          )}
           {busy && !preview && <span className="text-xs text-slate-500">Checking…</span>}
         </div>
 
@@ -402,7 +433,7 @@ function ReadinessPanel({ state, agentId, onDone }: { state: GovernanceState; ag
                 </div>
               )}
             {preview.blocked && (
-              <input className="input text-xs" placeholder="Override reason (admin; recorded in the audit log)" value={override} onChange={e => setOverride(e.target.value)} />
+              <input className="input text-xs" placeholder="Override reason (admin; recorded in the audit trail)" value={override} onChange={e => setOverride(e.target.value)} />
             )}
             <div className="flex gap-2">
               <button onClick={confirm} disabled={busy || (preview.blocked && !override.trim())} className="btn-primary btn-sm">
@@ -462,6 +493,7 @@ const DECISION: Record<Decision, { status: GateStatus; label: string }> = {
 }
 
 function GateCard({ gate, agentId, onDone }: { gate: GateReview; agentId: string; onDone: () => Promise<void> }) {
+  const me = useMe()
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [decision, setDecision] = useState<Decision | null>(null)
@@ -518,6 +550,13 @@ function GateCard({ gate, agentId, onDone }: { gate: GateReview; agentId: string
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div><span className="text-slate-500 block">Reviewer</span><span className="text-slate-700">{gate.reviewer || '—'}</span></div>
         <div><span className="text-slate-500 block">Reviewed</span><span className="text-slate-700">{fmtDate(gate.reviewedAt)}</span></div>
+      {gate.changedSinceApproval?.length > 0 && (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900 ring-1 ring-amber-200" data-testid="changed-since-approval">
+          Changed since this approval: {gate.changedSinceApproval.map(c => c.added || c.removed
+            ? `${c.label} (${[...(c.added || []).map(a => `+${a}`), ...(c.removed || []).map(r => `-${r}`)].join(', ')})`
+            : `${c.label} (${String(c.before ?? 'empty')} → ${String(c.after ?? 'empty')})`).join('; ').replace(/; /g, ' · ')}. The daily check reopens this review if the change touches it.
+        </p>
+      )}
         <div>
           <span className="text-slate-500 block">Approval expires <InfoTip term="approval_expiry" /></span>
           <span className={gate.expiryState === 'expired' ? 'text-rose-600' : gate.expiryState === 'expiring' ? 'text-amber-700' : 'text-slate-700'}>{fmtDate(gate.expiresAt)}</span>
@@ -581,7 +620,7 @@ function GateCard({ gate, agentId, onDone }: { gate: GateReview; agentId: string
                     disabled={busy !== null}
                     onChange={e => save({ checklist: { [item.id]: (e.target.value || null) as Tick | null } }, 'tick')}
                   >
-                    <option value="">{item.auto === 'manual' ? 'Not ticked' : 'Use auto'}</option>
+                    <option value="">{item.auto === 'manual' ? 'Not ticked' : 'Use the automatic result'}</option>
                     <option value="pass">Pass</option>
                     <option value="fail">Fail</option>
                     <option value="n/a">N/A</option>
@@ -616,22 +655,30 @@ function GateCard({ gate, agentId, onDone }: { gate: GateReview; agentId: string
           onSave={async notes => { if (await save({ notes }, 'draft-save')) setDraft(null) }} />
       )}
 
-      {!decision && !editing && (
+      {!decision && !editing && !can(me, 'update') && (
+        <p className="text-[12.5px] text-slate-600" data-testid="gate-readonly">{notAllowed(me, 'change reviews')}</p>
+      )}
+      {!decision && !editing && can(me, 'update') && (
         <div className="flex flex-wrap gap-1.5">
+          {!canDecide(me, gate.gate) && (
+            <p className="w-full text-[12.5px] text-slate-600" data-testid="gate-not-yours">
+              {notAllowed(me, `decide the ${gate.label}`)} It is decided by: {gate.reviewerRole}. You can submit it for review, edit details or draft notes.
+            </p>
+          )}
           {(gate.status === 'Not Submitted' || gate.status === 'Changes Requested') && (
             <button onClick={() => save({ status: 'In Review' }, 'submit')} disabled={busy !== null} className="btn-secondary btn-sm">
               {busy === 'submit' ? 'Submitting…' : 'Submit for review'}
             </button>
           )}
-          {(!approved || renewable) && (
+          {canDecide(me, gate.gate) && (!approved || renewable) && (
             <button onClick={() => setDecision('approve')} disabled={busy !== null} className="btn-secondary btn-sm">
               {renewable ? 'Renew approval' : 'Approve'}
             </button>
           )}
-          {gate.status !== 'Approved with Conditions' && (
+          {canDecide(me, gate.gate) && gate.status !== 'Approved with Conditions' && (
             <button onClick={() => setDecision('conditions')} disabled={busy !== null} className="btn-secondary btn-sm">Approve with conditions</button>
           )}
-          {gate.status !== 'Changes Requested' && (
+          {canDecide(me, gate.gate) && gate.status !== 'Changes Requested' && (
             <button onClick={() => setDecision('changes')} disabled={busy !== null} className="btn-secondary btn-sm">Request changes</button>
           )}
           <button onClick={() => setEditing(true)} disabled={busy !== null} className="btn-ghost btn-sm">Edit details</button>
@@ -652,15 +699,13 @@ function DecisionForm({ gate, decision, busy, onCancel, onSubmit }: {
   onCancel: () => void
   onSubmit: (body: GateReviewUpdate) => void
 }) {
-  const [reviewer, setReviewer] = useState(gate.reviewer || '')
   const [conditions, setConditions] = useState(gate.conditions || '')
   const [notes, setNotes] = useState(gate.notes || '')
   const d = DECISION[decision]
-  const needsReviewer = decision !== 'changes'
-  const invalid = (needsReviewer && !reviewer.trim()) || (decision === 'conditions' && !conditions.trim())
+  const invalid = decision === 'conditions' && !conditions.trim()
 
   function submit() {
-    const body: GateReviewUpdate = { status: d.status, reviewer: reviewer.trim(), notes }
+    const body: GateReviewUpdate = { status: d.status, notes }
     if (decision === 'conditions') body.conditions = conditions.trim()
     onSubmit(body)
   }
@@ -668,8 +713,7 @@ function DecisionForm({ gate, decision, busy, onCancel, onSubmit }: {
   return (
     <div className="rounded-lg bg-gray-50 px-3 py-2.5 space-y-2">
       <p className="text-xs font-medium text-slate-700">{d.label} — {gate.label}</p>
-      <input className="input text-xs" placeholder={`Accountable reviewer (${gate.reviewerRole})${needsReviewer ? ' — required' : ''}`}
-        value={reviewer} onChange={e => setReviewer(e.target.value)} />
+      <p className="text-[12px] text-slate-600" data-testid="decider-note">You are recorded as the reviewer of this decision. Accountable for this review: {gate.reviewerRole}.</p>
       {decision === 'conditions' && (
         <textarea className="input text-xs" rows={3} placeholder="Conditions the owner must meet — required"
           value={conditions} onChange={e => setConditions(e.target.value)} />
@@ -692,7 +736,6 @@ function EditForm({ gate, busy, onCancel, onSubmit }: {
   onCancel: () => void
   onSubmit: (body: GateReviewUpdate) => void
 }) {
-  const [reviewer, setReviewer] = useState(gate.reviewer || '')
   const [notes, setNotes] = useState(gate.notes || '')
   const [conditions, setConditions] = useState(gate.conditions || '')
   const [evidence, setEvidence] = useState<EvidenceLink[]>(gate.evidence)
@@ -704,7 +747,6 @@ function EditForm({ gate, busy, onCancel, onSubmit }: {
 
   function submit() {
     const body: GateReviewUpdate = {
-      reviewer: reviewer.trim(),
       notes,
       evidence: cleaned.map(ev => ({ label: ev.label.trim(), url: ev.url.trim() })),
     }
@@ -715,7 +757,6 @@ function EditForm({ gate, busy, onCancel, onSubmit }: {
   return (
     <div className="rounded-lg bg-gray-50 px-3 py-2.5 space-y-2">
       <p className="text-xs font-medium text-slate-700">Edit {gate.label} details (status unchanged)</p>
-      <input className="input text-xs" placeholder={`Reviewer (${gate.reviewerRole})`} value={reviewer} onChange={e => setReviewer(e.target.value)} />
       <textarea className="input text-xs" rows={4} placeholder="Review notes (markdown)" value={notes} onChange={e => setNotes(e.target.value)} />
       {(gate.status === 'Approved with Conditions' || gate.conditions) && (
         <textarea className="input text-xs" rows={2} placeholder="Conditions" value={conditions} onChange={e => setConditions(e.target.value)} />
@@ -756,7 +797,7 @@ function DraftForm({ draft, busy, onDiscard, onSave }: {
           : <span className="text-[12px] px-1.5 py-0.5 rounded-full ring-1 bg-amber-50 text-amber-700 ring-amber-200" title="Azure OpenAI could not be reached; this draft is built from the checklist and findings">LLM unavailable — rule-based draft</span>}
         {draft.usedContext && <span className="text-[12px] px-1.5 py-0.5 rounded-full ring-1 bg-indigo-50 text-indigo-700 ring-indigo-200">Uses context.md</span>}
       </div>
-      <p className="text-[12px] text-slate-500">Not saved yet. Edit it, then save it as this gate's review notes (replaces the current notes).</p>
+      <p className="text-[12px] text-slate-500">Not saved yet. Edit it, then save it as the notes of this review (replaces the current notes).</p>
       <textarea className="input text-xs font-mono" rows={10} value={text} onChange={e => setText(e.target.value)} />
       <div className="flex gap-2">
         <button onClick={() => onSave(text)} disabled={busy || !text.trim()} className="btn-primary btn-sm">{busy ? 'Saving…' : 'Save as review notes'}</button>
@@ -774,7 +815,9 @@ function ExceptionRow({ exc }: { exc: GovernanceException }) {
     <li className="flex items-start justify-between gap-2 py-1.5">
       <div className="min-w-0">
         <p className="text-xs text-slate-700"><span className="font-medium">{exc.gateLabel}</span> — {exc.reason}</p>
-        <p className="text-[12px] text-slate-500">Approved by {exc.approvedBy || '—'} · until {fmtDate(exc.expiresAt)}</p>
+        <p className="text-[12px] text-slate-500">
+          {exc.twoSigners ? <>Signed by {exc.approvedBy} and {exc.secondSignerName || exc.secondSigner}</> : <>Approved by {exc.approvedBy || '—'} (one signer, recorded before the two-signer rule)</>} · until {fmtDate(exc.expiresAt)}
+        </p>
       </div>
       <span className={`text-[12px] px-1.5 py-0.5 rounded-full ring-1 whitespace-nowrap ${soon ? 'bg-amber-50 text-amber-700 ring-amber-200' : 'bg-gray-50 text-slate-700 ring-gray-200'}`}>
         {exc.daysLeft ?? '—'} d left
@@ -784,14 +827,15 @@ function ExceptionRow({ exc }: { exc: GovernanceException }) {
 }
 
 function ExceptionsPanel({ state, agentId, onDone }: { state: GovernanceState; agentId: string; onDone: () => Promise<void> }) {
+  const me = useMe()
   const today = new Date()
   const maxDate = isoDate(new Date(today.getTime() + state.maxExceptionDays * 86_400_000))
   const minDate = isoDate(new Date(today.getTime() + 86_400_000))
+  const waivable = state.gates.filter(g => g.gate !== 'security' && canDecide(me, g.gate))
   const [open, setOpen] = useState(false)
   const [gate, setGate] = useState<GateKey>('arb')
   const [reason, setReason] = useState('')
   const [expiresAt, setExpiresAt] = useState(isoDate(new Date(today.getTime() + 30 * 86_400_000)))
-  const [approvedBy, setApprovedBy] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -799,46 +843,63 @@ function ExceptionsPanel({ state, agentId, onDone }: { state: GovernanceState; a
     setBusy(true)
     setErr(null)
     try {
-      await createGovernanceException(agentId, { gate, reason: reason.trim(), expiresAt, approvedBy: approvedBy.trim() })
+      await createGovernanceException(agentId, { gate, reason: reason.trim(), expiresAt })
       setOpen(false)
       setReason('')
-      setApprovedBy('')
       await onDone()
     } catch (e) {
-      setErr(errorMessage(e, 'Could not add exception'))
+      setErr(errorMessage(e, 'Could not add the waiver'))
     } finally {
       setBusy(false)
     }
   }
 
+  async function sign(id: string) {
+    setBusy(true)
+    setErr(null)
+    try { await signWaiver(agentId, id); await onDone() } catch (e) { setErr(errorMessage(e, 'The waiver was not signed')) } finally { setBusy(false) }
+  }
+
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5" data-testid="waivers">
       <div className="flex items-center justify-between">
-        <SectionLabel tip="governance_exception">Active exceptions</SectionLabel>
-        {!open && <button onClick={() => setOpen(true)} className="text-xs text-zen-600 hover:text-zen-700">+ Add exception</button>}
+        <SectionLabel tip="governance_exception">Waivers</SectionLabel>
+        {!open && waivable.length > 0 && <button onClick={() => { setGate(waivable[0].gate); setOpen(true) }} className="text-xs text-zen-600 hover:text-zen-700">+ Add a waiver</button>}
       </div>
-      {state.exceptions.length === 0
-        ? <p className="text-xs text-slate-500">No active exceptions. An exception lets one gate count as met for stage rules, for at most {state.maxExceptionDays} days.</p>
-        : <ul className="divide-y divide-gray-50">{state.exceptions.map(e => <ExceptionRow key={e.id} exc={e} />)}</ul>}
+      <p className="text-[12px] text-slate-500">A waiver lets one review that is not approved count as met for stage rules, for at most {state.maxExceptionDays} days. It needs a reason and two different signers who may decide that review. A failed Security Review cannot be waived.</p>
+      {state.exceptions.length === 0 && state.pendingWaivers.length === 0
+        ? <p className="text-xs text-slate-500">No waivers.</p>
+        : <ul className="divide-y divide-gray-50">
+            {state.exceptions.map(e => <ExceptionRow key={e.id} exc={e} />)}
+            {state.pendingWaivers.map(w => (
+              <li key={w.id} className="flex flex-wrap items-center gap-2 py-1.5 text-xs" data-testid="pending-waiver">
+                <span className="font-semibold text-slate-800">{w.gateLabel}</span>
+                <span className="rounded-full bg-amber-50 px-2 py-0.5 font-semibold text-amber-800 ring-1 ring-amber-200">Waiting for a second signer</span>
+                <span className="text-slate-600">signed by {w.approvedBy} · until {w.expiresAt?.slice(0, 10)} · {w.reason}</span>
+                {canDecide(me, w.gate) && me?.user_id !== w.firstSigner && (
+                  <button className="btn-secondary btn-sm !py-0.5 ml-auto" disabled={busy} onClick={() => sign(w.id)}>Sign as second signer</button>
+                )}
+              </li>
+            ))}
+          </ul>}
 
       {open && (
         <div className="rounded-lg bg-gray-50 px-3 py-2.5 space-y-2">
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2">
             <select className="input text-xs" value={gate} onChange={e => setGate(e.target.value as GateKey)}>
-              {state.gates.map(g => <option key={g.gate} value={g.gate}>{g.label}</option>)}
+              {waivable.map(g => <option key={g.gate} value={g.gate}>{g.label}</option>)}
             </select>
             <input type="date" className="input text-xs" min={minDate} max={maxDate} value={expiresAt} onChange={e => setExpiresAt(e.target.value)} />
-            <input className="input text-xs" placeholder="Approved by — required" value={approvedBy} onChange={e => setApprovedBy(e.target.value)} />
           </div>
-          <textarea className="input text-xs" rows={2} placeholder="Why the gate is waived and what closes it — required" value={reason} onChange={e => setReason(e.target.value)} />
-          <p className="text-[12px] text-slate-500">Expires at the end of the chosen day (UTC); at most {state.maxExceptionDays} days from today. The gate itself stays open on the Risk tab.</p>
+          <textarea className="input text-xs" rows={2} placeholder="Why the review is waived and what closes the waiver (at least 20 characters)" value={reason} onChange={e => setReason(e.target.value)} />
+          <p className="text-[12px] text-slate-500">You sign first. It covers the gate once a second person signs. Expires at the end of the chosen day (UTC).</p>
           <div className="flex gap-2">
-            <button onClick={submit} disabled={busy || !reason.trim() || !approvedBy.trim() || !expiresAt} className="btn-primary btn-sm">{busy ? 'Saving…' : 'Add exception'}</button>
+            <button onClick={submit} disabled={busy || reason.trim().length < 20 || !expiresAt} className="btn-primary btn-sm">{busy ? 'Saving…' : 'Sign and ask for a second signer'}</button>
             <button onClick={() => setOpen(false)} disabled={busy} className="btn-secondary btn-sm">Cancel</button>
           </div>
-          <ErrorLine text={err} />
         </div>
       )}
+      <ErrorLine text={err} />
     </div>
   )
 }

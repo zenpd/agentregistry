@@ -55,6 +55,8 @@ export interface GateReview {
   reviewedAt: string | null
   expiresAt: string | null
   expiryState: ExpiryState
+  // What changed in the record since this approval (the daily check reopens the gates a change touches).
+  changedSinceApproval: { field: string; label: string; before: unknown; after: unknown; added?: string[]; removed?: string[] }[]
 }
 
 export interface GateUpdateResult extends GateReview {
@@ -79,6 +81,12 @@ export interface GovernanceException {
   expiresAt: string | null
   createdAt: string | null
   daysLeft: number | null
+  // pending: waiting for a second signer. active: covers the gate.
+  status: 'pending' | 'active'
+  firstSigner: string | null
+  secondSigner: string | null
+  secondSignerName?: string | null
+  twoSigners: boolean
 }
 
 export interface RecertificationReason {
@@ -99,7 +107,7 @@ export interface UsageSummary {
 }
 
 // 'seed' means only demo rows exist; they are never used as governance evidence.
-export type UsageSource = 'phoenix' | 'seed' | 'none'
+export type UsageSource = 'phoenix' | 'langfuse' | 'seed' | 'none'
 
 export interface HistoryEntry {
   at: string | null
@@ -116,10 +124,17 @@ export interface GovernanceState {
   riskTier: string
   euAiActCategory: string | null
   enforcement: EnforcementMode
+  // The rules for this agent's risk tier (Settings → Governance rules).
+  template: { tier: string; gates: GateKey[]; validityDays: number; mode: EnforcementMode }
+  completeness: { score: number; filled: number; total: number; missing: string[] }
+  stageSince: string | null
+  weeksInStage: number | null
+  stalled: boolean
   validityDays: number
   maxExceptionDays: number
   gates: GateReview[]
   exceptions: GovernanceException[]
+  pendingWaivers: GovernanceException[]
   readiness: {
     current: string
     next: StageReadiness | null
@@ -134,6 +149,7 @@ export interface GovernanceState {
 // A body with `status` records a decision; without it, only the other fields change.
 export interface GateReviewUpdate {
   status?: GateStatus
+  // Ignored by the server: the signed-in person is recorded as the reviewer.
   reviewer?: string
   notes?: string
   conditions?: string
@@ -169,7 +185,6 @@ export interface ExceptionCreate {
   gate: GateKey
   reason: string
   expiresAt: string
-  approvedBy: string
 }
 
 const agentPath = (agentId: string) => `/agents/${encodeURIComponent(agentId)}`
@@ -197,3 +212,33 @@ export const recertifyGates = (agentId: string, reason?: string) =>
 
 export const createGovernanceException = (agentId: string, body: ExceptionCreate) =>
   api.post<GovernanceException>(`${agentPath(agentId)}/governance/exceptions`, body)
+
+// The rule checks' proposal for all three gates (the former auto-review). Saves nothing.
+export interface RuleProposal {
+  agentId: string
+  saved: false
+  validityDays: number
+  gates: { gate: GateKey; label: string; status: GateStatus; note: string }[]
+}
+
+export const getRuleProposal = (agentId: string) =>
+  api.post<RuleProposal>(`${agentPath(agentId)}/governance/rule-proposal`)
+
+// Accept the proposal with a reason: decisions are recorded in your name and
+// approvals from it expire after validityDays.
+export const applyRuleProposal = (agentId: string, reason: string) =>
+  api.post<{ agentId: string; saved: true }>(`${agentPath(agentId)}/governance/rule-proposal/apply`, { reason })
+
+export const signWaiver = (agentId: string, waiverId: string) =>
+  api.post<GovernanceException>(`${agentPath(agentId)}/governance/exceptions/${encodeURIComponent(waiverId)}/sign`)
+
+export interface GovernanceSettings {
+  templates: Record<'LOW' | 'MEDIUM' | 'HIGH', { gates: GateKey[]; validityDays: number; mode: EnforcementMode }>
+  requiredFields: Record<'Development' | 'Testing' | 'Production', string[]>
+  stallWeeks: Record<'Ideation' | 'Development' | 'Testing', number>
+  // A missing or failed AssureAI verdict is a readiness gap for Production.
+  assureaiRequired: boolean
+  requirable: { key: string; label: string }[]
+}
+export const getGovernanceSettings = () => api.get<GovernanceSettings>('/governance/settings')
+export const updateGovernanceSettings = (body: Partial<Omit<GovernanceSettings, 'requirable'>>) => api.put<GovernanceSettings>('/governance/settings', body)

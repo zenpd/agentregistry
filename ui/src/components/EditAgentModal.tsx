@@ -10,13 +10,11 @@ export default function EditAgentModal({ agent, onClose, onSaved }: {
 }) {
   const [initial] = useState({
     name: agent.name,
-    owner: agent.owner || '',
     owner_contact: agent.ownerContact || '',
     dept: agent.dept || '',
     ai_type: agent.aiType,
     description: agent.description || '',
     business_outcome: agent.businessOutcome || '',
-    value_amount: agent.valueAmount || 0,
     hours_saved_monthly: agent.hoursSavedMonthly || 0,
   })
   const [form, setForm] = useState(initial)
@@ -30,13 +28,11 @@ export default function EditAgentModal({ agent, onClose, onSaved }: {
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.name.trim()) { setError('Name is required'); return }
-    if (form.value_amount < 0 || form.hours_saved_monthly < 0) { setError('Value and hours cannot be negative'); return }
+    if (form.hours_saved_monthly < 0) { setError('Hours cannot be negative'); return }
     const cleaned = {
       ...form,
       name: form.name.trim(),
-      owner: form.owner.trim(),
       owner_contact: form.owner_contact.trim(),
-      value_amount: Number(form.value_amount) || 0,
       hours_saved_monthly: Number(form.hours_saved_monthly) || 0,
     }
     // Only what changed, so the audit log records real edits.
@@ -82,10 +78,14 @@ export default function EditAgentModal({ agent, onClose, onSaved }: {
             </div>
             <div>
               <div className="flex items-center gap-1">
-                <label className={label} htmlFor="edit-owner">Owner</label>
+                <span className={label}>Owner</span>
                 <InfoTip term="owner" className="-my-0.5 mb-1" />
               </div>
-              <input id="edit-owner" className="input" value={form.owner} onChange={e => set('owner', e.target.value)} />
+              {/* The owner is changed in one place, with a reason, so the change is on record. */}
+              <div className="input bg-slate-50 flex items-center justify-between gap-2" data-testid="edit-owner">
+                <span className="truncate text-slate-800">{agent.owner || 'No owner'}</span>
+                <Link to={`/agents/${agent.id}?tab=overview`} className="shrink-0 text-xs font-semibold text-zen-700 hover:underline">Change on Overview</Link>
+              </div>
             </div>
             <div>
               <label className={label} htmlFor="edit-contact">Owner contact</label>
@@ -126,10 +126,14 @@ export default function EditAgentModal({ agent, onClose, onSaved }: {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <div className="flex items-center gap-1">
-                <label className={label} htmlFor="edit-value">Value ($/mo)</label>
+                <span className={label}>Declared value ($ a month)</span>
                 <InfoTip term="declared_value" className="-my-0.5 mb-1" />
               </div>
-              <input id="edit-value" type="number" min={0} className="input" value={form.value_amount} onChange={e => set('value_amount', Number(e.target.value))} />
+              {/* The value is declared in one place, with its method and basis, and finance checks it there. */}
+              <div className="input bg-slate-50 flex items-center justify-between gap-2" data-testid="edit-value">
+                <span className="text-slate-800">{agent.valueAmount ? `$${agent.valueAmount.toLocaleString()}` : 'Not declared'}</span>
+                <Link to={`/agents/${agent.id}?tab=revenue`} className="shrink-0 text-xs font-semibold text-zen-700 hover:underline">Declare on Revenue &amp; Expenditure</Link>
+              </div>
             </div>
             <div>
               <div className="flex items-center gap-1">

@@ -59,6 +59,11 @@ class Agent(Base):
     function: Mapped[Optional[str]] = mapped_column(String(100))
     owner: Mapped[str] = mapped_column(String(255), nullable=False)
     owner_contact: Mapped[Optional[str]] = mapped_column(String(255))
+    # The signed-in account accountable for the agent, when the owner is a person
+    # with an account (owner stays the display text: a person or a team name).
+    owner_user_id: Mapped[Optional[str]] = mapped_column(String(64))
+    # Stands in for the owner when they are away, and inherits the agent if they leave.
+    backup_owner_user_id: Mapped[Optional[str]] = mapped_column(String(64))
 
     # Lifecycle
     lifecycle_stage: Mapped[str] = mapped_column(String(50), nullable=False, default="Ideation")
@@ -87,6 +92,22 @@ class Agent(Base):
     # specific app exports traces to its own Phoenix/OTel collector instead
     # of the shared org instance (the onboarding form's endpoint dropdown).
     phoenix_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
+    # Where else this agent is known: its code repository and its cloud resource
+    # (set when a person links a connector finding to the record).
+    source_repo: Mapped[Optional[str]] = mapped_column(String(500))
+    cloud_resource_id: Mapped[Optional[str]] = mapped_column(String(500))
+    # A Langfuse connector whose project holds this agent's traces (instead of Phoenix).
+    trace_connector_id: Mapped[Optional[str]] = mapped_column(String(64))
+    # The certified agent whose contract this one started from, when it did.
+    started_from_agent_id: Mapped[Optional[str]] = mapped_column(String(64))
+    # How the declared value is worked out: cost_avoidance | revenue_influenced | time_saved | risk_avoided.
+    value_method: Mapped[Optional[str]] = mapped_column(String(30))
+    value_basis: Mapped[Optional[str]] = mapped_column(Text)
+    # For time saved: the hourly rate behind the value, in cents (the blended rate when empty).
+    value_hourly_rate_cents: Mapped[Optional[int]] = mapped_column(Integer)
+    # Archived: left out of every page, count and job, but kept in the database and can be brought back.
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    archived_reason: Mapped[Optional[str]] = mapped_column(Text)
     # Free-form markdown the owner pastes at onboarding time to describe the
     # app in their own words (architecture notes, gotchas, links) — optional,
     # shown verbatim on the agent's own page. Not parsed/validated; it's
@@ -126,6 +147,9 @@ class Agent(Base):
 
     # Source tracking
     source: Mapped[str] = mapped_column(String(50), default="manual")
+    # True for the example agents the seed script creates. Portfolio pages leave
+    # them out unless the viewer switches them on (db/scope.py).
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
     discovered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     shadow_ai_risk: Mapped[Optional[str]] = mapped_column(String(20))
 
@@ -182,6 +206,8 @@ class AgentAccessRequest(Base):
     # True when approval is what added the team to consumers; revoking only
     # removes a consumer entry this request put there, never a declared one.
     added_to_consumers: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The agent version this team uses; set at approval to the version current then.
+    agent_version: Mapped[Optional[str]] = mapped_column(String(50))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -205,6 +231,8 @@ class GovernanceReview(Base):
     checklist: Mapped[dict] = mapped_column(JSON, default=dict)
     # When the current approval stops counting; NULL until approved.
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # The structural fields the current approval was given for (governance/lifecycle.snapshot).
+    approved_snapshot: Mapped[Optional[dict]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -225,6 +253,12 @@ class GovernanceException(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     approved_by: Mapped[Optional[str]] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Waiver with two sign-offs: pending until a second person signs. NULL status
+    # is an exception recorded before the two-signer rule (counted as active).
+    status: Mapped[Optional[str]] = mapped_column(String(20))
+    first_signer: Mapped[Optional[str]] = mapped_column(String(255))
+    second_signer: Mapped[Optional[str]] = mapped_column(String(255))
+    second_signed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class Discovery(Base):
@@ -411,6 +445,11 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="Executive Viewer")
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Away until this date: reviews and notices for this person go to the deputy meanwhile.
+    away_until: Mapped[Optional[date]] = mapped_column(Date)
+    deputy_user_id: Mapped[Optional[str]] = mapped_column(String(64))
+    # For an Auditor: the last day the account can sign in. Every request is logged.
+    access_until: Mapped[Optional[date]] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -476,6 +515,15 @@ class PhoenixProject(Base):
     scan_error: Mapped[Optional[str]] = mapped_column(String(500))
     scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # What the last scan read besides names: error spans in the sample, service
+    # names, and the values of the trace-attribute convention (agent.owner, ...).
+    error_count: Mapped[int] = mapped_column(Integer, default=0)
+    service_names: Mapped[Optional[list]] = mapped_column(JSON)
+    hints: Mapped[Optional[dict]] = mapped_column(JSON)
+    # Triage: who looks at this candidate, by when, and a note.
+    assignee_user_id: Mapped[Optional[str]] = mapped_column(String(64))
+    due_date: Mapped[Optional[date]] = mapped_column(Date)
+    triage_note: Mapped[Optional[str]] = mapped_column(String(1000))
 
 
 class Insight(Base):
@@ -705,3 +753,315 @@ class JobRun(Base):
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     summary: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class Notification(Base):
+    """One message to one person (or, with no user, to the shared Teams channel):
+    a daily digest of what waits for them, or an immediate notice such as a
+    failed job. Always shown in the in-app inbox; also e-mailed or posted to
+    Teams when those channels are configured. deliveries records each attempt."""
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_notifications_dedupe"),
+        Index("idx_notifications_user", "user_id", "read_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(64), ForeignKey("organizations.id"), nullable=False)
+    user_id: Mapped[Optional[str]] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)          # digest | job_failed | consumer_notice | ...
+    subject: Mapped[str] = mapped_column(String(300), nullable=False)
+    items: Mapped[list] = mapped_column(JSON, default=list)                # [{text, link, agentId, type}]
+    dedupe_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    deliveries: Mapped[dict] = mapped_column(JSON, default=dict)           # {email: {status, error, at}, teams: {...}}
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class RegistrySetting(Base):
+    """A setting an admin changes in the app (not in the environment), with who
+    changed it. Keys: ai.switches, ai.monthly_cap_cents, ..."""
+    __tablename__ = "registry_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[Optional[dict]] = mapped_column(JSON)
+    updated_by: Mapped[Optional[str]] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AiRun(Base):
+    """One call of the registry's own AI (an insight, Ask, a draft): which
+    function, which model and prompt version, tokens, cost and how it ended."""
+    __tablename__ = "ai_runs"
+    __table_args__ = (Index("idx_ai_runs_function_created", "function", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    function: Mapped[str] = mapped_column(String(50), nullable=False)
+    kind: Mapped[Optional[str]] = mapped_column(String(50))
+    agent_id: Mapped[Optional[str]] = mapped_column(String(64))
+    model: Mapped[Optional[str]] = mapped_column(String(100))
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(20))
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_cents: Mapped[Optional[float]] = mapped_column(Float)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="ok")      # ok | unavailable | refused
+    reason: Mapped[Optional[str]] = mapped_column(String(300))
+    interactive: Mapped[bool] = mapped_column(Boolean, default=True)
+    actor: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ApiKey(Base):
+    """A key for the registry's own API (CI pipelines, scripts). Shown once at
+    issue; only its SHA-256 hash and first characters are stored."""
+    __tablename__ = "api_keys"
+    __table_args__ = (UniqueConstraint("key_hash", name="uq_api_keys_hash"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    prefix: Mapped[str] = mapped_column(String(20), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    scopes: Mapped[list] = mapped_column(JSON, default=list)              # read | register | certify_check
+    created_by: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[Optional[str]] = mapped_column(String(255))
+
+
+class ConnectorConfig(Base):
+    """A source the registry reads to find agents: Langfuse, a GitHub
+    organisation, an Azure subscription. Read-only. The secret is stored
+    encrypted and never returned."""
+    __tablename__ = "connector_configs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)          # langfuse | github | azure
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    settings: Mapped[dict] = mapped_column(JSON, default=dict)             # host, orgs, subscriptions, ...
+    secret_enc: Mapped[Optional[str]] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_status: Mapped[Optional[str]] = mapped_column(String(30))         # ok | failed | not_configured
+    last_message: Mapped[Optional[str]] = mapped_column(String(500))
+    last_found: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ExternalFinding(Base):
+    """Something a connector found that may be an agent: a Langfuse project, a
+    repository with agent code, a cloud model deployment or agent."""
+    __tablename__ = "external_findings"
+    __table_args__ = (
+        UniqueConstraint("connector_id", "external_id", name="uq_external_findings"),
+        Index("idx_external_findings_state", "state"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    connector_id: Mapped[str] = mapped_column(String(64), ForeignKey("connector_configs.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)          # trace_project | code_repo | cloud_deployment | cloud_agent
+    external_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    url: Mapped[Optional[str]] = mapped_column(String(500))
+    details: Mapped[dict] = mapped_column(JSON, default=dict)              # signals: frameworks, models, counts, ...
+    state: Mapped[str] = mapped_column(String(20), default="new")          # new | dismissed | linked
+    dismiss_reason: Mapped[Optional[str]] = mapped_column(String(500))
+    linked_agent_id: Mapped[Optional[str]] = mapped_column(String(64))
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class ClassificationRecord(Base):
+    """One classification of an agent: the answers, the rule-based suggestion with
+    its reasons, and the category and risk level a named person confirmed. Every
+    record is kept; the latest confirmed one is the agent's classification."""
+    __tablename__ = "classification_records"
+    __table_args__ = (Index("idx_classification_records_agent", "agent_id"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="proposed")     # proposed | confirmed | replaced
+    answers: Mapped[dict] = mapped_column(JSON, default=dict)
+    suggested_category: Mapped[str] = mapped_column(String(32), nullable=False)
+    suggested_risk_level: Mapped[str] = mapped_column(String(20), nullable=False)
+    reasons: Mapped[list] = mapped_column(JSON, default=list)
+    category: Mapped[Optional[str]] = mapped_column(String(32))
+    risk_level: Mapped[Optional[str]] = mapped_column(String(20))
+    note: Mapped[Optional[str]] = mapped_column(Text)
+    proposed_by: Mapped[Optional[str]] = mapped_column(String(255))
+    proposed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    confirmed_by: Mapped[Optional[str]] = mapped_column(String(255))
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class ApprovedTool(Base):
+    """A tool, system, database or knowledge base on the approved list, with a risk
+    class. An agent's tool class is the highest class among the tools it declares."""
+    __tablename__ = "approved_tools"
+    __table_args__ = (UniqueConstraint("name", name="uq_approved_tools_name"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    kind: Mapped[str] = mapped_column(String(30), default="mcp")           # mcp | system | database | knowledge_base
+    risk_class: Mapped[str] = mapped_column(String(10), default="MEDIUM")  # LOW | MEDIUM | HIGH
+    note: Mapped[Optional[str]] = mapped_column(Text)
+    added_by: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+
+
+class AgentVersion(Base):
+    """A released version of an agent with its changelog and the structural fields
+    at release, so a consumer can see what changed between the version it uses and the latest."""
+    __tablename__ = "agent_versions"
+    __table_args__ = (UniqueConstraint("agent_id", "version", name="uq_agent_versions"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    version: Mapped[str] = mapped_column(String(50), nullable=False)
+    changelog: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    released_by: Mapped[Optional[str]] = mapped_column(String(255))
+    released_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentRetirement(Base):
+    """Retiring an agent: checked steps (no traffic for 7 days, consumers told, keys
+    revoked, stage set to Deprecated), each recorded with who and when."""
+    __tablename__ = "agent_retirements"
+    __table_args__ = (Index("idx_agent_retirements_agent", "agent_id"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="in_progress")  # in_progress | done | cancelled
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    replacement_agent_id: Mapped[Optional[str]] = mapped_column(String(64))
+    steps: Mapped[dict] = mapped_column(JSON, default=dict)                 # key → {state, at, by, detail}
+    started_by: Mapped[Optional[str]] = mapped_column(String(255))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class EvidenceVerdict(Base):
+    """The verdict of one AssureAI evaluation run recorded against an agent: pass or
+    fail, the run date and a link. No scores are copied."""
+    __tablename__ = "evidence_verdicts"
+    __table_args__ = (UniqueConstraint("agent_id", "run_id", name="uq_evidence_verdicts"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    connector_id: Mapped[Optional[str]] = mapped_column(String(64))
+    run_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    verdict: Mapped[Optional[str]] = mapped_column(String(20))             # pass | fail | None when not read
+    application: Mapped[Optional[str]] = mapped_column(String(255))
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    url: Mapped[Optional[str]] = mapped_column(String(500))
+    error: Mapped[Optional[str]] = mapped_column(Text)
+    recorded_by: Mapped[Optional[str]] = mapped_column(String(255))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ObservedConsumer(Base):
+    """A caller of an agent seen in its traces: a team that names itself with the
+    span attribute consumer.team, or another registered agent whose traces call
+    this one. Refreshed by the daily consumer observation job."""
+    __tablename__ = "observed_consumers"
+    __table_args__ = (UniqueConstraint("agent_id", "kind", "caller", name="uq_observed_consumers"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)          # team | agent
+    caller: Mapped[str] = mapped_column(String(255), nullable=False)
+    caller_agent_id: Mapped[Optional[str]] = mapped_column(String(64))
+    calls: Mapped[int] = mapped_column(Integer, default=0)                 # in the latest trace sample read
+    first_seen: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class SearchLog(Base):
+    """A search for agents that found nothing: the signal for a new shared agent."""
+    __tablename__ = "search_log"
+    __table_args__ = (Index("idx_search_log_at", "at"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(64))
+    query: Mapped[str] = mapped_column(String(255), nullable=False)
+    results: Mapped[int] = mapped_column(Integer, default=0)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ValueAttestation(Base):
+    """A finance reviewer's check of an agent's declared value: confirmed as declared,
+    or adjusted to another amount, with a note and a date. Every check is kept."""
+    __tablename__ = "value_attestations"
+    __table_args__ = (Index("idx_value_attestations_agent", "agent_id"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)        # attested | adjusted
+    declared_cents: Mapped[int] = mapped_column(Integer, default=0)        # monthly value declared at the time
+    declared_method: Mapped[Optional[str]] = mapped_column(String(30))
+    attested_cents: Mapped[int] = mapped_column(Integer, default=0)
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    attested_by: Mapped[Optional[str]] = mapped_column(String(255))
+    attested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AgentOutcome(Base):
+    """A measured business outcome of an agent on one day (for example 120 invoices
+    matched), from a CSV file, a webhook or typed in. One row per agent, day and outcome."""
+    __tablename__ = "agent_outcomes"
+    __table_args__ = (UniqueConstraint("agent_id", "day", "outcome", name="uq_agent_outcomes"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    outcome: Mapped[str] = mapped_column(String(120), nullable=False)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String(20), default="manual")      # csv | webhook | manual
+    recorded_by: Mapped[Optional[str]] = mapped_column(String(255))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DecisionChain(Base):
+    """The hash chain over decision records in the audit log. Each entry holds the hash
+    of one decision row together with the hash of the entry before it, so changing or
+    removing any sealed decision breaks every hash after it. Append-only."""
+    __tablename__ = "decision_chain"
+    __table_args__ = (UniqueConstraint("audit_id", name="uq_decision_chain_audit"),)
+
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    audit_id: Mapped[int] = mapped_column(Integer, ForeignKey("audit_log.id"), nullable=False)
+    prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    sealed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Incident(Base):
+    """An incident linked to an agent (from PagerDuty, ServiceNow or entered here), and
+    a request to the owner to stop the agent, with the owner's acknowledgement."""
+    __tablename__ = "incidents"
+    __table_args__ = (Index("idx_incidents_agent", "agent_id"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    source: Mapped[str] = mapped_column(String(20), default="manual")      # pagerduty | servicenow | manual | other
+    external_id: Mapped[Optional[str]] = mapped_column(String(120))
+    url: Mapped[Optional[str]] = mapped_column(String(500))
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), default="medium")    # low | medium | high | critical
+    status: Mapped[str] = mapped_column(String(20), default="open")        # open | resolved
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    resolution: Mapped[Optional[str]] = mapped_column(Text)
+    created_by: Mapped[Optional[str]] = mapped_column(String(255))
+    stop_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    stop_requested_by: Mapped[Optional[str]] = mapped_column(String(255))
+    stop_reason: Mapped[Optional[str]] = mapped_column(Text)
+    stop_acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    stop_acknowledged_by: Mapped[Optional[str]] = mapped_column(String(255))
+    stop_note: Mapped[Optional[str]] = mapped_column(Text)

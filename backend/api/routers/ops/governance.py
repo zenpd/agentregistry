@@ -4,6 +4,7 @@ nothing here approves, registers or changes anything unless a person asks."""
 from __future__ import annotations
 
 import asyncio
+import time
 import re
 import secrets
 from datetime import datetime, timedelta
@@ -15,10 +16,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from api.auth import USE_Rbac, has_permission, require_admin, require_read, require_update
+from api.auth import GATE_ROLE, ROLE_ALIASES, can_decide_gate, has_permission, require_admin, require_read, require_update, user_display_name
 from db.base import get_db_session
 from db.models import Agent, AuditLog, GovernanceException, GovernanceReview, User
 from governance import gate_policy as gp
+from governance import lifecycle
 from orchestrations import governance_checks as gc
 from shared.config import get_settings
 
@@ -96,7 +98,8 @@ class ExceptionRequest(BaseModel):
     gate: str
     reason: str = Field(..., min_length=1, max_length=4000)
     expiresAt: str
-    approvedBy: str = Field(..., min_length=1, max_length=255)
+    # Ignored: the waiver's first signer is the signed-in person (kept for older clients).
+    approvedBy: str = Field("", max_length=255)
 
     @field_validator("gate")
     @classmethod
@@ -167,6 +170,9 @@ def _gate_to_api(gate: str, review: dict | None, facts: dict, now: datetime) -> 
         "reviewedAt": _iso(review.get("reviewed_at")),
         "expiresAt": _iso(review.get("expires_at")),
         "expiryState": gp.gate_expiry_state(review, now),
+        # What changed in the record since this approval (only approvals made with a snapshot).
+        "changedSinceApproval": (lifecycle.changed_since(review.get("approved_snapshot"), facts)
+                                 if review["status"] in gp.APPROVED_STATUSES else []),
     }
 
 
@@ -175,14 +181,33 @@ def _exception_to_api(exc: dict, now: datetime) -> dict:
     return {
         "id": exc["id"], "gate": exc["gate"], "gateLabel": gp.GATES.get(exc["gate"], exc["gate"]),
         "reason": exc["reason"], "approvedBy": exc["approved_by"],
+        "status": exc.get("status") or "active", "firstSigner": exc.get("first_signer"), "secondSigner": exc.get("second_signer"),
+        "twoSigners": bool(exc.get("first_signer") and exc.get("second_signer")),
         "expiresAt": _iso(expires), "createdAt": _iso(exc.get("created_at")),
         "daysLeft": max(0, (expires - now).days) if expires else None,
     }
 
 
 def _readiness(state: dict, target: str, now: datetime, mode: str | None = None) -> dict:
-    return gp.stage_readiness(state["facts"], state["reviews"], target, state["exceptions"],
-                              state["budget_set"], now, mode)
+    from governance import lifecycle
+
+    template = state.get("template") or {}
+    missing = lifecycle.missing_required(target, state["facts"], state.get("required")) if "required" in state else None
+    result = gp.stage_readiness(state["facts"], state["reviews"], target, state["exceptions"],
+                                state["budget_set"], now, mode or template.get("mode"),
+                                gates=template.get("gates"), missing=missing)
+    if target == "Production" and state.get("assureai_required"):
+        verdict = state["facts"].get("assureai")
+        gap = None
+        if verdict is None:
+            gap = gp._warning("assureai_missing", "No AssureAI verdict is recorded. Record the run id of an AssureAI evaluation run.")
+        elif verdict["verdict"] != "pass":
+            gap = gp._warning("assureai_failed", f"The latest AssureAI verdict is fail (run completed {verdict['completedAt'] or 'on an unknown date'}).")
+        if gap:
+            result["warnings"].append(gap)
+            result["ready"] = False
+            result["blocked"] = result["mode"] == "block"
+    return result
 
 
 def _approval_warnings(checklist: list[dict]) -> list[dict]:
@@ -218,7 +243,13 @@ async def get_governance(agent_id: str, _=Depends(require_read)):
         agent = await _agent_or_404(db, agent_id)
         state = await gc.load_state(db, agent, now)
         history = await _history(db, agent_id)
+        from db.models import User
+        names = dict((await db.execute(select(User.id, User.name))).all())
     facts = state["facts"]
+
+    def waiver(e: dict) -> dict:
+        out = _exception_to_api(e, now)
+        return {**out, "secondSignerName": names.get(out.get("secondSigner") or "", out.get("secondSigner"))}
     nxt = gp.next_stage(agent.lifecycle_stage)
     return {
         "agentId": agent.id,
@@ -226,11 +257,17 @@ async def get_governance(agent_id: str, _=Depends(require_read)):
         "riskLevel": agent.risk_level,
         "riskTier": state["risk_tier"],
         "euAiActCategory": agent.eu_ai_act_category,
-        "enforcement": gp.enforcement_mode(),
+        "enforcement": state["template"]["mode"],
+        "template": {"tier": state["risk_tier"], **state["template"]},
+        "completeness": lifecycle.completeness(facts),
+        "stageSince": _iso(state.get("stage_since")),
+        "weeksInStage": state.get("weeks_in_stage"),
+        "stalled": state.get("stalled", False),
         "validityDays": facts["validity_days"],
         "maxExceptionDays": gp.MAX_EXCEPTION_DAYS,
         "gates": [_gate_to_api(gate, state["reviews"].get(gate), facts, now) for gate in gp.GATES],
-        "exceptions": [_exception_to_api(e, now) for e in state["exceptions"]],
+        "exceptions": [waiver(e) for e in state["exceptions"]],
+        "pendingWaivers": [waiver(e) for e in state.get("pendingWaivers", [])],
         "readiness": {
             "current": agent.lifecycle_stage,
             "next": _readiness(state, nxt, now) if nxt else None,
@@ -244,12 +281,22 @@ async def get_governance(agent_id: str, _=Depends(require_read)):
     }
 
 
-async def _apply_gate_update(agent_id: str, gate: str, body: GateReviewUpdate, user: dict, legacy: bool) -> dict:
+async def _apply_gate_update(agent_id: str, gate: str, body: GateReviewUpdate, user: dict, legacy: bool,
+                             source: str | None = None, validity_days: int | None = None) -> dict:
     """Shared by the agent-page path and the legacy portfolio path. The legacy
     body carries only a status, so it cannot name a reviewer or conditions."""
     _require_gate(gate)
     now = gc.utcnow()
     updates = body.model_dump(exclude_unset=True)
+    # The reviewer is whoever records the decision: the signed-in person, never a
+    # typed name. A reviewer in the body is ignored.
+    updates.pop("reviewer", None)
+    if updates.get("status") in gp.DECISION_STATUSES and not can_decide_gate(user.get("role", ""), gate):
+        role = user.get("role", "")
+        raise HTTPException(status_code=403, detail=(
+            f"Your role, {ROLE_ALIASES.get(role, role)}, cannot decide the {gp.GATES.get(gate, gate)}. "
+            f"That needs a {GATE_ROLE.get(gate)} or a Registry Admin."))
+    decider = await user_display_name(user) if updates.get("status") in gp.DECISION_STATUSES else None
     async with get_db_session() as db:
         agent = await _agent_or_404(db, agent_id)
         review = _review_row(agent, gate)
@@ -266,8 +313,8 @@ async def _apply_gate_update(agent_id: str, gate: str, body: GateReviewUpdate, u
                 else:
                     ticks.pop(item_id, None)
             review.checklist = ticks
-        if "reviewer" in updates:
-            review.reviewer = (updates["reviewer"] or "").strip() or None
+        if decider:
+            review.reviewer = decider
         if "notes" in updates:
             review.notes = (updates["notes"] or "").strip() or None
         if "conditions" in updates:
@@ -277,19 +324,27 @@ async def _apply_gate_update(agent_id: str, gate: str, body: GateReviewUpdate, u
 
         status = updates.get("status")
         if status:
-            if not legacy and status == "Approved with Conditions" and not review.conditions:
+            if status == "Approved with Conditions" and not review.conditions:
                 raise HTTPException(status_code=422, detail="Conditions are required for 'Approved with Conditions'")
-            if not legacy and status in gp.APPROVED_STATUSES and not review.reviewer:
-                raise HTTPException(status_code=422, detail="Name the accountable reviewer before approving")
             review.status = status
             review.reviewed_at = now
-            review.expires_at = (now + timedelta(days=gp.validity_days(
-                gp.effective_risk_level(agent.risk_level, agent.eu_ai_act_category), get_settings(),
-            ))) if status in gp.APPROVED_STATUSES else None
+            if validity_days:
+                days = validity_days
+            else:
+                from governance import templates as tpl
+                tier = gp.effective_risk_level(agent.risk_level, agent.eu_ai_act_category)
+                days = (await tpl.templates()).get(tier if tier in lifecycle.TIERS else "HIGH", {}).get("validityDays") \
+                    or gp.validity_days(tier, get_settings())
+            review.expires_at = (now + timedelta(days=days)) if status in gp.APPROVED_STATUSES else None
+            # What this approval covers, so a later change can be shown and can reopen it.
+            review.approved_snapshot = lifecycle.snapshot({k: getattr(agent, k) for k in lifecycle.STRUCTURAL}) \
+                if status in gp.APPROVED_STATUSES else None
 
         state = await gc.load_state(db, agent, now)
         result = _gate_to_api(gate, state["reviews"].get(gate), state["facts"], now)
         changes = {"gate": gate, "path": "legacy" if legacy else "agent", "before": before, "after": _snapshot(review)}
+        if source:
+            changes["source"] = source
         if status in gp.APPROVED_STATUSES:
             changes["openItemsAtApproval"] = [i["id"] for i in result["checklist"] if i["result"] in ("fail", "pending")]
         _audit(db, user, "gate_update", agent_id, changes)
@@ -307,6 +362,50 @@ async def update_gate_review(agent_id: str, gate: str, body: GateReviewUpdate, u
 async def update_gate_legacy(agent_id: str, gate: str, body: LegacyGateUpdate, user=Depends(require_update)):
     review = await _apply_gate_update(agent_id, gate, GateReviewUpdate(status=body.status), user, legacy=True)
     return {"status": "updated", "review": review}
+
+
+# ── Rule-check proposal (the former auto-review) ──────────────────────────
+
+RULE_PROPOSAL_VALIDITY_DAYS = 30
+
+
+class RuleProposalApply(BaseModel):
+    reason: str = Field(..., min_length=20, max_length=1000)
+
+
+@router.post("/agents/{agent_id}/governance/rule-proposal")
+async def rule_proposal(agent_id: str, _=Depends(require_read)):
+    """What the rule checks would decide for each gate. Saves nothing."""
+    from orchestrations.governance_workflow import propose_reviews
+
+    async with get_db_session() as db:
+        agent = await _agent_or_404(db, agent_id)
+        proposal = await propose_reviews(agent)
+    return {"agentId": agent_id, "saved": False, "validityDays": RULE_PROPOSAL_VALIDITY_DAYS,
+            "gates": [{"gate": g, "label": gp.GATES.get(g, g), **p} for g, p in proposal.items()]}
+
+
+@router.post("/agents/{agent_id}/governance/rule-proposal/apply")
+async def apply_rule_proposal(agent_id: str, body: RuleProposalApply, user=Depends(require_update)):
+    """Accept the rule-check proposal: each gate gets the proposed decision,
+    recorded in the accepting person's name, marked as rule-proposed, and an
+    approval from it expires after 30 days so a full review follows."""
+    from orchestrations.governance_workflow import propose_reviews
+
+    async with get_db_session() as db:
+        agent = await _agent_or_404(db, agent_id)
+        proposal = await propose_reviews(agent)
+    name = await user_display_name(user)
+    results = []
+    for gate, p in proposal.items():
+        update = GateReviewUpdate(
+            status=p["status"],
+            notes=f"Rule-check proposal accepted by {name}. Reason: {body.reason.strip()}\n\nRule result: {p['note']}",
+            conditions=p["note"] if p["status"] == "Approved with Conditions" else None,
+        )
+        results.append(await _apply_gate_update(agent_id, gate, update, user, legacy=False, source="rule_proposal",
+                                                validity_days=RULE_PROPOSAL_VALIDITY_DAYS))
+    return {"agentId": agent_id, "saved": True, "gates": results}
 
 
 # ── Review-notes drafting (never saved here) ───────────────────────────────
@@ -332,16 +431,27 @@ def _llm_client():
     return client
 
 
-async def _ask_llm(system: str, user_prompt: str) -> str | None:
+async def _ask_llm(system: str, user_prompt: str, agent_id: str | None = None, actor: str | None = None) -> str | None:
+    from services import ai_meter
+
     client = _llm_client()
     if not client.available:
         return None
+    if await ai_meter.refusal("review_notes", interactive=True):
+        return None
+    started = time.monotonic()
     try:
         text = await asyncio.wait_for(
             asyncio.to_thread(client.chat, system, user_prompt, LLM_MAX_TOKENS), LLM_TIMEOUT_S,
         )
     except asyncio.TimeoutError:
+        await ai_meter.record("review_notes", agent_id=agent_id, model=client.deployment, status="unavailable",
+                              reason="timed out", duration_ms=int((time.monotonic() - started) * 1000), actor=actor)
         return None
+    await ai_meter.record("review_notes", agent_id=agent_id, model=client.deployment,
+                          input_tokens=client.last_usage.get("input", 0), output_tokens=client.last_usage.get("output", 0),
+                          duration_ms=int((time.monotonic() - started) * 1000),
+                          status="ok" if client.last_usage else "unavailable", actor=actor)
     text = (text or "").strip()
     # LLMClient answers with a "[DETERMINISTIC]" placeholder when the call fails.
     if not text or text.startswith("[DETERMINISTIC]"):
@@ -364,7 +474,7 @@ def _prompt_facts(agent: Agent, reviews: dict) -> dict:
 
 
 @router.post("/agents/{agent_id}/governance/{gate}/draft-notes")
-async def draft_review_notes(agent_id: str, gate: str, _=Depends(require_update)):
+async def draft_review_notes(agent_id: str, gate: str, user=Depends(require_update)):
     _require_gate(gate)
     now = gc.utcnow()
     async with get_db_session() as db:
@@ -377,7 +487,7 @@ async def draft_review_notes(agent_id: str, gate: str, _=Depends(require_update)
     # Gate statuses are in the facts; findings derived from them lag until the next risk scan.
     risks = [r for r in state["open_risks"] if not gp.is_gate_derived_finding(r["rule_id"], r["title"])]
     system, user_prompt = gp.review_prompt(gate, facts, checklist, state["usage"], risks, context_text)
-    draft = await _ask_llm(system, user_prompt)
+    draft = await _ask_llm(system, user_prompt, agent_id=agent_id, actor=user.get("user_id"))
     if draft is None:
         return {
             "gate": gate, "llmStatus": "unavailable", "usedContext": False,
@@ -402,17 +512,20 @@ async def get_stage_readiness(agent_id: str, target: str = Query("Production"), 
 @router.put("/agents/{agent_id}/stage")
 async def change_stage(agent_id: str, body: StageChange, user=Depends(require_update)):
     now = gc.utcnow()
-    mode = gp.enforcement_mode()
     override = (body.overrideReason or "").strip() or None
+    if body.stage == "Deprecated":
+        raise HTTPException(status_code=409, detail="Retire the agent with the retirement steps on the Governance tab "
+                            "(POST /api/v1/agents/{id}/retirement). They check traffic, tell consumers and revoke access first.")
     async with get_db_session() as db:
         agent = await _agent_or_404(db, agent_id)
         state = await gc.load_state(db, agent, now)
+        mode = gp.enforcement_mode() if gp.enforcement_mode() == "block" else state["template"]["mode"]
         readiness = _readiness(state, body.stage, now, mode)
         current = agent.lifecycle_stage
         if body.stage == current:
             return {"agentId": agent_id, "from": current, "to": current, "changed": False, "mode": mode,
                     "warnings": readiness["warnings"], "readiness": readiness}
-        if readiness["blocked"] and override and USE_Rbac and not has_permission(user.get("role", ""), "admin"):
+        if readiness["blocked"] and override and not has_permission(user.get("role", ""), "admin"):
             raise HTTPException(status_code=403, detail="Only an admin can override a blocked stage change")
         blocked = readiness["blocked"] and not override
         _audit(db, user, "stage_change_blocked" if blocked else "stage_change", agent_id, {
@@ -460,21 +573,50 @@ async def recertify_legacy(agent_id: str, user=Depends(require_update)):
 
 
 @router.post("/agents/{agent_id}/governance/exceptions")
-async def create_exception(agent_id: str, body: ExceptionRequest, user=Depends(require_admin)):
+async def create_exception(agent_id: str, body: ExceptionRequest, user=Depends(require_update)):
+    """A waiver of one failed gate until a date. The signed-in person signs first;
+    it covers the gate only once a second, different person signs (sign route).
+    Both need the right to decide that gate. A failed Security Review cannot be waived."""
     now = gc.utcnow()
     expires = gp.parse_exception_expiry(body.expiresAt)
     error = gp.validate_exception_expiry(expires, now)
     if error:
         raise HTTPException(status_code=422, detail=error)
-    reason, approved_by = body.reason.strip(), body.approvedBy.strip()
-    if not reason or not approved_by:
-        raise HTTPException(status_code=422, detail="reason and approvedBy are required")
+    reason = body.reason.strip()
+    refusal = lifecycle.waiver_refusal(body.gate, reason)
+    if refusal:
+        raise HTTPException(status_code=422, detail=refusal)
+    if not can_decide_gate(user.get("role", ""), body.gate):
+        raise HTTPException(status_code=403, detail=f"Only someone who decides the {gp.GATES[body.gate]} can sign its waiver.")
+    signer = await user_display_name(user)
     async with get_db_session() as db:
         await _agent_or_404(db, agent_id)
         exc = GovernanceException(id=secrets.token_hex(8), agent_id=agent_id, gate=body.gate, reason=reason,
-                                  expires_at=expires, approved_by=approved_by, created_at=now)
+                                  expires_at=expires, approved_by=signer, created_at=now, status="pending",
+                                  first_signer=user.get("user_id"))
         db.add(exc)
         _audit(db, user, "exception_create", agent_id, {
-            "id": exc.id, "gate": body.gate, "reason": reason, "expiresAt": _iso(expires), "approvedBy": approved_by,
+            "id": exc.id, "gate": body.gate, "reason": reason, "expiresAt": _iso(expires), "approvedBy": signer,
+            "status": "pending",
         })
     return _exception_to_api(gc.exception_to_dict(exc), now)
+
+
+@router.post("/agents/{agent_id}/governance/exceptions/{exception_id}/sign")
+async def sign_exception(agent_id: str, exception_id: str, user=Depends(require_update)):
+    """The second signature. It must come from a different person who may decide the gate."""
+    now = gc.utcnow()
+    async with get_db_session() as db:
+        exc = await db.get(GovernanceException, exception_id)
+        if exc is None or exc.agent_id != agent_id:
+            raise HTTPException(status_code=404, detail="Waiver not found")
+        if exc.status != "pending":
+            raise HTTPException(status_code=409, detail="This waiver is not waiting for a second signature.")
+        if exc.first_signer == user.get("user_id"):
+            raise HTTPException(status_code=409, detail="The second signature must come from a different person.")
+        if not can_decide_gate(user.get("role", ""), exc.gate):
+            raise HTTPException(status_code=403, detail=f"Only someone who decides the {gp.GATES[exc.gate]} can sign its waiver.")
+        exc.status, exc.second_signer, exc.second_signed_at = "active", user.get("user_id"), now
+        _audit(db, user, "waiver.sign", agent_id, {"id": exc.id, "gate": exc.gate, "status": "active"})
+        result = _exception_to_api(gc.exception_to_dict(exc), now)
+    return result

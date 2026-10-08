@@ -145,7 +145,7 @@ export default function DependencyGraphView() {
             `Stage: ${attrs.stage ?? ''}`,
             attrs.model_name ? `Model: ${attrs.model_name}` : '',
             `Value: $${attrs.value_amount ?? 0}/mo · ${attrs.hours_saved_monthly ?? 0} h/mo`,
-            attrs.token_cost != null ? `Tokens: $${attrs.token_cost}/mo (30d)` : 'Tokens: unknown (no priced usage in the last 30d)',
+            attrs.token_cost != null ? `Token cost: $${attrs.token_cost} in the last 30 days` : 'Token cost: unknown (no priced usage in the last 30 days)',
             attrs.at_risk ? '⚠ FLAGGED AT RISK' : '',
             attrs.worst_gate ? `Governance: ${attrs.worst_gate}` : '',
             isProduction ? 'right-click for a hierarchical view of what it feeds' : '',
@@ -445,8 +445,8 @@ export default function DependencyGraphView() {
       <div className="grid grid-cols-4 gap-2">
         {([
           ['Agents + resources', graph.stats.nodes, 'Every node in this graph: agents plus the systems, databases, knowledge bases, MCP servers and consumers they use.'],
-          ['Dependencies', graph.stats.edges, 'Every typed edge: agent→agent calls plus every declared system/database/KB/MCP access.'],
-          ['Production entry points', graph.stats.production_agents, 'Agents in the Production stage — not the narrower "outage root" definition (Production and reachable by a caller or consumer) shown on the canvas as a thick green ring.'],
+          ['Dependencies', graph.stats.edges, 'Every link: agent-to-agent calls plus each declared use of a system, database, knowledge base or MCP server.'],
+          ['Production agents', graph.stats.production_agents, 'Agents in the Production stage. The thick green ring on the canvas marks only those that a caller or consumer depends on.'],
           ['Agent→Agent calls', graph.stats.cross_agent_edges, 'Direct agent-to-agent handoffs only.'],
         ] as [string, number, string][]).map(([label, value, hint]) => (
           <div key={label} className="rounded-lg border bg-white p-2 text-center" title={hint}>
@@ -469,7 +469,7 @@ export default function DependencyGraphView() {
                 else next.add(item.kind)
                 return next
               })}
-              title={`${item.count} node(s) — click to show/hide these and every edge touching them`}
+              title={`${item.count} item(s). Click to show or hide them and their links.`}
               className={`rounded-full border px-3 py-1 text-xs font-medium transition-opacity ${off ? 'opacity-35' : ''}`}
               style={{ borderColor: item.color }}
             >
@@ -495,7 +495,7 @@ export default function DependencyGraphView() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') searchFocus() }}
-            placeholder="Search & focus…"
+            placeholder="Find an agent or system…"
             className="w-52 rounded-lg border px-3 py-1.5 text-sm"
           />
           <button onClick={searchFocus} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">
@@ -551,16 +551,16 @@ export default function DependencyGraphView() {
                 </div>
               </div>
               {selected.attrs.worst_gate && (
-                <div className="text-xs">Worst governance gate <InfoTip term="gate" />: <b>{selected.attrs.worst_gate}</b></div>
+                <div className="text-xs">Weakest review status <InfoTip term="gate" />: <b>{selected.attrs.worst_gate}</b></div>
               )}
               {selected.attrs.at_risk && (
-                <div className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-700">▶ Flagged at risk</div>
+                <div className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-700">Marked at risk on the agent record</div>
               )}
               {selected.kind.startsWith('group:') && (
                 <div className="text-xs text-slate-600">
                   ${Math.round(selected.attrs.value_amount ?? 0).toLocaleString()}/mo value ·{' '}
                   {selected.attrs.hours_saved_monthly ?? 0} h/mo saved ·{' '}
-                  {selected.attrs.token_cost != null ? `$${selected.attrs.token_cost} tokens/mo (30d)` : 'tokens unknown (30d)'}
+                  {selected.attrs.token_cost != null ? `$${selected.attrs.token_cost} token cost in the last 30 days` : 'token cost unknown (last 30 days)'}
                 </div>
               )}
               <div>
@@ -603,16 +603,16 @@ export default function DependencyGraphView() {
                   onClick={() => simulateOutage(selected.id)}
                   className="w-full rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                 >
-                  {impactLoading ? 'Simulating…' : '⚡ Simulate outage'}
+                  {impactLoading ? 'Simulating…' : 'Show what breaks if this goes down'}
                 </button>
               )}
               {impact && (
                 <div className="rounded-lg bg-red-50 p-3 text-xs">
                   <div className="mb-1 font-semibold text-red-700">
-                    Outage: {impact.target_name} — {impact.risk_level.toUpperCase()} <InfoTip term="blast_radius" />
+                    If {impact.target_name} goes down: {impact.risk_level.toUpperCase()} impact <InfoTip term="blast_radius" />
                   </div>
-                  <div>Revenue at risk: ${impact.revenue_at_risk.toLocaleString()}/mo</div>
-                  <div>Hours at risk: {impact.efficiency_at_risk}/mo</div>
+                  <div>Value at risk: ${impact.revenue_at_risk.toLocaleString()}/mo</div>
+                  <div>Hours saved at risk: {impact.efficiency_at_risk} h/mo</div>
                   <div>Departments hit: {impact.blast_radius_depts.join(', ')}</div>
                   <ul className="mt-1 list-disc pl-4">
                     {impact.mitigation_suggestions.map((m, i) => <li key={i}>{m}</li>)}

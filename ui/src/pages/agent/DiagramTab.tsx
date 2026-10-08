@@ -353,10 +353,10 @@ function ConnectedGraphView({ graph }: { graph: DiagramGraph }) {
     <div>
       <div className="grid grid-cols-4 gap-2 mb-2">
         {([
-          ['Steps', drawn.length],
-          ['Dependencies', nwEdges.length],
-          ['Calls', callsCount],
-          ['Errors', errorCount],
+          ['Nodes shown', drawn.length],
+          ['Connections', nwEdges.length],
+          ['Call links', callsCount],
+          ['Nodes with errors', errorCount],
         ] as [string, number][]).map(([label, value]) => (
           <div key={label} className="rounded-lg border bg-white p-2 text-center">
             <div className="text-lg font-bold text-slate-800">{value}</div>
@@ -618,7 +618,7 @@ function ComparisonTable({ comparison, traceCount, agentId, onAdopted }: {
 
             {groupRow('Declared only', declaredOnly.length, comparison.absenceConclusive
               ? 'not seen in this sample'
-              : `only ${fmtNumber(traceCount)} trace(s) sampled; absence isn't conclusive below ${comparison.minTracesForAbsence}`)}
+              : `only ${fmtNumber(traceCount)} trace(s) sampled; fewer than ${comparison.minTracesForAbsence} traces cannot show that a dependency is unused`)}
             {declaredOnly.map(o => (
               <tr key={`d:${o.declaredAs}:${o.name}`}>
                 <td className={td}><span className="inline-block w-2 h-2 rounded-full bg-amber-400" title="Declared, not seen" /></td>
@@ -631,7 +631,7 @@ function ComparisonTable({ comparison, traceCount, agentId, onAdopted }: {
             ))}
 
             {groupRow('Seen in traces, not on the record', notOnRecord.length, notOnRecord.length
-              ? 'tools and knowledge sources are added by the registry itself at its next check'
+              ? 'tick the ones to add now; the registry also adds tools and knowledge sources by itself at its daily check'
               : 'nothing is missing from the record')}
             {notOnRecord.map(o => {
               const target = ADOPT_TARGET[o.kind]
@@ -703,15 +703,15 @@ function ComparisonTable({ comparison, traceCount, agentId, onAdopted }: {
                 {chosen.map(o => <li key={obsKey(o)}><span className="font-mono">{o.name}</span> → {ADOPT_TARGET[o.kind]}</li>)}
               </ul>
               <div className="flex gap-2">
-                <button onClick={adopt} disabled={adopting} className="btn-primary btn-sm">{adopting ? 'Adopting…' : 'Confirm'}</button>
+                <button onClick={adopt} disabled={adopting} className="btn-primary btn-sm">{adopting ? 'Adding…' : 'Add to the record'}</button>
                 <button onClick={() => setConfirming(false)} disabled={adopting} className="btn-secondary btn-sm">Cancel</button>
               </div>
             </div>
           ) : (
             <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-500">Nothing is added until you confirm.</span>
+              <span className="text-xs text-slate-500">Ticked items are added only when you confirm.</span>
               <button onClick={() => { setResult(null); setConfirming(true) }} disabled={chosen.length === 0} className="btn-secondary btn-sm">
-                Adopt selected{chosen.length ? ` (${chosen.length})` : ''}
+                Add selected to the record{chosen.length ? ` (${chosen.length})` : ''}
               </button>
             </div>
           )}
@@ -744,7 +744,7 @@ function BlastRadiusCard({ blast, upstream, shared }: { blast: BlastRadius; upst
         <div>
           <SectionLabel tip="blast_radius">If this agent goes down</SectionLabel>
           <div className="grid grid-cols-3 gap-2 mt-1 mb-3">
-            <MiniStat label="Downstream" value={fmtNumber(blast.downstreamCount)} accent={blast.downstreamCount ? 'text-rose-600' : undefined} />
+            <MiniStat label="Affected in total" value={fmtNumber(blast.downstreamCount)} accent={blast.downstreamCount ? 'text-rose-600' : undefined} />
             <MiniStat label="Agents" value={fmtNumber(blast.agents.length)} />
             <MiniStat label="Consumers" tip="consumers" value={fmtNumber(blast.consumers.length)} />
           </div>
@@ -757,7 +757,7 @@ function BlastRadiusCard({ blast, upstream, shared }: { blast: BlastRadius; upst
                   <li key={a.id} className="flex items-center gap-2 text-xs">
                     <Link to={`/agents/${encodeURIComponent(a.id)}?tab=diagram`} className="text-slate-800 hover:text-zen-700 truncate">{a.name}</Link>
                     {a.stage && <span className={STAGE_PILL[a.stage] || 'status-pending'}>{a.stage}</span>}
-                    {a.atRisk && <span className="text-[12px] text-rose-600">at risk</span>}
+                    {a.atRisk && <span className="text-[12px] text-rose-600">marked at risk</span>}
                     <span className="text-slate-500 ml-auto whitespace-nowrap">{hopLabel(a.hops)}</span>
                   </li>
                 ))}
@@ -770,7 +770,7 @@ function BlastRadiusCard({ blast, upstream, shared }: { blast: BlastRadius; upst
                 </div>
               )}
               {blast.revenueAtRisk > 0 && (
-                <p className="text-xs text-slate-600 mt-2">Declared value on the affected path (incl. this agent): <b className="text-slate-700">{fmtDollars(blast.revenueAtRisk)}/mo</b></p>
+                <p className="text-xs text-slate-600 mt-2">Monthly value of this agent and of everything that depends on it: <b className="text-slate-700">{fmtDollars(blast.revenueAtRisk)}/mo</b></p>
               )}
             </>
           )}
@@ -792,8 +792,8 @@ function BlastRadiusCard({ blast, upstream, shared }: { blast: BlastRadius; upst
                   {u.registered
                     ? u.stage && <span className={STAGE_PILL[u.stage] || 'status-pending'}>{u.stage}</span>
                     : <span className={`text-[12px] px-1.5 py-0.5 rounded-full ring-1 ${NEUTRAL_CHIP}`}>unregistered</span>}
-                  {u.atRisk && <span className="text-[12px] px-1.5 py-0.5 rounded-full ring-1 bg-rose-50 text-rose-700 ring-rose-200">at risk</span>}
-                  {u.worstGate && u.worstGate !== 'Approved' && <span className="text-slate-500 ml-auto whitespace-nowrap">gate: {u.worstGate}</span>}
+                  {u.atRisk && <span className="text-[12px] px-1.5 py-0.5 rounded-full ring-1 bg-rose-50 text-rose-700 ring-rose-200">marked at risk</span>}
+                  {u.worstGate && u.worstGate !== 'Approved' && <span className="text-slate-500 ml-auto whitespace-nowrap">review: {u.worstGate}</span>}
                 </li>
               ))}
             </ul>

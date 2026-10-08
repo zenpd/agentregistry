@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity, ArrowRight, CalendarClock, Radar, Sparkles, CheckCircle2, ChevronRight, Cloud, Coins, Database, Loader2, Play, ShieldAlert,
-  ShieldCheck, Wand2, Workflow,
+  ShieldCheck, Wand2, Workflow, Bell, Plug, Users,
 } from 'lucide-react'
 import { getAgents } from '../services/api'
 import { getJobRuns, getJobs, runJob, type JobListItem, type JobName, type JobRun, type JobsResponse } from '../services/ops/jobs'
@@ -23,16 +23,32 @@ const META: Record<JobName, {
     does: 'Reads every Phoenix project (read-only) and notes its models, tools and last activity. Projects that no agent is linked to appear on the Discovered page, ready to register. Nothing is registered automatically, and prompt and answer text is never read.',
     reads: ['Phoenix projects and a recent sample of their traces'], writes: ['Discovered page (new projects, activity of registered agents)'],
     feeds: [{ label: 'Discovered page', to: '/discovered' }],
-    needs: 'The Phoenix address and a read-only key in Settings → Phoenix. Phoenix is reachable over the VPN.',
+    needs: 'The Phoenix address and a read-only key in Settings → Common tracing endpoint. The server must be able to reach Phoenix (VPN).',
     alsoFrom: 'Discovered → Scan now',
+  },
+  connector_sync: {
+    icon: Plug, tone: 'bg-violet-50 text-violet-600',
+    does: 'Scans every connector in Settings, read-only: Langfuse projects, GitHub repositories that build agents, and Azure model deployments and Foundry agents. What it finds waits on Discovered → Other sources. It also reads daily token usage for agents whose traces are in Langfuse.',
+    reads: ['Langfuse, GitHub and Azure, as configured'], writes: ['Findings on the Discovered page', 'Daily usage of Langfuse-linked agents'],
+    feeds: [{ label: 'Discovered → Other sources', to: '/discovered' }, { label: 'Tokenomics tab (Langfuse agents)' }],
+    needs: 'At least one connector in Settings → Connectors. Each one is tested and scanned from there too.',
+    alsoFrom: 'Settings → Connectors → Scan now',
   },
   usage_ingestion: {
     icon: Activity, tone: 'bg-sky-50 text-sky-600',
     does: 'Reads the LLM calls in each agent’s Phoenix project and stores daily token usage per model. Prompt and answer text are never stored.',
     reads: ['Phoenix traces (read-only)'], writes: ['Daily usage per agent and model'],
     feeds: [{ label: 'Tokenomics tab' }, { label: 'Revenue & Expenditure' }, { label: 'Business Impact cost', to: '/business' }],
-    needs: 'A Phoenix project linked on the agent (Diagram tab). Phoenix is reachable over the VPN.',
+    needs: 'A Phoenix project linked on the agent (Diagram tab). The server must be able to reach Phoenix (VPN).',
     alsoFrom: 'An agent’s Tokenomics tab → Refresh from Phoenix',
+  },
+  consumer_observation: {
+    icon: Users, tone: 'bg-emerald-50 text-emerald-600',
+    does: 'Reads the latest trace sample of each agent linked to Phoenix and records who calls it: teams that name themselves with the span attribute consumer.team, and other registered agents whose traces call it. The first call seen from each team is kept, so the time from an access approval to the first call can be measured. Prompt and answer text is never read.',
+    reads: ['Phoenix traces (read-only, the latest sample per agent)'], writes: ['Observed consumers per agent'],
+    feeds: [{ label: 'Integrate tab → Consumers' }, { label: 'Programme health', to: '/programme' }, { label: 'Tokenomics tab → Chargeback' }],
+    needs: 'A Phoenix project linked on the agent, and callers that set consumer.team on their spans. The server must be able to reach Phoenix (VPN).',
+    alsoFrom: 'An agent’s Integrate tab → Read callers now',
   },
   record_autofill: {
     icon: Wand2, tone: 'bg-teal-50 text-teal-700',
@@ -44,10 +60,10 @@ const META: Record<JobName, {
   },
   infra_costs: {
     icon: Cloud, tone: 'bg-indigo-50 text-indigo-600',
-    does: 'Pulls daily Azure hosting cost and assigns it to agents, by an agent-id tag or a share of a linked resource. Show-back only: nothing in Azure changes.',
+    does: 'Pulls daily Azure hosting cost and assigns it to agents, by an agent-id tag or a share of a linked resource. Read-only: nothing in Azure changes.',
     reads: ['Azure Cost Management'], writes: ['Metered hosting cost per agent'],
-    feeds: [{ label: 'Revenue & Expenditure (metered infra)' }],
-    needs: 'AZURE_COST_SCOPE and a service principal with Cost Management Reader. Until then, infra cost is the owner’s figure or a stage estimate.',
+    feeds: [{ label: 'Revenue & Expenditure (metered hosting cost)' }],
+    needs: 'AZURE_COST_SCOPE and a service principal with Cost Management Reader. Until then, hosting cost is the owner’s figure or a stage estimate.',
   },
   cost_rollup: {
     icon: Coins, tone: 'bg-emerald-50 text-emerald-600',
@@ -71,10 +87,23 @@ const META: Record<JobName, {
     needs: 'The AI model reachable from the server. Agents without traces get their summary the first time someone opens them.',
     alsoFrom: 'Any agent tab → AI insights → Check again',
   },
+  notifications: {
+    icon: Bell, tone: 'bg-orange-50 text-orange-600',
+    does: 'Sends each person one message a day with what waits for them: reviews they decide, approvals about to expire, access requests, budget alerts, new unregistered projects and overdue risks. Demo agents are left out. A failed scheduled job is sent to the admins at once.',
+    reads: ['Reviews, access requests, budgets, discovered projects, risks', 'People and their roles'], writes: ['Each person’s notification inbox (the bell)', 'E-mail and the Teams channel, when configured'],
+    feeds: [{ label: 'The bell in the top bar' }, { label: 'Settings → Notifications', to: '/settings' }],
+    needs: 'Nothing for the in-app inbox. E-mail needs SMTP_HOST and SMTP_FROM, Teams needs TEAMS_WEBHOOK_URL.',
+  },
+  spend_review: {
+    icon: ShieldCheck, tone: 'bg-amber-50 text-amber-600',
+    does: 'Lists Production agents that cost money with no calls, and pairs of agents that cost money and look like they do the same job. It never changes an agent.',
+    reads: ['Monthly cost and value per agent', 'Usage per day'], writes: ['Spend findings'],
+    feeds: [{ label: 'Business Impact (idle and duplicate spend)', to: '/business' }],
+  },
   governance_checks: {
     icon: ShieldCheck, tone: 'bg-amber-50 text-amber-600',
-    does: 'Finds approvals that are expiring or have expired, and agents that need recertification. Read-only: it never changes a review or a stage.',
-    reads: ['Reviews and expiry dates', 'Stage and telemetry'], writes: ['Report in the run log'],
+    does: 'Finds approvals that are expiring or have expired, and agents that need recertification. When the model, tools or endpoint changed after an approval, it reopens the reviews that change affects. It never changes a stage.',
+    reads: ['Reviews and expiry dates', 'Stage and telemetry', 'The copy of the record kept at approval'], writes: ['Report in the run log', 'Reopened reviews'],
     feeds: [{ label: 'Governance tab (recertification)' }, { label: 'Approvals', to: '/approvals' }],
   },
 }
@@ -83,7 +112,7 @@ type Health = 'ok' | 'warn' | 'failed' | 'never' | 'running' | 'muted'
 const STATUS_TEXT: Record<string, [string, Health]> = {
   ok: ['OK', 'ok'], partial: ['Partial', 'warn'], skipped: ['Skipped', 'muted'], not_configured: ['Not configured', 'warn'],
   running: ['Running', 'running'], error: ['Failed', 'failed'], unreachable: ['Unreachable', 'failed'],
-  stale: ['Stopped', 'failed'], cancelled: ['Cancelled', 'failed'], unavailable: ['Unavailable', 'failed'],
+  stale: ['Did not finish', 'failed'], cancelled: ['Cancelled', 'failed'], unavailable: ['Unavailable', 'failed'],
 }
 const HEALTH_PILL: Record<Health, string> = {
   ok: 'bg-emerald-50 text-emerald-700 ring-emerald-200', warn: 'bg-amber-50 text-amber-800 ring-amber-200',
@@ -386,7 +415,7 @@ function JobDetail({ job, runs, names, onRan }: { job: JobListItem; runs: JobRun
 const ON_DEMAND: { title: string; does: string; where: string; to: string; icon: typeof Activity }[] = [
   { title: 'Refresh one agent’s usage', does: 'Reads that agent’s latest calls from Phoenix, then rolls up its cost.', where: 'Agent → Tokenomics → Refresh from Phoenix', to: '/agents', icon: Activity },
   { title: 'Risk scan for one agent', does: 'Re-scores one agent’s risks straight away.', where: 'Agent → Risk → Scan now', to: '/agents', icon: ShieldAlert },
-  { title: 'Auto-review', does: 'Rule checks that set all three review statuses. Use with care.', where: 'Governance → Run auto-review', to: '/governance', icon: ShieldCheck },
+  { title: 'Rule-check proposal', does: 'Rule checks propose a decision for all three reviews. Nothing is saved until a reviewer accepts it with a reason.', where: 'Governance → Propose by rules', to: '/governance', icon: ShieldCheck },
   { title: 'Blast radius', does: 'What breaks, and whose value is at risk, if an agent or system goes down.', where: 'Dependencies → click a node', to: '/dependencies', icon: Workflow },
   { title: 'API operations', does: 'Reads a backend’s own openapi.json so Try it can call a real path.', where: 'Agent → Integrate → Load API operations', to: '/agents', icon: Database },
 ]

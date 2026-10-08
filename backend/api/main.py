@@ -30,6 +30,8 @@ APP_VERSION = "1.0.0"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    from api.auth import check_signing_key
+    check_signing_key()
     init_tracing()
 
     # Initialize database tables and seed data on startup
@@ -74,11 +76,16 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Include-Demo"],
 )
 
 # Add rate limiting
 app.add_middleware(RateLimitMiddleware)
+
+# Demo agents are hidden unless the viewer asks for them (db/scope.py). Added
+# last so it runs first and its context reaches every endpoint.
+from db.scope import DemoScopeMiddleware
+app.add_middleware(DemoScopeMiddleware)
 
 # Add global error handling
 add_error_handling(app)

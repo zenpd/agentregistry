@@ -589,3 +589,23 @@ def test_operations_every_service_has_are_not_capabilities_or_contract_lines():
         "/pay": {"post": {"summary": "Orchestrate Payment", "responses": {"200": {"content": {"application/json": {"schema": {
             "type": "object", "properties": {"rail": {"type": "string"}}}}}}}}}}}
     assert reuse.openapi_io(doc)["outputs"] == ["Orchestrate Payment: rail"]
+
+
+def test_version_comes_from_agent_version_on_the_spans_unless_a_person_owns_it():
+    from governance import autofill as r
+
+    ev = {"hints": {"agent.version": "2.4.1"}}
+    [u] = [x for x in r.plan_updates({"version": None}, ev) if x["field"] == "version"]
+    assert u["new"] == "2.4.1" and u["source"] == "traces"
+    history = [r.Past(field="version", old=None, new="2.4.0", reverted=True)]
+    assert not [x for x in r.plan_updates({"version": None}, ev, history) if x["field"] == "version"]
+
+
+def test_owner_and_department_are_suggested_from_the_spans_never_set():
+    from governance import autofill as r
+
+    gaps = r.missing_from_person({"owner": "", "dept_id": None, "hints": {"agent.owner": "Card Ops"},
+                                  "hint_dept": {"id": "dept-fin", "name": "Finance"}})
+    by = {g["key"]: g for g in gaps}
+    assert by["owner"]["suggested"] == {"value": "Card Ops", "label": "Card Ops", "source": "agent.owner on its spans"}
+    assert by["department"]["suggested"]["value"] == "dept-fin"

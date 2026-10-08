@@ -17,13 +17,16 @@ GATES: dict[str, str] = {
     "security": "Security Review",
     "dp": "Data Protection Review",
 }
+# The account role that decides each gate (api/auth.py ROLES), with the usual title.
 REVIEWER_ROLES: dict[str, str] = {
-    "arb": "ARB chair",
-    "security": "CISO or delegate",
-    "dp": "DPO or delegate",
+    "arb": "Architect Steward (ARB chair)",
+    "security": "Security Reviewer (CISO or delegate)",
+    "dp": "Data Protection Officer (DPO or delegate)",
 }
 STATUSES = ("Not Submitted", "In Review", "Changes Requested", "Approved with Conditions", "Approved")
 APPROVED_STATUSES = frozenset({"Approved", "Approved with Conditions"})
+# Statuses that record a reviewer's decision (and so who made it).
+DECISION_STATUSES = frozenset({"Approved", "Approved with Conditions", "Changes Requested"})
 STAGES = ("Ideation", "Development", "Testing", "Production", "Deprecated")
 TICK_VALUES = frozenset({"pass", "fail", "n/a"})
 ENFORCEMENT_MODES = ("warn", "block")
@@ -179,7 +182,11 @@ def _check_pii(f: Mapping) -> tuple[str, str | None]:
 
 
 def _check_eu_tier(f: Mapping) -> tuple[str, str | None]:
-    return "manual", f"Recorded tier: {f.get('eu_ai_act_category') or 'not set'}"
+    confirmed = f.get("classification_detail")
+    if confirmed:
+        return "pass", f"Confirmed as {confirmed['category']}, risk level {confirmed['riskLevel']}, by {confirmed['by']} on {confirmed['on']}"
+    return "manual", (f"Recorded tier: {f.get('eu_ai_act_category') or 'not set'}, not confirmed. "
+                      "Classify the agent on the Governance tab to record who confirmed it.")
 
 
 def _check_context(f: Mapping) -> tuple[str, str | None]:
@@ -330,6 +337,13 @@ def _gate_warning(gate: str, review: Any, now: datetime) -> dict | None:
     return _warning("gate_not_approved", f"{GATES[gate]} is '{status}'", gate)
 
 
+_REQUIRED_WARNING = {
+    "owner": ("owner_missing", "No accountable owner recorded"),
+    "dept": ("dept_missing", "No owning department recorded"),
+    "phoenix_project": ("telemetry_unlinked", "No Phoenix project linked — usage and trace signals cannot be observed"),
+}
+
+
 def stage_readiness(
     agent_facts: Mapping[str, Any],
     reviews: Mapping[str, Mapping[str, Any]],
@@ -338,9 +352,15 @@ def stage_readiness(
     budget_set: bool,
     now: datetime,
     mode: str | None = None,
+    gates: Iterable[str] | None = None,
+    missing: list[str] | None = None,
 ) -> dict:
     """Entry rules are cumulative along Ideation -> Development -> Testing ->
-    Production. An unexpired exception covers one gate. Deprecated only warns."""
+    Production. An unexpired exception covers one gate. Deprecated only warns.
+    gates: the reviews the agent's risk tier requires for Production (default: all three).
+    missing: required record fields the target stage needs and the record lacks
+    (governance/lifecycle.missing_required); when given it replaces the fixed owner,
+    department and tracing checks."""
     if target_stage not in STAGES:
         raise ValueError(f"Unknown stage {target_stage!r}")
     mode = mode or enforcement_mode()
@@ -356,13 +376,19 @@ def stage_readiness(
                                      blocking=False))
     else:
         rank = STAGES.index(target_stage)
-        if rank >= 1:
+        if missing is not None:
+            from governance.lifecycle import FIELD_LABELS
+            for key in missing:
+                code, message = _REQUIRED_WARNING.get(key, (f"{key}_missing", f"Required before {target_stage}: {FIELD_LABELS.get(key, key)}"))
+                warnings.append(_warning(code, message))
+        elif rank >= 1:
             if not _filled(agent_facts.get("owner")):
                 warnings.append(_warning("owner_missing", "No accountable owner recorded"))
             if not _filled(agent_facts.get("dept")):
                 warnings.append(_warning("dept_missing", "No owning department recorded"))
+        required_gates = [g for g in GATES if g in set(gates)] if gates is not None else list(GATES)
         if rank >= 2:
-            for gate in (["arb"] if rank == 2 else list(GATES)):
+            for gate in (["arb"] if rank == 2 else required_gates):
                 gate_warning = _gate_warning(gate, reviews.get(gate), now)
                 if gate_warning is None:
                     continue
@@ -373,7 +399,7 @@ def stage_readiness(
         if rank >= 3:
             if not budget_set:
                 warnings.append(_warning("budget_missing", "No monthly budget set (visibility only)"))
-            if not _filled(agent_facts.get("phoenix_project")):
+            if missing is None and not _filled(agent_facts.get("phoenix_project")):
                 warnings.append(_warning("telemetry_unlinked", "No Phoenix project linked — usage and trace "
                                                                "signals cannot be observed"))
 
@@ -410,7 +436,9 @@ def parse_exception_expiry(value: str) -> datetime | None:
 
 # ── Decision history ────────────────────────────────────────────────────────
 
-HISTORY_ACTIONS = ("gate_update", "stage_change", "stage_change_blocked", "recertify", "exception_create")
+HISTORY_ACTIONS = ("gate_update", "stage_change", "stage_change_blocked", "recertify", "exception_create", "waiver.sign",
+                   "classification.propose", "classification.confirm", "ownership.transfer", "version.release",
+                   "retirement.start", "retirement.step", "retirement.finish", "retirement.cancel", "evidence.record")
 
 
 def _gate_update_summary(label: str, changes: Mapping[str, Any]) -> str:
@@ -448,10 +476,19 @@ def history_entry(action: str, changes: Any) -> dict:
             summary += f" ({changes['reason']})"
     elif action == "exception_create":
         until = as_utc(changes.get("expiresAt"))
-        summary = (f"Exception on {label} until {until.date().isoformat() if until else '?'}, "
-                   f"approved by {changes.get('approvedBy') or '?'}")
+        if changes.get("status") == "pending":
+            summary = (f"Waiver of {label} until {until.date().isoformat() if until else '?'} signed by "
+                       f"{changes.get('approvedBy') or '?'}, waiting for a second signature")
+        else:
+            summary = (f"Exception on {label} until {until.date().isoformat() if until else '?'}, "
+                       f"approved by {changes.get('approvedBy') or '?'}")
+    elif action == "waiver.sign":
+        summary = f"Waiver of {label} signed a second time: it now covers the gate"
     else:
-        summary = action
+        # The other lifecycle decisions read the same here as in the audit trail.
+        from governance.audit_view import ACTION_LABELS, summary_of
+        detail = summary_of(action, changes)
+        summary = f"{ACTION_LABELS.get(action, action)}: {detail}" if detail else ACTION_LABELS.get(action, action)
     return {"gate": gate, "summary": summary}
 
 
@@ -616,7 +653,7 @@ def usage_summary(rows: Iterable[Mapping[str, Any]], source: str, days: int) -> 
     """Totals of Phoenix-sourced usage, or None: seed rows are demo data and
     never count as observed usage."""
     rows = list(rows)
-    if source != "phoenix" or not rows:
+    if source not in ("phoenix", "langfuse") or not rows:
         return None
     calls_by_model: dict[str, int] = {}
     for r in rows:

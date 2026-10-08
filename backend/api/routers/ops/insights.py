@@ -156,7 +156,8 @@ async def run_agent_insight(agent: Agent, kind: str, *, subject: Optional[str], 
                                  "reason": meta.get("reason", "")}, agent_id=agent_id, subject=subject, actor=actor)
 
     started = datetime.now(timezone.utc)
-    result = await run_insight(spec, agent_id=agent_id, request=request, data_block=data_block, book=book)
+    result = await run_insight(spec, agent_id=agent_id, request=request, data_block=data_block, book=book,
+                               interactive=not str(actor).startswith("job:"), actor=actor)
     result["meta"] = meta
     return await _store(result, agent_id=agent_id, subject=subject, actor=actor, started=started)
 

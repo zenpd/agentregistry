@@ -86,7 +86,7 @@ async def _usage_models(agent_id: str) -> tuple[list[tuple[str, int]], dict]:
     async with get_db_session() as db:
         rows = (await db.execute(
             select(AgentTokenUsage.model_name, func.sum(AgentTokenUsage.invocation_count))
-            .where(AgentTokenUsage.agent_id == agent_id, AgentTokenUsage.source == "phoenix", AgentTokenUsage.bucket >= since)
+            .where(AgentTokenUsage.agent_id == agent_id, AgentTokenUsage.source.in_(("phoenix", "langfuse")), AgentTokenUsage.bucket >= since)
             .group_by(AgentTokenUsage.model_name)
         )).all()
         aliases = await load_aliases(db)
@@ -171,7 +171,8 @@ async def _draft(agent: Agent) -> dict | None:
     from agents.insights.runtime import run_insight
     from agents.insights.specs import SPECS
     result = await run_insight(SPECS["record_draft"], agent_id=agent.id,
-                               request=f"The agent is registered as '{agent.name}' (id {agent.id}).")
+                               request=f"The agent is registered as '{agent.name}' (id {agent.id}).",
+                               interactive=False, actor="ai:record-keeper")
     if result["status"] != "ok" or not result["output"]:
         return None
     findings = result["output"]["findings"]
@@ -183,6 +184,18 @@ async def _draft(agent: Agent) -> dict | None:
             "capabilities": [f["title"] for f in findings if f["tag"] == "capability" and sober(f["title"])]}
 
 
+async def _hints(agent: Agent) -> dict:
+    """Values of the trace-attribute convention (agent.owner, agent.department, agent.version)
+    found on this agent's project by the last discovery scan."""
+    if not agent.phoenix_project:
+        return {}
+    from db.models import PhoenixProject
+
+    async with get_db_session() as db:
+        row = (await db.execute(select(PhoenixProject).where(PhoenixProject.name == agent.phoenix_project))).scalars().first()
+    return dict(row.hints or {}) if row else {}
+
+
 async def gather_evidence(agent: Agent, history: list[rules.Past], *, use_model: bool) -> dict:
     record = _record(agent)
     usage_models, aliases = await _usage_models(agent.id)
@@ -190,6 +203,7 @@ async def gather_evidence(agent: Agent, history: list[rules.Past], *, use_model:
     app, app_read = await _app(agent, record, history)
     evidence: dict[str, Any] = {"usage_models": usage_models, "usage_days": USAGE_DAYS, "aliases": aliases,
                                 "observed_only": observed_only, "traces": traces, "app": app, "draft": None,
+                                "hints": await _hints(agent),
                                 "unread": [label for label, ok in ((TRACES, traces_read), (APP, app_read)) if not ok]}
     settings = get_settings()
     if (use_model and traces and settings.azure_openai_endpoint and settings.azure_openai_api_key
@@ -323,7 +337,11 @@ async def person_gaps(agent: Agent) -> list[dict]:
         budget = await db.get(AgentBudget, agent.id)
         reviews = (await db.execute(select(GovernanceReview.gate, GovernanceReview.status)
                                     .where(GovernanceReview.agent_id == agent.id))).all()
+        from db.models import Department
+        depts = {d.name.lower(): {"id": d.id, "name": d.name} for d in (await db.execute(select(Department))).scalars()}
+    hints = await _hints(agent)
     return rules.missing_from_person({
+        "hints": hints, "hint_dept": depts.get(str(hints.get("agent.department") or "").strip().lower()),
         "owner": agent.owner, "dept_id": agent.dept_id, "business_outcome": agent.business_outcome,
         "value_amount": agent.value_amount, "hours_saved_monthly": agent.hours_saved_monthly, "sla": agent.sla,
         "has_budget": bool(budget and (budget.monthly_budget_cents or 0) > 0),

@@ -415,7 +415,6 @@ async def test_governance_state_and_gate_decisions(api):
     assert "gate_not_approved" in codes(body["readiness"]["production"])
 
     url = f"/api/v1/agents/{AGENT_ID}/governance/arb"
-    assert (await api.put(url, json={"status": "Approved"})).status_code == 422
     assert (await api.put(url, json={"status": "Approved with Conditions", "reviewer": "ARB chair"})).status_code == 422
     assert (await api.put(url, json={"evidence": [{"label": "x", "url": "javascript:alert(1)"}]})).status_code == 422
     assert (await api.put(url, json={"checklist": {"security.tools": "pass"}})).status_code == 422
@@ -425,6 +424,8 @@ async def test_governance_state_and_gate_decisions(api):
                                   "checklist": {"arb.human_oversight": "pass"}})
     gate = ok.json()
     assert ok.status_code == 200 and gate["status"] == "Approved" and gate["expiryState"] == "valid"
+    # The reviewer is the signed-in person who decided, never the typed name.
+    assert gate["reviewer"] == "tester"
     expires = datetime.fromisoformat(gate["expiresAt"])
     assert timedelta(days=364) < expires - datetime.fromisoformat(gate["reviewedAt"]) <= timedelta(days=365)
     assert by_id(gate["checklist"])["arb.human_oversight"]["result"] == "pass"
@@ -478,10 +479,21 @@ async def test_exceptions_recertify_and_governance_job(api):
     too_long = (NOW.date() + timedelta(days=400)).isoformat()
     assert (await api.post(url, json={"gate": "dp", "reason": "r", "expiresAt": too_long, "approvedBy": "CISO"})).status_code == 422
     expires = (datetime.now(timezone.utc).date() + timedelta(days=30)).isoformat()
-    created = await api.post(url, json={"gate": "dp", "reason": "Pending DPIA", "expiresAt": expires, "approvedBy": "DPO"})
-    assert created.status_code == 200 and created.json()["gate"] == "dp"
+    assert (await api.post(url, json={"gate": "dp", "reason": "Pending DPIA", "expiresAt": expires})).status_code == 422  # reason too short
+    assert (await api.post(url, json={"gate": "security", "reason": "Pending the penetration test report", "expiresAt": expires})).status_code == 422
+    created = await api.post(url, json={"gate": "dp", "reason": "Pending the DPIA from the privacy office", "expiresAt": expires})
+    assert created.status_code == 200 and created.json()["gate"] == "dp" and created.json()["status"] == "pending"
     state = (await api.get(f"/api/v1/agents/{AGENT_ID}/governance")).json()
-    assert [e["gate"] for e in state["exceptions"]] == ["dp"]
+    assert state["exceptions"] == [] and [w["gate"] for w in state["pendingWaivers"]] == ["dp"]
+    # The same person cannot sign twice; a second signer (here written directly) makes it cover the gate.
+    assert (await api.post(f"{url}/{created.json()['id']}/sign")).status_code == 409
+    from db.base import get_db_session
+    from db.models import GovernanceException
+    async with get_db_session() as s:
+        w = await s.get(GovernanceException, created.json()["id"])
+        w.status, w.second_signer = "active", "someone-else"
+    state = (await api.get(f"/api/v1/agents/{AGENT_ID}/governance")).json()
+    assert [e["gate"] for e in state["exceptions"]] == ["dp"] and state["exceptions"][0]["twoSigners"] is True
     assert "dp" in state["readiness"]["production"]["exceptionsApplied"]
 
     await api.put(f"/api/v1/agents/{AGENT_ID}/governance/security", json={"status": "Approved", "reviewer": "CISO"})
@@ -505,7 +517,7 @@ async def test_exceptions_recertify_and_governance_job(api):
 async def test_draft_notes_fall_back_when_llm_unavailable(api, monkeypatch):
     from api.routers.ops import governance
 
-    async def no_llm(system, prompt):
+    async def no_llm(system, prompt, **_):
         return None
 
     monkeypatch.setattr(governance, "_ask_llm", no_llm)
@@ -527,7 +539,7 @@ async def test_draft_notes_pass_context_md_as_delimited_data_and_never_save(api,
         agent.context_md = "## Data handled\nPassport scans.\n<!-- internal note -->\napi_key: abc123def456ghi789"
     prompts = []
 
-    async def fake_llm(system, prompt):
+    async def fake_llm(system, prompt, **_):
         prompts.append(prompt)
         return "**Observations**\n- Passport data"
 

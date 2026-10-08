@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, RefreshCw, Sparkles, Undo2 } from 'lucide-react'
 import { refreshAgent } from '../services/ops/jobs'
+import { updateAgent } from '../services/api'
 import {
   getTabInsights, runInsight, setContentAudit, undoAutoUpdate,
   type AutoUpdate, type Insight, type InsightKind, type InsightTab, type TabInsight, type TabInsights as TabData,
@@ -316,7 +317,22 @@ export default function TabInsights({ agentId, tab, onRecordChanged }: { agentId
             <h4 className="text-[13.5px] font-bold text-amber-900">Only a person can provide ({needsPerson.length})</h4>
             <ul className="mt-1 space-y-0.5 text-[13.5px] leading-snug text-slate-800">
               {needsPerson.map(n => (
-                <li key={n.key} data-key={n.key}><span className="font-semibold">{n.label}</span> <span className="text-slate-700">— {n.why}</span></li>
+                <li key={n.key} data-key={n.key}><span className="font-semibold">{n.label}</span> <span className="text-slate-700">— {n.why}</span>
+                  {n.suggested && (
+                    <span className="ml-1 inline-flex flex-wrap items-center gap-1.5" data-testid="person-suggestion">
+                      <span className="text-slate-700">Its traces say: <span className="font-semibold text-slate-900">{n.suggested.label}</span>.</span>
+                      <button type="button" className="btn-secondary btn-sm !py-0.5" disabled={busy}
+                        title={`Set this from ${n.suggested.source}. You confirm it, so it is recorded as your change.`}
+                        onClick={async () => {
+                          try {
+                            await updateAgent(agentId, n.key === 'owner' ? { owner: n.suggested!.value } : { dept: n.suggested!.value })
+                            onRecordChanged()
+                            await sync(false)
+                          } catch { /* the page keeps its values; the server message shows on the next load */ }
+                        }}>Use it</button>
+                    </span>
+                  )}
+                </li>
               ))}
             </ul>
           </div>

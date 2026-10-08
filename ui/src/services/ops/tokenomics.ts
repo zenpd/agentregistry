@@ -1,6 +1,6 @@
 import api from '../api'
 
-export type UsageSource = 'phoenix' | 'seed' | 'none'
+export type UsageSource = 'phoenix' | 'langfuse' | 'seed' | 'none'
 
 // ok | partial come from a completed read; the rest mean Phoenix was not read.
 export type UsageStatus =

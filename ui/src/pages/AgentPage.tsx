@@ -88,6 +88,29 @@ export default function AgentPage() {
                   ? <MetaChip icon={<User size={12} />}>{agent.owner}</MetaChip>
                   : <MetaChip icon={<User size={12} />} warn>No owner</MetaChip>}
                 {agent.version && <MetaChip icon={<Tag size={12} />}>{agent.version}</MetaChip>}
+                {agent.sourceRepo && (
+                  <a href={agent.sourceRepo} target="_blank" rel="noreferrer" className="rounded-full bg-slate-50 px-2.5 py-0.5 text-[12px] font-semibold text-slate-700 ring-1 ring-slate-200 hover:text-zen-700" data-testid="repo-chip">Code repository</a>
+                )}
+                {agent.cloudResourceId && (
+                  <span className="rounded-full bg-slate-50 px-2.5 py-0.5 text-[12px] font-semibold text-slate-700 ring-1 ring-slate-200" title={agent.cloudResourceId}>Azure resource linked</span>
+                )}
+                {agent.traceConnectorId && (
+                  <span className="rounded-full bg-teal-50 px-2.5 py-0.5 text-[12px] font-semibold text-teal-700 ring-1 ring-teal-200">Traces in Langfuse</span>
+                )}
+                {(agent.sharedProject?.length ?? 0) > 0 && (
+                  <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[12px] font-semibold text-amber-800 ring-1 ring-amber-300" data-testid="shared-project-badge"
+                    title="Another record is linked to the same Phoenix project. Usually the same app registered twice: keep one, or split the project from the wrong record on the Discovered page.">
+                    Same Phoenix project as {agent.sharedProject!.map(o => o.name).join(', ')}
+                  </span>
+                )}
+                {agent.isDemo && (
+                  <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[12px] font-semibold text-amber-800 ring-1 ring-amber-300" data-testid="demo-badge"
+                    title="A seeded example agent. Its numbers are demo data. Settings → Demo agents hides the demo agents from every page.">Demo agent</span>
+                )}
+                {agent.archivedAt && (
+                  <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[12px] font-semibold text-slate-700 ring-1 ring-slate-300" data-testid="archived-badge"
+                    title="Left out of every page, count and job, but kept in the database. Settings → Demo agents brings it back.">Archived</span>
+                )}
               </div>
             </div>
             <span className="inline-flex items-center gap-1">

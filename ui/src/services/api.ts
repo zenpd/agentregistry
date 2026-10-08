@@ -23,12 +23,31 @@ export function clearAuthToken() {
   localStorage.removeItem(TOKEN_KEY)
 }
 
+// ── Demo agents ──────────────────────────────────────────────────────────────
+// The seeded example agents are shown on every page, labelled Demo, so a first
+// look has agents and graphs to show. The viewer can hide them with the switch in
+// the top bar. The choice is kept per browser and sent on every request, so all
+// pages count the same agents (backend/db/scope.py).
+const INCLUDE_DEMO_KEY = 'airegistry_include_demo'
+
+export function includingDemo(): boolean {
+  try { return localStorage.getItem(INCLUDE_DEMO_KEY) !== '0' } catch { return true }
+}
+
+export function setIncludingDemo(on: boolean) {
+  try { localStorage.setItem(INCLUDE_DEMO_KEY, on ? '1' : '0') } catch { /* private mode */ }
+}
+
+// demoEnabled is false when the installation turned the demo agents off (DEMO_AGENTS_ENABLED=false).
+export const getScope = () => api.get<{ demoAgents: number; includingDemo: boolean; demoEnabled: boolean }>('/admin/scope')
+
 // Add auth header to every request if token exists
 api.interceptors.request.use((config) => {
   const token = getAuthToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+  if (includingDemo()) config.headers['X-Include-Demo'] = '1'
   return config
 })
 
@@ -98,6 +117,18 @@ export interface Agent {
   contextMd?: string | null
   capabilities: string[]
   rateLimit?: string | null
+  // A seeded example agent (hidden on every page unless demo agents are switched on).
+  isDemo?: boolean
+  // Archived: left out of every page, kept in the database (Settings → Demo agents brings it back).
+  archivedAt?: string | null
+  // Set only by GET /agents/{id}: other records linked to the same Phoenix project.
+  sharedProject?: { id: string; name: string }[]
+  // Where else the agent is known (set when a connector finding is linked to it).
+  sourceRepo?: string | null
+  cloudResourceId?: string | null
+  traceConnectorId?: string | null
+  ownerUserId?: string | null
+  backupOwnerUserId?: string | null
 }
 
 export interface ReuseUnmet {
@@ -128,7 +159,7 @@ export interface ReuseStatus {
 
 export interface RegistryCard {
   costPerCallCents: number | null
-  source: 'phoenix' | 'seed' | 'none'
+  source: 'phoenix' | 'langfuse' | 'seed' | 'none'
   // 'missing': nothing the agent ran on has a price, so cost is unknown.
   pricing: 'ok' | 'partial' | 'missing'
   consumerCount: number
@@ -182,6 +213,11 @@ export interface AgentCreateInput {
   calls: string[]
   consumers: string[]
   reuse_justification: string
+  // Required when stage is not Ideation: why the agent skips the earlier gates.
+  stage_reason?: string
+  version?: string
+  // A certified agent whose contract this registration started from.
+  started_from_agent_id?: string
 }
 
 export interface PaginationInfo {
@@ -220,7 +256,16 @@ export const login = async (email: string, password: string): Promise<LoginRespo
   return resp.data
 }
 
-export const getMe = () => api.get<{ user_id: string; role: string }>('/auth/me')
+export const getMe = () => api.get<{ user_id: string; role: string; name: string | null; email: string | null; accountRole: string | null; perms: string[]; gates: string[]; rbac: boolean; awayUntil: string | null; deputyUserId: string | null }>('/auth/me')
+
+// Away until a date (empty clears it), with a deputy who receives your review notices meanwhile.
+export const setMyAway = (awayUntil: string | null, deputyUserId: string | null) =>
+  api.put<{ awayUntil: string | null; deputyUserId: string | null }>('/auth/me/away', { awayUntil, deputyUserId })
+
+// The accountable owner (a person with an account) and a backup owner who takes
+// over if the owner's account is deactivated. An empty string clears a field.
+export const setOwnership = (agentId: string, body: { ownerUserId?: string; backupOwnerUserId?: string; ownerText?: string; reason?: string }) =>
+  api.put<{ owner: string; ownerUserId: string | null; backupOwnerUserId: string | null }>(`/agents/${encodeURIComponent(agentId)}/ownership`, body)
 
 export const logout = () => {
   clearAuthToken()
@@ -353,6 +398,9 @@ export interface AgentEconomics {
   tokenSource?: string
   infraSource?: string
   costComplete?: boolean
+  // Which figure the value is: declared, attested or adjusted by finance, or declared again (stale).
+  valueState?: 'none' | 'declared' | 'attested' | 'adjusted' | 'stale'
+  valueMethodLabel?: string | null
 }
 
 
@@ -374,6 +422,15 @@ export interface GovernanceOverview {
 
 export const getGovernanceOverview = () =>
   api.get<GovernanceOverview>('/governance/')
+
+export interface GovernanceSummary {
+  requiredReviews: Record<string, string[]>   // by risk level, from Settings → Governance rules
+  agents: number; cleared: number; blocked: number; inReview: number
+}
+export const getGovernanceSummary = () => api.get<GovernanceSummary>('/governance/summary')
+// The reviews an agent's risk level requires. All three until the rules are loaded.
+export const requiredReviewsOf = (s: GovernanceSummary | null, riskLevel?: string | null): string[] =>
+  s?.requiredReviews[(riskLevel || 'LOW').toUpperCase()] ?? ['arb', 'security', 'dp']
 
 export const updateGate = (agentId: string, gate: string, status: string) =>
   api.put<{ status: string }>(`/governance/agents/${agentId}/governance/${gate}`, { status })
@@ -529,8 +586,9 @@ export const revokeAgentIdentity = (agentId: string) =>
 
 // ── Offboarding ────────────────────────────────────────────────────────────────
 
+// Older offboarding notes (steps 1 to 6). The stage itself changes through the retirement steps (services/ops/retirement.ts).
 export const offboardAgent = (agentId: string, stage: number) =>
-  api.post(`/agents/${agentId}/offboard`, { stage })
+  api.post(`/agents/${agentId}/offboard`, null, { params: { stage } })
 
 export const recertifyAgent = (agentId: string) =>
   api.post(`/governance/agents/${agentId}/recertify`)
@@ -570,14 +628,29 @@ export interface User {
   name: string
   role: string
   isActive: boolean
+  // Away until this date: review notices go to the deputy meanwhile.
+  awayUntil?: string | null
+  deputyUserId?: string | null
+  // For an Auditor: the last day the account can sign in.
+  accessUntil?: string | null
 }
 
 export const getTaxonomy = () => api.get<Taxonomy>('/admin/taxonomy')
 
 export const getUsers = () => api.get<User[]>('/admin/users')
 
-export const createUser = (data: { email: string; name: string; role: string; password: string }) =>
+export const createUser = (data: { email: string; name: string; role: string; password: string; accessUntil?: string }) =>
   api.post<{ id: string; status: string }>('/admin/users', data)
+
+export const updateUser = (id: string, data: { name?: string; role?: string; isActive?: boolean; awayUntil?: string | null; deputyUserId?: string | null; accessUntil?: string | null }) =>
+  api.put<{ status: string; user: User }>(`/admin/users/${encodeURIComponent(id)}`, data)
+
+export const resetUserPassword = (id: string, password: string) =>
+  api.post<{ status: string }>(`/admin/users/${encodeURIComponent(id)}/password`, { password })
+
+// Active people for pickers (owner, deputy); readable by everyone signed in.
+export const getDirectory = () =>
+  api.get<{ id: string; name: string; email: string; role: string }[]>('/admin/directory')
 
 // ── V2 Features ──────────────────────────────────────────────────────────────
 
@@ -682,3 +755,9 @@ export const getImpact = (nodeId: string) =>
   }>(`/graph/impact/${nodeId}`)
 
 export default api
+
+// Step-by-step Phoenix check: connected, not_configured, blocked_address,
+// unreachable, not_phoenix, unauthorized or project_not_found.
+export interface ConnectionTestResult { endpoint: string | null; state: string; message: string; version?: string | null; projectCount?: number }
+export const testPhoenixConnection = (body: { endpoint?: string; apiKey?: string; project?: string } = {}) =>
+  api.post<ConnectionTestResult>('/phoenix/test-connection', body, { timeout: 60_000 })

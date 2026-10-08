@@ -299,7 +299,7 @@ export default function JobStatusBar({ agentId, onRefreshed }: { agentId: string
             >
               Scheduler:{' '}
               <span className={scheduler.enabled ? 'font-semibold text-emerald-700' : 'font-semibold text-slate-600'}>
-                {scheduler.enabled ? (scheduler.running ? 'on' : 'on (not running)') : 'off'}
+                {scheduler.enabled ? (scheduler.running ? 'on' : 'on, but not started (restart the backend)') : 'off'}
               </span>
             </span>
           )}
@@ -308,7 +308,7 @@ export default function JobStatusBar({ agentId, onRefreshed }: { agentId: string
             onClick={refresh}
             disabled={refreshing}
             className="btn-secondary btn-sm whitespace-nowrap"
-            title="Re-reads Phoenix usage, fills in what the record is missing from usage, traces and the app's own API description, then reruns cost rollup, risk scan and governance checks for this agent."
+            title="Re-reads this agent's usage from its traces, fills in what the record is missing from usage, traces and the app's own API description, then recalculates cost, risks and governance checks for this agent."
           >
             {refreshing ? 'Refreshing…' : 'Refresh all data'}
           </button>
@@ -368,7 +368,7 @@ export default function JobStatusBar({ agentId, onRefreshed }: { agentId: string
       )}
 
       {!refreshing && !result && !refreshError && !notice && neverRun && (
-        <div className="text-slate-500">No data jobs have run for this agent yet. Use "Refresh all data" to collect them now.</div>
+        <div className="text-slate-500">No data has been collected for this agent yet. Press "Refresh all data" to collect it now.</div>
       )}
     </div>
   )

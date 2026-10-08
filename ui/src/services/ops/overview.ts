@@ -1,7 +1,7 @@
 import api from '../api'
 
 export type GateKey = 'arb' | 'security' | 'dp'
-export type UsageSource = 'phoenix' | 'seed' | 'none'
+export type UsageSource = 'phoenix' | 'langfuse' | 'seed' | 'none'
 export type TelemetryStatus = 'ok' | 'demo' | 'no_usage_yet' | 'not_linked'
 export type Freshness = 'fresh' | 'aging' | 'stale'
 export type BudgetState = 'on_track' | 'at_threshold' | 'over_budget' | 'no_usage_data'
@@ -67,6 +67,8 @@ export interface OverviewFacts {
   apiEndpoint: string | null
   apiEndpointWarning: string | null
   euAiActCategory: string | null
+  // The latest confirmed classification; null when nobody confirmed one.
+  classification?: { category: string; riskLevel: string; by: string; on: string } | null
   phoenixProject: string | null
   description: string | null
   businessOutcome: string | null
@@ -210,3 +212,18 @@ export const confirmContextSuggestion = (agentId: string, type: SuggestionType, 
 
 export const dismissContextSuggestion = (agentId: string, type: SuggestionType, ref: string) =>
   api.post<SuggestionActionResult>(`/agents/${agentId}/context/suggestions/dismiss`, suggestionBody(type, ref))
+
+// Lifecycle signals across the portfolio, from stored usage.
+export interface AttentionItem { agentId: string; name: string; text: string }
+export interface PortfolioAttention {
+  silent: (AttentionItem & { lastCall: string | null; days: number | null })[]
+  runningAfterRetirement: (AttentionItem & { calls: number })[]
+  callsRetired: (AttentionItem & { retiredId: string; retiredName: string })[]
+  stalled: (AttentionItem & { stage: string; weeks: number })[]
+  // No accountable owner, or an owner whose account is deactivated.
+  ownerless: AttentionItem[]
+  // An incident's stop request the owner has not acknowledged yet.
+  stopWaiting: AttentionItem[]
+  silentDays: number
+}
+export const getPortfolioAttention = () => api.get<PortfolioAttention>('/portfolio/attention')

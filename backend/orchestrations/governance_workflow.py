@@ -81,51 +81,35 @@ async def _check_dlp_criteria(agent: Agent) -> tuple:
     return status, note
 
 
-async def run_governance_workflow(agent_id: str, org_id: str) -> dict:
-    """Run the full governance review workflow for an agent."""
-    agent = await _get_agent_data(agent_id)
-    if not agent:
-        return {"status": "error", "message": "Agent not found"}
-
-    # Run reviews for each gate
+async def propose_reviews(agent: Agent) -> dict:
+    """What the rule checks would decide for each gate. Pure proposal: saves nothing."""
     arb_status, arb_note = await _check_arb_criteria(agent)
     sec_status, sec_note = await _check_security_criteria(agent)
     dlp_status, dlp_note = await _check_dlp_criteria(agent)
+    return {
+        "arb": {"status": arb_status, "note": arb_note},
+        "security": {"status": sec_status, "note": sec_note},
+        "dp": {"status": dlp_status, "note": dlp_note},
+    }
 
-    reviews = {"arb": arb_status, "security": sec_status, "dp": dlp_status}
-    notes = {"arb": arb_note, "security": sec_note, "dp": dlp_note}
 
-    # Determine final decision
+async def run_governance_workflow(agent_id: str, org_id: str) -> dict:
+    """Rule checks for one agent, returned as a proposal. Nothing is written:
+    a person accepts the proposal on the Governance page, with a reason, and the
+    decisions are then recorded in their name (POST
+    /api/v1/agents/{id}/governance/rule-proposal/apply)."""
+    agent = await _get_agent_data(agent_id)
+    if not agent:
+        return {"status": "error", "message": "Agent not found"}
+    proposal = await propose_reviews(agent)
+    reviews = {g: p["status"] for g, p in proposal.items()}
+    notes = {g: p["note"] for g, p in proposal.items()}
     all_approved = all(s in ["Approved", "Approved with Conditions"] for s in reviews.values())
     changes_requested = any(s == "Changes Requested" for s in reviews.values())
     final_decision = "Approved" if all_approved else "Changes Requested" if changes_requested else "Rejected"
-
-    # Save results to database
-    async with get_db_session() as db:
-        for gate, status in reviews.items():
-            result = await db.execute(
-                select(GovernanceReview).where(
-                    GovernanceReview.agent_id == agent_id,
-                    GovernanceReview.gate == gate
-                )
-            )
-            review = result.scalar_one_or_none()
-            if review:
-                review.status = status
-                review.notes = notes[gate]
-                review.reviewed_at = datetime.now(timezone.utc)
-            else:
-                db.add(GovernanceReview(
-                    id=f"gr-{secrets.token_hex(6)}",
-                    agent_id=agent_id,
-                    gate=gate,
-                    status=status,
-                    notes=notes[gate],
-                    reviewed_at=datetime.now(timezone.utc),
-                ))
-
     return {
-        "status": "completed",
+        "status": "proposed",
+        "saved": False,
         "agent_id": agent_id,
         "reviews": reviews,
         "notes": notes,

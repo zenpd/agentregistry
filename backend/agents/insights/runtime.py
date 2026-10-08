@@ -48,7 +48,7 @@ Rules you must follow:
 6. If you looked for something and could not establish it, put it in not_determined with the reason. That is a good answer, not a failure.
 7. Use a tag only when it names something you found. When you checked for something and it is absent, leave the tag empty (or use the tag for background, if one is offered).
 8. Write short plain sentences for a busy reader. No headings, no markdown. The summary is at most three sentences and gives the overall answer, not a list. At most six findings unless your task asks for more, most important first; each detail at most two sentences. Leave why_it_matters empty unless it says something specific to this agent that the detail does not.
-9. The registry fills in what it can by itself: the model actually used, tools and knowledge sources seen in traces, the API address, and a description, capabilities, inputs and outputs taken from the app's own API or drafted from its traces. Never tell the person to fill in or correct those fields. If one of them is still empty or looks wrong, say that the registry could not determine it and why. Ask a person only for what only a person can give: an accountable owner, the business outcome and value, a budget, a service level, review decisions and stage changes.
+9. The registry fills in what it can by itself: the model actually used, tools and knowledge sources seen in traces, the API address, and a description, capabilities, inputs and outputs taken from the app's own API or drafted from its traces. Never tell the person to fill in or correct those fields. If one of them is still empty or looks wrong, say that the registry could not determine it and why. Ask a person only for what only a person can give: an accountable owner and a backup owner, the business outcome, the declared value and how it was worked out, a budget, a service level, the answers to the classification questions, review decisions and stage changes.
 10. The page itself lists, next to your text, what the registry filled in and what only a person still has to provide (get_automatic_updates returns both). Do not write findings that only repeat either list; mention one of those points only where it explains something else you found.
 11. Do not repeat what the record already says about the agent (its description, capabilities, model, tools): the page shows those. Steps inside the app's own graph are how it works, not dependencies, and are never undeclared. A second model or an embedding model has no field on the record, so it is not undeclared either.
 12. Write for a reader who never sees the data. Call an agent by its name, never by its id. Never write ref values, ids or field names from the data (such as ownerRecorded) in the summary or in a finding's text: refs go only in the refs list."""
@@ -271,20 +271,45 @@ Prepare = Callable[[RefBook], Awaitable[str]]
 
 
 async def run_insight(spec: InsightSpec, *, agent_id: Optional[str], request: str, data_block: str = "",
-                      book: Optional[RefBook] = None, model: Any = None) -> dict:
+                      book: Optional[RefBook] = None, model: Any = None, interactive: bool = True,
+                      actor: Optional[str] = None) -> dict:
     """Runs the graph and returns {status, output, refs, toolsUsed, checks, model, promptVersion, steps, durationMs}.
-    Never raises for a model problem: the status says what happened and the page keeps its calculated facts."""
+    Never raises for a model problem: the status says what happened and the page keeps its calculated facts.
+    Every run, refused or not, is recorded with its tokens and cost (services/ai_meter.py)."""
+    from langchain_core.callbacks import UsageMetadataCallbackHandler
+    from services import ai_meter
+
     book = book or RefBook()
     started = time.monotonic()
     settings = get_settings()
     base = {"kind": spec.kind, "promptVersion": spec.version, "model": settings.azure_openai_deployment, "refs": {},
             "toolsUsed": [], "checks": {}, "steps": 0, "output": None}
+    function = ai_meter.function_for_kind(spec.kind)
+    refused = await ai_meter.refusal(function, interactive)
+    if refused:
+        await ai_meter.record(function, kind=spec.kind, agent_id=agent_id, model=settings.azure_openai_deployment,
+                              prompt_version=spec.version, status="refused", reason=refused, interactive=interactive, actor=actor)
+        return {**base, "status": "unavailable", "reason": refused, "durationMs": 0}
+    usage = UsageMetadataCallbackHandler()
+    result = await _run_insight(spec, agent_id=agent_id, request=request, data_block=data_block, book=book, model=model,
+                                started=started, base=base, usage=usage)
+    tokens_in = sum(int(u.get("input_tokens") or 0) for u in usage.usage_metadata.values())
+    tokens_out = sum(int(u.get("output_tokens") or 0) for u in usage.usage_metadata.values())
+    await ai_meter.record(function, kind=spec.kind, agent_id=agent_id, model=settings.azure_openai_deployment,
+                          prompt_version=spec.version, input_tokens=tokens_in, output_tokens=tokens_out,
+                          duration_ms=int(result.get("durationMs") or 0), status=result.get("status", "ok"),
+                          reason=result.get("reason"), interactive=interactive, actor=actor)
+    return {**result, "tokens": {"input": tokens_in, "output": tokens_out}}
+
+
+async def _run_insight(spec: InsightSpec, *, agent_id: Optional[str], request: str, data_block: str, book: RefBook,
+                       model: Any, started: float, base: dict, usage: Any) -> dict:
     try:
         model = model or get_model()
         graph = build_graph(spec, book, agent_id, model)
         content = request if not data_block else f"{request}\n\n{data_block}"
         config = {"recursion_limit": MAX_STEPS * 2 + 6, "run_name": f"insight:{spec.kind}",
-                  "metadata": {"insight": spec.kind, "agent_id": agent_id or ""}}
+                  "metadata": {"insight": spec.kind, "agent_id": agent_id or ""}, "callbacks": [usage]}
 
         async def go() -> State:
             return await graph.ainvoke({"messages": [HumanMessage(content=content)], "steps": 0, "out": None}, config)

@@ -2,6 +2,13 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import AppShell from './components/layout/AppShell'
 import LoginPage from './pages/LoginPage'
 import PlaygroundPage from './pages/PlaygroundPage'
+
+// Trying an agent lives in one place, its Integrate tab. Old /playground links land there.
+function PlaygroundRedirect() {
+  const agent = new URLSearchParams(window.location.search).get('agent')
+  return <Navigate to={agent ? `/agents/${agent}?tab=integrate` : '/agents'} replace />
+}
+void PlaygroundPage   // kept until the final cleanup
 import SettingsPage from './pages/SettingsPage'
 import ExecutivePage from './pages/ExecutivePage'
 import AgentsPage from './pages/AgentsPage'
@@ -15,6 +22,9 @@ import DiscoveredPage from './pages/DiscoveredPage'
 import AskPage from './pages/AskPage'
 import HowItWorksPage from './pages/HowItWorksPage'
 import PipelinesPage from './pages/PipelinesPage'
+import AuditPage from './pages/AuditPage'
+import ProgrammeHealthPage from './pages/ProgrammeHealthPage'
+import CompliancePage from './pages/CompliancePage'
 import { getAuthToken } from './services/api'
 
 export default function App() {
@@ -45,8 +55,11 @@ function AuthShell() {
         <Route path="/governance" element={<GovernancePage />} />
         <Route path="/platform" element={<PlatformView />} />
         <Route path="/dependencies" element={<DependencyGraphView />} />
-        <Route path="/playground" element={<PlaygroundPage />} />
+        <Route path="/playground" element={<PlaygroundRedirect />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/audit" element={<AuditPage />} />
+        <Route path="/programme" element={<ProgrammeHealthPage />} />
+        <Route path="/compliance" element={<CompliancePage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppShell>

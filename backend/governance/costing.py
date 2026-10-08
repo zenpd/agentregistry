@@ -43,13 +43,26 @@ def token_cost_cents(input_tokens: int, output_tokens: int, cached_tokens: int, 
     return dollars * 100
 
 
+# Usage read from a trace source, or entered by hand for an agent without tracing,
+# is real; anything else is seeded demo data. Earlier sources win over later ones.
+REAL_SOURCES = ("phoenix", "langfuse", "manual")
+# Only these show that calls were observed (silent agents, retirement traffic).
+TRACED_SOURCES = ("phoenix", "langfuse")
+
+
+def is_real(source: str | None) -> bool:
+    return source in REAL_SOURCES
+
+
 def effective_rows(rows: Iterable[Mapping]) -> tuple[list[Mapping], str]:
-    """Real (phoenix) rows win: seed rows are dropped once any real row exists.
-    Returns (rows, source) where source is 'phoenix', 'seed' or 'none'."""
+    """Real rows (from Phoenix, Langfuse or entered by hand) win: seed rows are
+    dropped once any real row exists. Returns (rows, source) where source is
+    'phoenix', 'langfuse', 'manual', 'seed' or 'none'."""
     rows = list(rows)
-    real = [r for r in rows if r.get("source") == "phoenix"]
-    if real:
-        return real, "phoenix"
+    for real_source in REAL_SOURCES:
+        real = [r for r in rows if r.get("source") == real_source]
+        if real:
+            return real, real_source
     if rows:
         return rows, "seed"
     return [], "none"

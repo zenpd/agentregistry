@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import ChargebackCard from './ChargebackCard'
+import ManualUsagePanel from './ManualUsagePanel'
 import InfoTip from '../../components/InfoTip'
 import {
   getTokenomics,
@@ -48,7 +50,7 @@ const ANOMALY_LABEL: Record<string, string> = {
   cost_per_call_jump: 'Cost per call jump',
   unpriced_model: 'Unpriced model',
   undeclared_model: 'Undeclared model',
-  error_burn: 'Error burn',
+  error_burn: 'High error rate',
 }
 
 // ── Formatting ───────────────────────────────────────────────────────────────
@@ -199,6 +201,7 @@ export default function TokenomicsTab({ agentId, dataVersion }: TabProps) {
       <RefreshNotice data={data} result={refreshResult} error={refreshError} refreshing={refreshing} />
       {data.source === 'seed' && <DemoNotice linked={data.linked} />}
       {!hasData && <EmptyState data={data} />}
+      <ManualUsagePanel agentId={agentId} onChanged={load} />
 
       {hasData && (
         <>
@@ -230,6 +233,7 @@ export default function TokenomicsTab({ agentId, dataVersion }: TabProps) {
 
       <AnomalyList data={data} onChanged={load} />
       <BudgetEditor agentId={agentId} budget={data.budget} onSaved={load} />
+      <ChargebackCard agentId={agentId} />
     </div>
   )
 }
@@ -243,15 +247,15 @@ function StatusStrip({ data, refreshing, onRefresh }: { data: Tokenomics; refres
         <SourceBadge source={data.source} />
         {data.phoenixProject
           ? <span>Phoenix project <InfoTip term="phoenix_project" /> <span className="font-mono text-slate-700">{data.phoenixProject}</span></span>
-          : <span>No Phoenix project linked</span>}
-        {data.source === 'phoenix' && (
+          : <span>No tracing project linked</span>}
+        {(data.source === 'phoenix' || data.source === 'langfuse') && (
           <span title={fmtTime(data.lastIngestedAt)}>· Updated {fmtAgo(data.lastIngestedAt)}</span>
         )}
       </div>
       <button
         onClick={onRefresh}
         disabled={!data.linked || refreshing}
-        title={data.linked ? 'Read LLM spans from Phoenix and recompute cost' : 'Link a Phoenix project on the Diagram tab first'}
+        title={data.linked ? 'Read this agent\'s model calls from Phoenix and recalculate the cost' : 'Link a Phoenix project on the Diagram tab first'}
         className="btn-secondary btn-sm"
       >
         {refreshing ? 'Reading Phoenix…' : 'Refresh from Phoenix'}
@@ -292,7 +296,7 @@ function RefreshNotice({ data, result, error, refreshing }: {
     return (
       <Banner tone={u.status === 'partial' ? 'amber' : 'rose'}>
         {u.reason || USAGE_STATUS_TEXT[u.status] || `Refresh ended with status ${u.status}.`}
-        {data.source === 'phoenix' && u.status !== 'partial' && <> Showing usage collected {fmtAgo(data.lastIngestedAt)}.</>}
+        {(data.source === 'phoenix' || data.source === 'langfuse') && u.status !== 'partial' && <> Showing usage collected {fmtAgo(data.lastIngestedAt)}.</>}
         {data.source === 'seed' && <> Still showing demo data.</>}
       </Banner>
     )
@@ -300,7 +304,7 @@ function RefreshNotice({ data, result, error, refreshing }: {
 
   // A scheduled read that failed since the data shown was collected.
   const last = data.lastRefresh
-  if (data.source === 'phoenix' && last && !['ok', 'skipped'].includes(last.status)) {
+  if ((data.source === 'phoenix' || data.source === 'langfuse') && last && !['ok', 'skipped'].includes(last.status)) {
     return (
       <Banner tone="amber">
         The last read from Phoenix ({fmtAgo(last.at)}) did not complete: {last.reason || USAGE_STATUS_TEXT[last.status] || last.status}
@@ -337,10 +341,10 @@ function EmptyState({ data }: { data: Tokenomics }) {
   let title = 'No usage data'
   let detail: string
   if (!data.linked) {
-    title = 'No usage data — link a Phoenix project on the Diagram tab'
-    detail = 'Usage and cost come only from this agent’s Phoenix traces, so nothing is shown until a project is linked.'
+    title = 'No usage data yet'
+    detail = 'Link a Phoenix project on the Diagram tab, or enter usage by hand below, to see usage and cost.'
   } else if (!last) {
-    detail = 'Usage has not been read from Phoenix yet. Refresh from Phoenix to read the last 30 days of LLM spans.'
+    detail = 'Usage has not been read from Phoenix yet. Press Refresh from Phoenix to read the model calls of the last 30 days.'
   } else if (last.status === 'ok') {
     detail = last.reason || `Phoenix has no LLM spans for this project in the last ${last.days ?? 30} days.`
   } else {
@@ -629,7 +633,7 @@ function ChartTooltip({ day, x, width }: { day: DailyUsage; x: number; width: nu
       <TipRow label="Input tokens" value={fmtNumber(day.inputTokens)} color={SERIES.input} />
       <TipRow label="of which cached" value={fmtNumber(day.cachedTokens)} color={SERIES.cached} />
       <TipRow label="Output tokens" value={fmtNumber(day.outputTokens)} color={SERIES.output} />
-      {day.spike && <div className="mt-1 text-rose-600">Spend spike against the trailing median</div>}
+      {day.spike && <div className="mt-1 text-rose-600">Spend spike: well above this agent’s usual daily spend</div>}
     </div>
   )
 }
@@ -656,7 +660,7 @@ function ModelTable({ data }: { data: Tokenomics }) {
       {unpriced.length > 0 && (
         <Banner tone="amber">
           No price for {unpriced.join(', ')} — {unpriced.length === 1 ? 'its' : 'their'} tokens are counted but not costed,
-          so the totals above are a lower bound. An admin can map the name to a priced model (model aliases).
+          so the totals above are a lower bound. A Registry Admin can map the name to a priced model (model aliases, through the API).
         </Banner>
       )}
       <div className="overflow-x-auto">
@@ -710,7 +714,7 @@ function ForecastPanel({ data }: { data: Tokenomics }) {
         <>
           <div className="grid grid-cols-3 gap-3">
             {f.months.map(m => (
-              <MiniStat key={m.month} label={`Days ${30 * (m.month - 1) + 1}–${30 * m.month}`} value={fmtCost(m.projectedCents)} />
+              <MiniStat key={m.month} label={m.month === 1 ? 'Next 30 days' : `Days ${30 * (m.month - 1) + 1}–${30 * m.month} from today`} value={fmtCost(m.projectedCents)} />
             ))}
           </div>
           <p className="text-[12px] text-slate-500">
@@ -737,7 +741,7 @@ function AnomalyList({ data, onChanged }: { data: Tokenomics; onChanged: () => P
   const [error, setError] = useState<string | null>(null)
   const share = data.anomalyCostShare
 
-  if (data.source !== 'phoenix' && data.anomalies.length === 0) return null
+  if (data.source !== 'phoenix' && data.source !== 'langfuse' && data.anomalies.length === 0) return null
 
   const resolve = async (id: string) => {
     setBusy(id)
@@ -758,7 +762,7 @@ function AnomalyList({ data, onChanged }: { data: Tokenomics; onChanged: () => P
         <SectionLabel tip="cost_anomaly">Cost anomalies</SectionLabel>
         {share && (
           <span className="text-[12px] text-slate-500" title="Spike impact ÷ total spend (FinOps Foundation): under 2% healthy, 2–7% warning, over 7% critical">
-            Anomaly cost share <span className={`font-semibold ${SHARE_BAND[share.band] || ''}`}>{share.pct}%</span> of spend over {share.evaluatedDays} evaluated days
+            Share of spend that came from spend spikes: <span className={`font-semibold ${SHARE_BAND[share.band] || ''}`}>{share.pct}%</span> of spend over {share.evaluatedDays} evaluated days
           </span>
         )}
       </div>
@@ -785,7 +789,7 @@ function AnomalyList({ data, onChanged }: { data: Tokenomics; onChanged: () => P
         </ul>
       )}
       <p className="text-[12px] text-slate-500">
-        Found by the daily cost rollup. Budget and model conditions close on their own once they clear; spikes and error bursts stay open until a person resolves them.
+        Found by the daily cost rollup. Budget and model conditions close on their own once they clear; spikes and high error rates stay open until a person resolves them.
       </p>
     </section>
   )
@@ -853,7 +857,7 @@ function BudgetEditor({ agentId, budget, onSaved }: { agentId: string; budget: B
           />
         </label>
         <label className="text-xs text-slate-600 space-y-1">
-          <span>Period starts on day</span>
+          <span>Budget period starts on day of the month</span>
           <input
             className="input" type="number" min={1} max={28} step={1}
             value={form.reset} onChange={e => setForm({ ...form, reset: e.target.value })}

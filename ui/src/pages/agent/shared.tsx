@@ -58,6 +58,8 @@ export const STAGE_PILL: Record<string, string> = {
 
 export const SOURCE_BADGE: Record<string, { label: string; className: string }> = {
   phoenix: { label: 'Phoenix traces', className: 'bg-teal-50 text-teal-700 ring-teal-200' },
+  langfuse: { label: 'Langfuse traces', className: 'bg-teal-50 text-teal-700 ring-teal-200' },
+  manual: { label: 'Entered by hand', className: 'bg-indigo-50 text-indigo-700 ring-indigo-200' },
   metered: { label: 'Metered (Azure)', className: 'bg-sky-50 text-sky-700 ring-sky-200' },
   declared: { label: 'Declared by owner', className: 'bg-indigo-50 text-indigo-700 ring-indigo-200' },
   estimate: { label: 'Estimate', className: 'bg-amber-50 text-amber-700 ring-amber-200' },

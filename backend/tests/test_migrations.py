@@ -36,6 +36,21 @@ def test_upgrade_head_matches_the_models(tmp_path):
     assert not drift, f"columns in the models but not in the migrations: {drift}"
 
 
+def test_sync_missing_columns_default_is_valid_on_postgres_too():
+    """A bare 1/0 integer literal is not a valid default for a Postgres BOOLEAN
+    column (Postgres raised DatatypeMismatchError in production), even though
+    SQLite accepts it. TRUE/FALSE keywords are valid on both."""
+    import sqlalchemy as sa_mod
+    import sys as sys_mod
+    sys_mod.path.insert(0, str(BACKEND))
+    from scripts.init_db import _sql_default
+
+    col = sa_mod.Column("flag", sa_mod.Boolean, default=True)
+    assert _sql_default(col).strip() == "DEFAULT TRUE"
+    col = sa_mod.Column("flag", sa_mod.Boolean, default=False)
+    assert _sql_default(col).strip() == "DEFAULT FALSE"
+
+
 def test_audit_rows_cannot_be_changed_or_deleted(tmp_path):
     db_file = tmp_path / "migrated.db"
     env = {"DATABASE_URL": f"sqlite+aiosqlite:///{db_file}", "PATH": "/usr/bin:/bin", "PYTHONPATH": str(BACKEND)}

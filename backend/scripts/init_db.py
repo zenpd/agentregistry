@@ -81,7 +81,9 @@ REFERENCE_MODEL_ALIASES = {
 def _sql_default(column):
     default = column.default.arg if column.default is not None and not callable(column.default.arg) else None
     if isinstance(default, bool):
-        return " DEFAULT " + ("1" if default else "0")
+        # TRUE/FALSE, not 1/0: Postgres rejects an integer literal as a boolean
+        # column default (SQLite accepts either).
+        return " DEFAULT " + ("TRUE" if default else "FALSE")
     if isinstance(default, (int, float)):
         return f" DEFAULT {default}"
     if isinstance(default, str):

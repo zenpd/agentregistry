@@ -34,7 +34,7 @@ try {
   ok('ISO 42001 coverage reads "n of 38 controls evidenced"', /ISO\/IEC 42001: \d+ of 38 controls evidenced/.test(await text('[data-testid=pack-summary]')), await text('[data-testid=pack-summary]'))
   await page.locator('[data-testid=control-line] button', { hasText: 'A.6.2.8' }).click()
   ok('opening a control names the agents missing evidence', /Runtime tracing is linked/.test(await text('[data-testid=pack-detail]')))
-  const ctlCsv = await download(() => page.locator('[data-testid=control-line]', { hasText: 'A.6.2.8' }).locator('button', { hasText: 'CSV' }).click())
+  const ctlCsv = await download(() => page.locator('[data-testid=control-detail] button', { hasText: 'CSV' }).click())
   ok('a control\'s evidence downloads as CSV', ctlCsv && ctlCsv.toString().startsWith('pack,control,title'))
   await page.waitForSelector('[data-testid=decision-log] p', { timeout: 30000 })
   ok('the decision log check says the sealed decisions match', /sealed decisions match/.test(await text('[data-testid=decision-log]')), await text('[data-testid=decision-log]'))
@@ -79,7 +79,11 @@ try {
   await page.fill('#u-name', 'Probe Auditor'); await page.fill('#u-email', 'probe.auditor@example.com')
   await page.selectOption('#u-role', 'Auditor'); await page.fill('[data-testid=auditor-until]', until); await page.fill('#u-password', 'probe-auditor-1')
   await page.click('[data-testid=save-user]'); await page.waitForTimeout(1200)
-  const aud = (await j('GET', '/admin/users')).body.find(u => u.email === 'probe.auditor@example.com')
+  let aud = (await j('GET', '/admin/users')).body.find(u => u.email === 'probe.auditor@example.com')
+  if (aud && aud.accessUntil !== until) {   // left from an earlier day: users are deactivated, never deleted
+    await j('PUT', `/admin/users/${aud.id}`, { isActive: true, accessUntil: until })
+    aud = (await j('GET', '/admin/users')).body.find(u => u.email === 'probe.auditor@example.com')
+  }
   ok('the Auditor is added with an end date', aud?.accessUntil === until, JSON.stringify(aud))
   if (aud) cleanup.push(() => j('PUT', `/admin/users/${aud.id}`, { isActive: false }))
   // Left from an earlier run: users are deactivated, never deleted, so the form could not add it again.

@@ -111,7 +111,10 @@ export default function AgentsPage() {
   return (
     <div className="space-y-4 animate-fade-in">
       <div className="page-header">
-        <h1 className="text-2xl font-bold gradient-text">AI Registry</h1>
+        <div>
+          <h1 className="text-2xl font-bold gradient-text">AI Registry</h1>
+          <p className="text-slate-600 mt-0.5">Every registered agent. Search or filter, open one, or register a new one.</p>
+        </div>
         {can(me, 'create')
           ? <div className="flex gap-2">
               <button onClick={() => setImporting(true)} className="btn-secondary" data-testid="import-btn">Import CSV</button>

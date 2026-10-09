@@ -50,6 +50,11 @@ export default function ValueSpendSection({ unitKey, unitLabel, unitAgentIds }: 
               {scenario.attestedShare !== null && ` (${scenario.attestedShare}% attested by finance)`}. Cost it brings: <b className="text-rose-600">{fmtCents(scenario.costCents)}/mo</b>.
               Net: <b>{fmtCents(scenario.netCents)}/mo</b>.
             </p>
+            <p className="text-[12.5px] text-slate-700" data-testid="scenario-working">
+              The cost is {fmtCents(scenario.tokenCents)} token cost + {fmtCents(scenario.costCents - scenario.tokenCents)} hosting.
+              {scenario.fixedHostingAgents > 0 && <> Of the hosting, <b>{fmtCents(scenario.fixedHostingTotalCents)}</b> is not a recorded cost: {scenario.fixedHostingAgents} agent{scenario.fixedHostingAgents === 1 ? ' has' : 's have'} no
+                hosting cost recorded, so the registry counts its fixed figure of {fmtCents(scenario.fixedHostingCents)} a month for each. They are marked "fixed figure" below.</>}
+            </p>
             <p className="text-[12px] text-slate-500">{scenario.caveat}</p>
             <ul className="max-h-56 overflow-y-auto divide-y divide-slate-100 text-[13px]">
               {all.map(a => (
@@ -63,7 +68,8 @@ export default function ValueSpendSection({ unitKey, unitLabel, unitAgentIds }: 
                   <Link to={`/agents/${a.agentId}?tab=revenue`} className="flex-1 text-slate-800 hover:text-zen-700">{a.name}</Link>
                   <span className="text-slate-500">{a.stage}</span>
                   <span className="w-28 text-right text-emerald-700">{fmtCents(a.valueCents)}{a.valueCents ? ` · ${VALUE_STATE_SHORT[a.valueState]}` : ''}</span>
-                  <span className="w-20 text-right text-rose-600">{fmtCents(a.tokenCents + a.infraCents)}</span>
+                  <span className="w-36 text-right text-rose-600" title={`Token cost ${fmtCents(a.tokenCents)} + hosting ${fmtCents(a.infraCents)} (${a.infraBasis === 'estimate' ? 'the fixed figure, no hosting cost recorded' : a.infraBasis === 'metered' ? 'metered by Azure' : 'declared by the owner'})`}>
+                    {fmtCents(a.tokenCents + a.infraCents)}{a.infraBasis === 'estimate' && <span className="text-slate-500"> · fixed figure</span>}</span>
                 </li>
               ))}
             </ul>

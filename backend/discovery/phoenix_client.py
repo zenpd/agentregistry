@@ -4,9 +4,7 @@ Deliberately narrow — this project only needs to LIST what Phoenix already
 knows about (projects, spans), not upload datasets or run experiments. The
 request shape (`GET /v1/projects`, `GET /v1/projects/{name}/spans`, cursor
 pagination, `Authorization: Bearer` auth) mirrors the same REST surface
-already proven against this org's `zaf-phoenix` instance by a sibling
-project (assureai) — see that project's `backend/app/runs/phoenix.py` if
-this ever needs to grow past listing.
+already proven against this org's `zaf-phoenix` instance.
 
 `observability/tracing.py` in this codebase only WRITES traces (OTLP
 export); this is the first code that READS them back.

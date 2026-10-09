@@ -5,7 +5,7 @@ import type { ReuseCheck, ReuseStatus } from '../services/api'
 
 const tabHref = (agentId: string, tab: ReuseCheck['tab']) => `/agents/${encodeURIComponent(agentId)}?tab=${tab}`
 
-// Status pill per failing check, in the AssureAI / test-maker semantic tones.
+// Status pill per failing check, in the shared semantic tones.
 const PILL = {
   muted: 'bg-slate-100 text-slate-700 ring-slate-200',
   info: 'bg-sky-50 text-sky-700 ring-sky-200',

@@ -170,13 +170,7 @@ async def load_state(db: AsyncSession, agent: Agent, now: datetime) -> dict:
     facts["classification_detail"] = await _classification_detail(db, agent.id)
     facts["classification"] = facts["classification_detail"] is not None
     facts["reviews"] = any((r.status or "Not Submitted") != "Not Submitted" for r in agent.governance_reviews or [])
-    from api.routers.ops.evidence import latest as latest_verdict
-
-    verdict = await latest_verdict(db, agent.id)
-    facts["assureai"] = {"verdict": verdict.verdict, "completedAt": gp.as_utc(verdict.completed_at).date().isoformat()
-                         if verdict.completed_at else None} if verdict else None
     return {
-        "assureai_required": await tpl.assureai_required(),
         "stage_since": since, "weeks_in_stage": weeks,
         "stalled": lifecycle.stalled(agent.lifecycle_stage, weeks, await tpl.stall_weeks()),
         "pendingWaivers": gp.unexpired_exceptions(pending_waivers, now),

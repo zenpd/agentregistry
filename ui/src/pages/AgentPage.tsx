@@ -99,7 +99,7 @@ export default function AgentPage() {
                 )}
                 {(agent.sharedProject?.length ?? 0) > 0 && (
                   <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[12px] font-semibold text-amber-800 ring-1 ring-amber-300" data-testid="shared-project-badge"
-                    title="Another record is linked to the same Phoenix project. Usually the same app registered twice: keep one, or split the project from the wrong record on the Discovered page.">
+                    title="Another record is linked to the same Phoenix project. Usually the same app registered twice: keep one, or split the project from the wrong record on the Discovered Agents page.">
                     Same Phoenix project as {agent.sharedProject!.map(o => o.name).join(', ')}
                   </span>
                 )}

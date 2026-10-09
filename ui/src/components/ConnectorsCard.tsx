@@ -17,10 +17,6 @@ const FORMS: Record<ConnectorKind, { label: string; help: string; fields: { key:
     label: 'Azure subscription', help: 'Lists Azure OpenAI and AI Services model deployments, and Foundry agents where allowed. Needs a service principal with Reader on the subscriptions.',
     fields: [{ key: 'tenantId', label: 'Tenant id' }, { key: 'clientId', label: 'Client id' }, { key: 'subscriptions', label: 'Subscription ids (comma separated)', list: true }, { key: 'clientSecret', label: 'Client secret', secret: true }],
   },
-  assureai: {
-    label: 'AssureAI application (verdicts only)', help: 'Reads the pass or fail verdict of an AssureAI evaluation run with the application\'s run key, for the evidence line on the Governance tab. Copies no scores and finds no agents, so Scan now finds nothing.',
-    fields: [{ key: 'baseUrl', label: 'AssureAI API address', placeholder: 'https://assureai.example.com/api' }, { key: 'linkTemplate', label: 'Link to a run in AssureAI (optional, {runId} is replaced)', placeholder: 'https://assureai.example.com/runs/{runId}' }, { key: 'runKey', label: 'Run key of the application', secret: true }],
-  },
 }
 
 const STATUS_TONE: Record<string, string> = { ok: 'text-emerald-700', unauthorized: 'text-rose-700', unreachable: 'text-rose-700', failed: 'text-rose-700', not_configured: 'text-amber-700' }
@@ -68,7 +64,7 @@ export default function ConnectorsCard() {
         <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-600"><Plug size={20} /></div>
         <div>
           <h3 className="text-[16px] font-extrabold text-slate-900">Connectors</h3>
-          <p className="text-[13px] text-slate-600">Other places the registry looks for agents, read-only. What they find appears on Discovered → Other sources. They are scanned every day (Pipelines → Connector scan).</p>
+          <p className="text-[13px] text-slate-600">Other places the registry looks for agents, read-only. What they find appears on Discovered Agents → Other sources. They are scanned every day (Pipelines → Connector scan).</p>
         </div>
       </div>
       {rows && rows.length > 0 && (
@@ -101,7 +97,7 @@ export default function ConnectorsCard() {
             <option value="">Add a connector…</option>
             {(Object.keys(FORMS) as ConnectorKind[]).map(k => <option key={k} value={k}>{FORMS[k].label}</option>)}
           </select>
-          {kind && <input className="input !w-64" placeholder="Name, e.g. Payments GitHub" value={label} onChange={e => setLabel(e.target.value)} />}
+          {kind && <input className="input !w-64" placeholder="Name, e.g. Payments team" value={label} onChange={e => setLabel(e.target.value)} />}
         </div>
         {kind && (
           <>

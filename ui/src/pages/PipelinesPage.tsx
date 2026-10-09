@@ -20,17 +20,17 @@ const META: Record<JobName, {
 }> = {
   phoenix_discovery: {
     icon: Radar, tone: 'bg-violet-50 text-violet-600',
-    does: 'Reads every Phoenix project (read-only) and notes its models, tools and last activity. Projects that no agent is linked to appear on the Discovered page, ready to register. Nothing is registered automatically, and prompt and answer text is never read.',
-    reads: ['Phoenix projects and a recent sample of their traces'], writes: ['Discovered page (new projects, activity of registered agents)'],
-    feeds: [{ label: 'Discovered page', to: '/discovered' }],
+    does: 'Reads every Phoenix project (read-only) and notes its models, tools and last activity. Projects that no agent is linked to appear on the Discovered Agents page, ready to register. Nothing is registered automatically, and prompt and answer text is never read.',
+    reads: ['Phoenix projects and a recent sample of their traces'], writes: ['Discovered Agents page (new projects, activity of registered agents)'],
+    feeds: [{ label: 'Discovered Agents page', to: '/discovered' }],
     needs: 'The Phoenix address and a read-only key in Settings → Common tracing endpoint. The server must be able to reach Phoenix (VPN).',
-    alsoFrom: 'Discovered → Scan now',
+    alsoFrom: 'Discovered Agents → Scan now',
   },
   connector_sync: {
     icon: Plug, tone: 'bg-violet-50 text-violet-600',
-    does: 'Scans every connector in Settings, read-only: Langfuse projects, GitHub repositories that build agents, and Azure model deployments and Foundry agents. What it finds waits on Discovered → Other sources. It also reads daily token usage for agents whose traces are in Langfuse.',
-    reads: ['Langfuse, GitHub and Azure, as configured'], writes: ['Findings on the Discovered page', 'Daily usage of Langfuse-linked agents'],
-    feeds: [{ label: 'Discovered → Other sources', to: '/discovered' }, { label: 'Tokenomics tab (Langfuse agents)' }],
+    does: 'Scans every connector in Settings, read-only: Langfuse projects, GitHub repositories that build agents, and Azure model deployments and Foundry agents. What it finds waits on Discovered Agents → Other sources. It also reads daily token usage for agents whose traces are in Langfuse.',
+    reads: ['Langfuse, GitHub and Azure, as configured'], writes: ['Findings on the Discovered Agents page', 'Daily usage of Langfuse-linked agents'],
+    feeds: [{ label: 'Discovered Agents → Other sources', to: '/discovered' }, { label: 'Tokenomics tab (Langfuse agents)' }],
     needs: 'At least one connector in Settings → Connectors. Each one is tested and scanned from there too.',
     alsoFrom: 'Settings → Connectors → Scan now',
   },
@@ -104,7 +104,7 @@ const META: Record<JobName, {
     icon: ShieldCheck, tone: 'bg-amber-50 text-amber-600',
     does: 'Finds approvals that are expiring or have expired, and agents that need recertification. When the model, tools or endpoint changed after an approval, it reopens the reviews that change affects. It never changes a stage.',
     reads: ['Reviews and expiry dates', 'Stage and telemetry', 'The copy of the record kept at approval'], writes: ['Report in the run log', 'Reopened reviews'],
-    feeds: [{ label: 'Governance tab (recertification)' }, { label: 'Approvals', to: '/approvals' }],
+    feeds: [{ label: 'Governance tab (recertification)' }, { label: 'Integration Approval', to: '/approvals' }],
   },
 }
 
@@ -416,7 +416,7 @@ const ON_DEMAND: { title: string; does: string; where: string; to: string; icon:
   { title: 'Refresh one agent’s usage', does: 'Reads that agent’s latest calls from Phoenix, then rolls up its cost.', where: 'Agent → Tokenomics → Refresh from Phoenix', to: '/agents', icon: Activity },
   { title: 'Risk scan for one agent', does: 'Re-scores one agent’s risks straight away.', where: 'Agent → Risk → Scan now', to: '/agents', icon: ShieldAlert },
   { title: 'Rule-check proposal', does: 'Rule checks propose a decision for all three reviews. Nothing is saved until a reviewer accepts it with a reason.', where: 'Governance → Propose by rules', to: '/governance', icon: ShieldCheck },
-  { title: 'Blast radius', does: 'What breaks, and whose value is at risk, if an agent or system goes down.', where: 'Dependencies → click a node', to: '/dependencies', icon: Workflow },
+  { title: 'Blast radius', does: 'What breaks, and whose value is at risk, if an agent or system goes down.', where: 'All Agents Graph → click an item', to: '/dependencies', icon: Workflow },
   { title: 'API operations', does: 'Reads a backend’s own openapi.json so Try it can call a real path.', where: 'Agent → Integrate → Load API operations', to: '/agents', icon: Database },
 ]
 

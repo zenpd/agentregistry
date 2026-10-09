@@ -30,10 +30,3 @@ async def stall_weeks() -> dict:
 
     saved = await get_setting("stage.stall_weeks")
     return saved if isinstance(saved, dict) else lifecycle.DEFAULT_STALL_WEEKS
-
-
-async def assureai_required() -> bool:
-    """Whether a missing or failed AssureAI verdict is a readiness gap for Production."""
-    from services.ai_meter import get_setting
-
-    return bool(await get_setting("evidence.assureai_required"))

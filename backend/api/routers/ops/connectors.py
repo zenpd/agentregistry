@@ -21,7 +21,7 @@ from services.audit import log_audit_event
 
 router = APIRouter(prefix="/api/v1", tags=["Agent Ops — Connectors"])
 
-SECRET_KEYS = {"langfuse": ("public_key", "secret_key"), "github": ("token",), "azure": ("clientSecret",), "assureai": ("runKey",)}
+SECRET_KEYS = {"langfuse": ("public_key", "secret_key"), "github": ("token",), "azure": ("clientSecret",)}
 
 
 def _iso(d):

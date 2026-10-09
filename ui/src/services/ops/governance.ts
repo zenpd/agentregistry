@@ -236,8 +236,6 @@ export interface GovernanceSettings {
   templates: Record<'LOW' | 'MEDIUM' | 'HIGH', { gates: GateKey[]; validityDays: number; mode: EnforcementMode }>
   requiredFields: Record<'Development' | 'Testing' | 'Production', string[]>
   stallWeeks: Record<'Ideation' | 'Development' | 'Testing', number>
-  // A missing or failed AssureAI verdict is a readiness gap for Production.
-  assureaiRequired: boolean
   requirable: { key: string; label: string }[]
 }
 export const getGovernanceSettings = () => api.get<GovernanceSettings>('/governance/settings')

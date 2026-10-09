@@ -4,7 +4,7 @@ import api from '../api'
 // retention report, the GRC export, and incidents with stop requests.
 
 export interface PackSummary {
-  key: string; name: string; source: string
+  key: string; name: string; source: string; url?: string | null
   total: number; evidenced: number; missing: number; outside: number; notApplicable: number; inRegistry: number
   dates: { key: string; label: string; date: string }[]
 }

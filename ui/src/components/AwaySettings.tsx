@@ -42,7 +42,7 @@ export default function AwaySettings() {
         <div>
           <h3 className="text-[16px] font-extrabold text-slate-900">Away and deputy</h3>
           <p className="text-[13px] text-slate-600">
-            While you are away, the daily notices that would go to you go to your deputy, and the Approvals page shows the deputy next to the reviews you would decide.
+            While you are away, the daily notices that would go to you go to your deputy, and the Integration Approval page shows the deputy next to the reviews you would decide.
             {away && <span className="ml-1 font-semibold text-amber-800" data-testid="away-now">You are marked as away until {saved.awayUntil}.</span>}
           </p>
         </div>

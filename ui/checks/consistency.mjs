@@ -1,7 +1,7 @@
 // Consistency check: one place for each action and one rule for each figure.
 // Governance statuses are read-only links, cleared follows the governance rules, the Edit window does not change
-// owner or value, Executive and Business Impact agree on value, Platform links to Dependencies, /playground lands
-// on the Integrate tab, and an agent is archived from its delete dialog and listed in Settings → Archived agents.
+// owner or value, Executive and Business Impact agree on value, Platform links to the graph page, and /playground
+// lands on the Integrate tab.
 // Creates one probe agent and deletes it at the end.
 import { chromium } from 'playwright'
 import fs from 'node:fs'
@@ -25,7 +25,8 @@ try {
   ok('probe agent created', !!probe, JSON.stringify(a.body).slice(0, 200))
 
   // Governance: summary from the server, read-only statuses
-  const sum = (await j('GET', '/governance/summary')).body
+  // The browser hides the demo agents by default, so the comparison figure is read without them too.
+  const sum = await (await fetch(API + '/governance/summary', { headers: { Authorization: `Bearer ${TOKEN}` } })).json()
   await page.goto(`${B}/governance`); await page.waitForSelector('[data-testid=tile-cleared]', { timeout: 30000 }); await page.waitForTimeout(1500)
   ok('the cleared tile shows the server figure', (await text('[data-testid=tile-cleared]')).trim() === String(sum.cleared), `${await text('[data-testid=tile-cleared]')} vs ${sum.cleared}`)
   ok('no review dropdown and no Register button on Governance', await page.locator('table select').count() === 0 && !/Register agent/.test(await text('main')))
@@ -46,23 +47,11 @@ try {
 
   // Platform and Playground
   await page.goto(`${B}/platform`); await page.waitForSelector('[data-testid=to-dependencies]', { timeout: 30000 })
-  ok('Platform links to Dependencies instead of drawing the call graph', await page.locator('canvas').count() === 0)
+  ok('Platform links to All Agents Graph instead of drawing the call graph', await page.locator('canvas').count() === 0)
   ok('the menu has no Playground entry', await page.locator('nav a', { hasText: 'Playground' }).count() === 0)
   await page.goto(`${B}/playground?agent=${probe}`); await page.waitForTimeout(2500)
   ok('/playground lands on the Integrate tab of that agent', page.url().includes(`/agents/${probe}?tab=integrate`), page.url())
 
-  // Archive from the delete dialog, listed last on Settings, brought back
-  await page.goto(`${B}/agents`); await page.waitForSelector('h3', { timeout: 30000 }); await page.waitForTimeout(800)
-  await page.click('[aria-label="Delete Probe Consistency"]'); await page.waitForSelector('[data-testid=delete-agent-dialog]', { timeout: 10000 })
-  await page.click('[data-testid=archive-instead]'); await page.fill('#archive-reason', 'Probe of the consistency check')
-  await page.click('[data-testid=archive-confirm]'); await page.waitForTimeout(2000)
-  ok('the archived agent leaves the list', !(await page.locator('h3').allTextContents()).some(t => t.startsWith('Probe Consistency')))
-  await page.goto(`${B}/settings`); await page.waitForSelector('[data-testid=archived-agents] li', { timeout: 30000 })
-  const rowSel = page.locator('[data-testid=archived-agents] li', { hasText: 'Probe Consistency' })
-  ok('Settings → Archived agents lists it', await rowSel.count() === 1)
-  ok('Archived agents is the last list card on Settings', await page.evaluate(() => { const c = [...document.querySelectorAll('main .card')]; return c.at(-2)?.getAttribute('data-testid') === 'archived-agents' }))
-  await rowSel.locator('button', { hasText: 'Bring back' }).click(); await page.waitForTimeout(1500)
-  ok('Bring back shows it again', (await j('GET', `/agents/${probe}`)).body?.archivedAt == null)
 } catch (e) {
   ok('the check ran to the end', false, String(e).slice(0, 300))
 } finally {

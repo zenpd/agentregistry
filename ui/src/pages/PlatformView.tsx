@@ -81,7 +81,7 @@ export default function PlatformView() {
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold gradient-text">Platform</h1>
-        <p className="text-slate-600 mt-0.5">Every system, database, MCP server and knowledge base the AI fleet uses, and where dependency is concentrated.</p>
+        <p className="text-slate-600 mt-0.5">Every system, database, MCP server and knowledge base the agents use, and which of them many agents depend on.</p>
       </div>
 
       {/* Mini Cards Grid */}
@@ -127,7 +127,7 @@ export default function PlatformView() {
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="font-semibold">Which systems and databases each agent uses <InfoTip term="dependency_graph" /></h2>
               {/* The agent-to-agent call graph lives on one page only. */}
-              <Link to="/dependencies" className="text-[13px] font-semibold text-zen-700 hover:underline" data-testid="to-dependencies">Which agents call which: open Dependencies</Link>
+              <Link to="/dependencies" className="text-[13px] font-semibold text-zen-700 hover:underline" data-testid="to-dependencies">Which agents call which: open All Agents Graph</Link>
             </div>
             {(() => {
               const cols = [

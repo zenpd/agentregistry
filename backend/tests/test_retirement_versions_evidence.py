@@ -1,5 +1,4 @@
-"""Retirement steps, versions with consumers, the AssureAI verdict line (against
-recorded answers, no live AssureAI), the controls list and the tool-call share.
+"""Retirement steps, versions with consumers, the controls list and the tool-call share.
 Runs against a throwaway DB."""
 from __future__ import annotations
 
@@ -110,50 +109,3 @@ async def test_versions_record_changes_and_the_version_each_team_uses(setup):
     assert (await c.get("/api/v1/agents/a1")).json()["version"] == "1.1"
     assert (await c.put("/api/v1/agents/a1/access/g1/version", json={"version": "2.0"})).status_code == 422
     assert (await c.put("/api/v1/agents/a1/access/g1/version", json={"version": "1.1"})).json()["version"] == "1.1"
-
-
-def assureai_transport(verdict="pass", status=200):
-    def handler(req: httpx.Request):
-        assert req.headers["authorization"] == "Bearer run-key-1"
-        if req.url.path.endswith("/runs/00000000-0000-0000-0000-000000000000/gate-report"):
-            return httpx.Response(404, json={"detail": "no run"})
-        if status != 200:
-            return httpx.Response(status, json={"detail": "This run is still executing, so it has no gate verdict to export."})
-        return httpx.Response(200, json={"run": {"id": "r", "completedAt": "2026-10-07T10:00:00+00:00"},
-                                          "application": {"name": "claims"}, "gate": {"verdict": verdict, "pillars": []}})
-    return httpx.MockTransport(handler)
-
-
-@pytest.mark.asyncio
-async def test_assureai_verdict_is_recorded_and_can_gate_production(setup, monkeypatch):
-    c, _ = setup
-    from services import connectors as svc
-
-    answers = {"verdict": "fail", "status": 200}
-    real = svc.build
-    monkeypatch.setattr(svc, "build", lambda config, transport=None: real(config, transport=assureai_transport(**answers)))
-    none = await c.post("/api/v1/agents/a1/evidence/assureai", json={"runId": "3f2a9c10-0000-4000-8000-000000000001"})
-    assert none.status_code == 422 and "No AssureAI connector" in none.json()["detail"]
-    conn = (await c.post("/api/v1/connectors", json={"kind": "assureai", "label": "AssureAI claims", "secret": {"runKey": "run-key-1"},
-                                                     "settings": {"baseUrl": "https://assure.example/api", "linkTemplate": "https://assure.example/runs/{runId}"}})).json()
-    assert (await c.post(f"/api/v1/connectors/{conn['id']}/test")).json()["ok"] is True
-    r = (await c.post("/api/v1/agents/a1/evidence/assureai", json={"runId": "3f2a9c10-0000-4000-8000-000000000001"})).json()
-    assert r["verdict"] == "fail" and r["url"] == "https://assure.example/runs/3f2a9c10-0000-4000-8000-000000000001" and r["application"] == "claims"
-    rules = (await c.get("/api/v1/governance/settings")).json()
-    assert rules["assureaiRequired"] is False
-    gov = (await c.get("/api/v1/agents/a1/governance")).json()
-    assert not any(w["code"].startswith("assureai") for w in gov["readiness"]["production"]["warnings"])
-    assert (await c.put("/api/v1/governance/settings", json={"assureaiRequired": True})).status_code == 200
-    gov = (await c.get("/api/v1/agents/a1/governance")).json()
-    assert any(w["code"] == "assureai_failed" for w in gov["readiness"]["production"]["warnings"])
-    answers.update(status=409)
-    waiting = (await c.post("/api/v1/agents/a1/evidence/assureai", json={"runId": "3f2a9c10-0000-4000-8000-000000000002"})).json()
-    assert waiting["verdict"] is None and waiting["error"].startswith("No verdict yet")
-    answers.update(status=200, verdict="pass")
-    from api.routers.ops.evidence import refresh_waiting
-    assert await refresh_waiting() == {"waiting": 1, "read": 1}
-    ev = (await c.get("/api/v1/agents/a1/evidence")).json()
-    assert ev["latest"]["verdict"] in ("pass", "fail") and len(ev["runs"]) == 2 and ev["requiredForProduction"] is True
-    controls = {x["key"]: x for x in (await c.get("/api/v1/governance/controls")).json()["controls"]}
-    assert controls["assureai"]["state"] in ("enforced", "recorded") and controls["retirement"]["state"] == "enforced"
-    assert controls["audit"]["state"] in ("enforced", "off")

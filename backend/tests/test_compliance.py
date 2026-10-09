@@ -16,7 +16,7 @@ from governance import compliance as cp
 def test_packs_hold_the_published_control_lists():
     assert {k: len(p["controls"]) for k, p in cp.PACKS.items()} == {"eu_ai_act": 17, "iso_42001": 38, "nist_ai_rmf": 19, "india_dpdp": 10}
     iso = [c for c in cp.PACKS["iso_42001"]["controls"]]
-    assert sum(1 for c in iso if c["outside"]) == 12 and iso[0]["id"] == "A.2.2" and iso[-1]["id"] == "A.10.4"
+    assert sum(1 for c in iso if c["outside"]) == 13 and iso[0]["id"] == "A.2.2" and iso[-1]["id"] == "A.10.4"
     for p in cp.PACKS.values():
         for c in p["controls"]:
             assert all(k in cp.AGENT_EVIDENCE for k in c["agent"]) and all(k in cp.REGISTRY_EVIDENCE for k in c["registry"])
@@ -37,7 +37,7 @@ def test_coverage_names_the_agents_missing_evidence():
     assert logs["status"] == "missing" and logs["agentsMissing"] == 1 and logs["agents"][1]["missing"] == ["Runtime tracing is linked"]
     deploy = next(c for c in cov["controls"] if c["id"] == "A.6.2.5")
     assert deploy["agentsInScope"] == 1 and deploy["status"] == "evidenced"            # Production agents only
-    assert (cov["total"], cov["outside"]) == (38, 12) and cov["evidenced"] + cov["missing"] + cov["notApplicable"] == 26
+    assert (cov["total"], cov["outside"]) == (38, 13) and cov["evidenced"] + cov["missing"] + cov["notApplicable"] == 25
     eu = cp.coverage("eu_ai_act", agents, reg)
     assert next(c for c in eu["controls"] if c["id"] == "Art. 9")["status"] == "not_applicable"   # neither agent is High Risk
 

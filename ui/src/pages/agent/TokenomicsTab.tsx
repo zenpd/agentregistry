@@ -717,6 +717,13 @@ function ForecastPanel({ data }: { data: Tokenomics }) {
               <MiniStat key={m.month} label={m.month === 1 ? 'Next 30 days' : `Days ${30 * (m.month - 1) + 1}–${30 * m.month} from today`} value={fmtCost(m.projectedCents)} />
             ))}
           </div>
+          {f.last30TotalCents != null && (
+            <p className="text-[12.5px] text-slate-700" data-testid="forecast-working">
+              Worked out from the last 30 days: {fmtCost(f.last30TotalCents)} in total on {f.daysWithUsage} day{f.daysWithUsage === 1 ? '' : 's'} with usage, an average
+              of {fmtCost(f.last30DailyAvgCents ?? 0)} a day. Over those 30 days the daily cost {(f.dailySlopeCents ?? 0) === 0 ? 'stayed level' : <>{(f.dailySlopeCents ?? 0) > 0 ? 'rose' : 'fell'} by {fmtCost(Math.abs(f.dailySlopeCents ?? 0))} each day</>}.
+              The forecast continues that line for the next 90 days. It is a projection from past use, not a commitment.
+            </p>
+          )}
           <p className="text-[12px] text-slate-500">
             {f.method}; each month is 30 days
             {f.dailySlopeCents != null && <> · trend {f.dailySlopeCents >= 0 ? '+' : '−'}{fmtCost(Math.abs(f.dailySlopeCents))} per day</>}
@@ -762,7 +769,8 @@ function AnomalyList({ data, onChanged }: { data: Tokenomics; onChanged: () => P
         <SectionLabel tip="cost_anomaly">Cost anomalies</SectionLabel>
         {share && (
           <span className="text-[12px] text-slate-500" title="Spike impact ÷ total spend (FinOps Foundation): under 2% healthy, 2–7% warning, over 7% critical">
-            Share of spend that came from spend spikes: <span className={`font-semibold ${SHARE_BAND[share.band] || ''}`}>{share.pct}%</span> of spend over {share.evaluatedDays} evaluated days
+            Share of spend that came from spend spikes: <span className={`font-semibold ${SHARE_BAND[share.band] || ''}`}>{share.pct}%</span>
+            {share.totalCents != null && <> = {fmtCost(share.impactCents)} above the usual level on {share.spikeDays} spike day{share.spikeDays === 1 ? '' : 's'} ÷ {fmtCost(share.totalCents)} spent in the period</>} ({share.evaluatedDays} day{share.evaluatedDays === 1 ? '' : 's'} had enough earlier days to compare with)
           </span>
         )}
       </div>

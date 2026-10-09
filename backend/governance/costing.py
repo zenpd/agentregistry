@@ -179,7 +179,10 @@ def forecast_monthly_cents(rows: list[Mapping], today: date, months: int = 3, mi
         first = 30 + 30 * (m - 1)
         total = sum(max(intercept + slope * (first + i), 0.0) for i in range(30))
         out.append({"month": m, "projected_cents": round(total, 2)})
-    return {"status": "ok", "daily_slope_cents": round(slope, 4), "months": out}
+    # The figures the trend line was drawn from: the last 30 days.
+    return {"status": "ok", "daily_slope_cents": round(slope, 4), "months": out,
+            "last30_total_cents": round(sum(ys), 4), "last30_daily_avg_cents": round(mean_y, 4),
+            "days_with_usage": len([v for v in ys if v > 0])}
 
 
 def budget_status(mtd_cents: float, budget_cents: int | None, alert_pct: int = 80) -> dict:

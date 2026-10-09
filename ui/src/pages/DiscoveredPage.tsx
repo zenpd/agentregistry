@@ -201,7 +201,7 @@ export default function DiscoveredPage() {
     <div className="space-y-5 animate-fade-in max-w-5xl">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold gradient-text flex items-center gap-1.5">Discovered <InfoTip term="discovered" /></h1>
+          <h1 className="text-2xl font-bold gradient-text flex items-center gap-1.5">Discovered Agents <InfoTip term="discovered" /></h1>
           <p className="text-slate-600 mt-0.5">
             Agents sending traces to Phoenix that are not in the registry yet. Review each one, then register it or dismiss it.
           </p>
@@ -256,7 +256,7 @@ export default function DiscoveredPage() {
           ['inbox', 'New', summary.new, `${summary.newActive} active · ${summary.assigned} assigned${summary.overdue ? ` · ${summary.overdue} overdue` : ''}`, 'text-zen-700'],
           ['registered', 'Registered', summary.registered, summary.quiet ? `${summary.quiet} gone quiet` : 'All active', summary.quiet ? 'text-amber-700' : 'text-emerald-700'],
           ['dismissed', 'Dismissed', summary.dismissed, 'Hidden from New', 'text-slate-700'],
-          ['evaluation', 'Evaluation runs', summary.evaluation, 'AssureAI experiment projects, not agents', 'text-slate-700'],
+          ['evaluation', 'Evaluation runs', summary.evaluation, 'Experiment projects of a testing tool, not agents', 'text-slate-700'],
           ['other', 'Other sources', findings.filter(f => f.state === 'new').length, 'Langfuse, GitHub and Azure (Settings → Connectors)', 'text-violet-700'],
         ] as [View, string, number, string, string][]).map(([key, label, count, sub, tone]) => (
           <button key={key} type="button" onClick={() => setView(key)} data-testid={`tile-${key}`}
@@ -389,7 +389,7 @@ export default function DiscoveredPage() {
 
       {view === 'evaluation' && (
         <div className="card p-4 space-y-2" data-testid="evaluation-list">
-          <p className="text-sm text-slate-600">AssureAI creates one Phoenix project for each experiment run. They hold evaluation traffic, not an agent, so they are kept out of New and out of usage and cost.</p>
+          <p className="text-sm text-slate-600">A testing tool creates one Phoenix project for each experiment run. They hold evaluation traffic, not an agent, so they are kept out of New and out of usage and cost.</p>
           {data.evaluation.length === 0 ? <p className="text-sm text-slate-600">None found.</p>
             : <ul className="flex flex-wrap gap-1.5">{data.evaluation.map(p => <li key={p.name} className="rounded-md bg-slate-100 px-2 py-0.5 text-[12.5px] text-slate-700">{p.name}</li>)}</ul>}
         </div>

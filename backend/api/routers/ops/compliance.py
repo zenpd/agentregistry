@@ -24,7 +24,7 @@ from sqlalchemy.orm import selectinload
 from api.auth import require_admin, require_read
 from db.base import get_db_session
 from db.models import (Agent, AgentRetirement, AgentRisk, AgentVersion, AuditLog, ClassificationRecord, DecisionChain, Department,
-                       EvidenceVerdict, GovernanceException, Incident, User)
+                       GovernanceException, Incident, User)
 from governance import compliance as cp
 from orchestrations.risk_scan import as_utc
 from services import compliance_facts as cf
@@ -52,7 +52,7 @@ async def packs(_=Depends(require_read)):
     out = []
     for key in cp.PACKS:
         c = cp.coverage(key, agents, registry)
-        out.append({k: c[k] for k in ("key", "name", "source", "total", "evidenced", "missing", "outside", "notApplicable", "inRegistry")}
+        out.append({k: c[k] for k in ("key", "name", "source", "url", "total", "evidenced", "missing", "outside", "notApplicable", "inRegistry")}
                    | {"dates": dates[key]})
     return {"packs": out, "agents": len(agents), "registry": registry,
             "meaning": "Evidenced: the registry holds the record for every agent the control applies to. It is not a statement of compliance. "
@@ -114,7 +114,6 @@ async def agent_pack_data(db, agent: Agent) -> dict:
     waivers = (await db.execute(select(GovernanceException).where(GovernanceException.agent_id == agent.id))).scalars().all()
     risks = (await db.execute(select(AgentRisk).where(AgentRisk.agent_id == agent.id, AgentRisk.status.in_(("open", "acknowledged", "mitigating"))))).scalars().all()
     versions = (await db.execute(select(AgentVersion).where(AgentVersion.agent_id == agent.id).order_by(AgentVersion.released_at))).scalars().all()
-    verdicts = (await db.execute(select(EvidenceVerdict).where(EvidenceVerdict.agent_id == agent.id))).scalars().all()
     incidents = (await db.execute(select(Incident).where(Incident.agent_id == agent.id))).scalars().all()
     retire = (await db.execute(select(AgentRetirement).where(AgentRetirement.agent_id == agent.id))).scalars().all()
     decisions = (await db.execute(select(AuditLog, DecisionChain).outerjoin(DecisionChain, DecisionChain.audit_id == AuditLog.id)
@@ -147,7 +146,6 @@ async def agent_pack_data(db, agent: Agent) -> dict:
                                                         names.get(w.second_signer, w.second_signer))))} for w in waivers],
         "risks": [{"category": r.category, "severity": r.severity, "title": r.title, "status": r.status} for r in risks],
         "versions": [{"version": v.version, "at": _d(v.released_at), "changelog": v.changelog} for v in versions],
-        "verdicts": [{"run": v.run_id, "verdict": v.verdict or "not read", "at": _d(v.completed_at), "url": v.url or ""} for v in verdicts],
         "incidents": [{"title": i.title, "severity": i.severity, "status": i.status, "opened": _d(i.opened_at),
                        "stop": "requested" + (", acknowledged" if i.stop_acknowledged_at else ", waiting") if i.stop_requested_at else "-"} for i in incidents],
         "retirements": [{"status": r.status, "reason": r.reason, "started": _d(r.started_at), "completed": _d(r.completed_at)} for r in retire],
@@ -193,7 +191,6 @@ def agent_pack_pdf(d: dict) -> bytes:
             ("Waivers", [[w["gate"], w["status"], w["until"], w["signers"], w["reason"]] for w in d["waivers"]], ["Gate", "Status", "Until", "Signed by", "Reason"], [1, 1, 1, 2, 4]),
             ("Open risks", [[r["category"], r["severity"], r["status"], r["title"]] for r in d["risks"]], ["Category", "Severity", "Status", "Finding"], [1.4, 1, 1.1, 5]),
             ("Versions", [[v["version"], v["at"], v["changelog"]] for v in d["versions"]], ["Version", "Released", "Changelog"], [1, 1, 6]),
-            ("AssureAI verdicts", [[v["run"], v["verdict"], v["at"], v["url"]] for v in d["verdicts"]], ["Run", "Verdict", "Completed", "Link"], [2.5, 1, 1, 3.5]),
             ("Incidents", [[i["title"], i["severity"], i["status"], i["opened"], i["stop"]] for i in d["incidents"]], ["Incident", "Severity", "Status", "Opened", "Stop request"], [3.5, 1, 1, 1, 1.8]),
             ("Retirement", [[r["status"], r["started"], r["completed"], r["reason"]] for r in d["retirements"]], ["Status", "Started", "Completed", "Reason"], [1, 1, 1, 5]),
             ("Decisions (sealed in the hash chain)", [[x["at"], x["by"], x["action"], x["summary"], x["seal"]] for x in d["decisions"]],

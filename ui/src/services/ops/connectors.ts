@@ -1,6 +1,6 @@
 import api from '../api'
 
-export type ConnectorKind = 'langfuse' | 'github' | 'azure' | 'assureai'
+export type ConnectorKind = 'langfuse' | 'github' | 'azure'
 export interface ConnectorRow {
   id: string; kind: ConnectorKind; kindLabel: string; label: string; settings: Record<string, unknown>
   secretSet: string[]; enabled: boolean; lastSyncAt: string | null; lastStatus: string | null; lastMessage: string | null; lastFound: number

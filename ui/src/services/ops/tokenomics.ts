@@ -63,6 +63,9 @@ export interface CostForecast {
   minDays: number
   daysWithUsage: number
   dailySlopeCents: number | null
+  // What the trend was drawn from: total and daily average cost of the last 30 days.
+  last30TotalCents?: number | null
+  last30DailyAvgCents?: number | null
   months: { month: number; projectedCents: number }[]
 }
 
@@ -93,6 +96,8 @@ export interface AnomalyCostShare {
   band: 'green' | 'yellow' | 'red'
   impactCents: number
   evaluatedDays: number
+  totalCents?: number
+  spikeDays?: number
 }
 
 export interface Tokenomics {

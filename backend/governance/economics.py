@@ -19,7 +19,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping, Sequence
 
-from governance.costing import month_to_date_cents, period_end, period_start, projected_period_end_cents
+from governance.costing import month_to_date_cents, period_end, period_start, projected_period_end_cents, trailing_daily_avg_cents
 
 INFRA_ESTIMATE_CENTS_BY_STAGE: dict[str, int] = {
     "Ideation": 0,
@@ -264,6 +264,22 @@ def _declared_components(components: Iterable[Any] | None) -> tuple[list[dict], 
     return out, one_time
 
 
+def _models_this_month(rows: Sequence[Mapping], start: date, today: date) -> list[dict]:
+    """Per model, the calls, tokens and cost of the current month so far."""
+    by: dict[str, dict] = {}
+    for r in rows:
+        if not (start <= r["day"] <= today):
+            continue
+        m = by.setdefault(r.get("model") or "unknown", {"model": r.get("model") or "unknown", "calls": 0, "inputTokens": 0,
+                                                         "outputTokens": 0, "costCents": 0.0, "priced": True})
+        m["calls"] += r.get("calls") or 0
+        m["inputTokens"] += r.get("input_tokens") or 0
+        m["outputTokens"] += r.get("output_tokens") or 0
+        m["costCents"] += r.get("cost_cents") or 0.0
+        m["priced"] = m["priced"] and r.get("priced", True)
+    return sorted(({**m, "costCents": round(m["costCents"], 4)} for m in by.values()), key=lambda m: -m["costCents"])
+
+
 def build_economics(
     agent: Mapping,
     usage: Mapping,
@@ -398,6 +414,10 @@ def build_economics(
             "phoenixLinked": linked,
             "phoenixProject": agent.get("phoenix_project"),
             "callsLast30d": calls_30d,
+            # How the projected figure is made: spent so far + the daily average of the last 14 days x the days left.
+            "daysLeft": max((end - today).days, 0),
+            "dailyAvg14Cents": None if projected is None else round(trailing_daily_avg_cents(rows, today, 14), 4),
+            "modelsThisMonth": _models_this_month(rows, start, today) if projected is not None else [],
         },
         "infra": {
             "source": infra["source"],
@@ -408,6 +428,9 @@ def build_economics(
             "declaredFrom": profile["effective_from"].isoformat() if profile and profile.get("effective_from") else None,
             "components": components,
             "estimateCents": estimated_infra_cents(stage),
+            # The fixed figure per stage that the estimate is read from.
+            "estimateByStage": dict(INFRA_ESTIMATE_CENTS_BY_STAGE),
+            "daysInPeriod": (end - start).days + 1,
             "byResource": sorted(by_resource.values(), key=lambda e: e["cents"], reverse=True)[:20],
         },
         "efficiencyRating": efficiency_rating(econ["totalCostCents"], econ["valueCents"], econ["costComplete"]),

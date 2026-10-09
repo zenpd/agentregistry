@@ -28,7 +28,7 @@ import {
 } from '../../services/ops/governance'
 import ClassificationPanel from './ClassificationPanel'
 import RetirementPanel from './RetirementPanel'
-import { AssureAiLine, ToolCallsLine } from './EvidenceLines'
+import { ToolCallsLine } from './EvidenceLines'
 import EvidencePackLine from './EvidencePackLine'
 import { Loading, FieldLabel, SectionLabel, SourceBadge, STAGE_PILL, fmtNumber, type TabProps, useReloadOn } from './shared'
 import { can, canDecide, notAllowed, useMe } from '../../lib/me'
@@ -191,7 +191,6 @@ function TelemetryLine({ telemetry }: { telemetry: GovernanceState['telemetry'] 
 function EvidenceSignals({ state, agentId, onDone }: { state: GovernanceState; agentId: string; onDone: () => Promise<void> }) {
   return (
     <div className="rounded-xl ring-1 ring-gray-100 px-3 py-2.5 space-y-1 text-xs">
-      <AssureAiLine agentId={agentId} onRecorded={onDone} />
       <ToolCallsLine agentId={agentId} />
       <EvidencePackLine agentId={agentId} />
       <div className="flex flex-wrap items-baseline gap-x-2">
@@ -247,7 +246,7 @@ function EnforcementBanner({ state }: { state: GovernanceState }) {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2 text-[13px]" data-testid="governance-summary">
-        <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-semibold text-slate-800" title="Share of the record's important fields that are filled in">Record {state.completeness.score}% complete</span>
+        <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-semibold text-slate-800" title="Details of the record that are filled in, out of the ones the registry looks for">Record {state.completeness.score}% complete ({state.completeness.filled} of {state.completeness.total} details filled in)</span>
         {state.weeksInStage != null && (
           <span className={`rounded-full px-2.5 py-0.5 font-semibold ${state.stalled ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-300' : 'bg-slate-100 text-slate-800'}`} data-testid="time-in-stage">
             In {state.stage} for {state.weeksInStage} week{state.weeksInStage === 1 ? '' : 's'}{state.stalled ? ' — stalled' : ''}

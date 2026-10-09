@@ -40,7 +40,6 @@ AGENT_EVIDENCE = {
     "human_oversight": "Human oversight and fallback are confirmed in the review checklist",
     "decommission_plan": "A rollback and decommissioning plan is confirmed in the review checklist",
     "context_doc": "A context document (context.md) is provided",
-    "evaluation_pass": "The latest AssureAI verdict is pass",
     "versions": "At least one version is released with a changelog",
 }
 
@@ -78,6 +77,7 @@ def C(cid: str, title: str, *, agent: Iterable[str] = (), registry: Iterable[str
 PACKS: dict[str, dict] = {
     "eu_ai_act": {
         "name": "EU AI Act", "source": "Regulation (EU) 2024/1689",
+        "url": "https://eur-lex.europa.eu/eli/reg/2024/1689/oj",
         "dates": [
             {"key": "in_force", "label": "Entered into force", "date": "2024-08-01"},
             {"key": "prohibitions", "label": "Prohibited practices and AI literacy apply (Articles 4 and 5)", "date": "2025-02-02"},
@@ -95,7 +95,8 @@ PACKS: dict[str, dict] = {
             C("Art. 12", "Record-keeping (automatic logs)", agent=["tracing"], registry=["audit_log"], applies="high_risk"),
             C("Art. 13", "Transparency and information to deployers", agent=["purpose", "contract", "owner"], applies="high_risk"),
             C("Art. 14", "Human oversight", agent=["human_oversight"], applies="high_risk"),
-            C("Art. 15", "Accuracy, robustness and cybersecurity", agent=["security_approved", "evaluation_pass"], applies="high_risk"),
+            C("Art. 15", "Accuracy, robustness and cybersecurity", applies="high_risk",
+              outside="Accuracy and robustness test results are kept in the tool that tests the agent. The Security Review on each agent covers the cybersecurity part."),
             C("Art. 17", "Quality management system", agent=["arb_approved"],
               registry=["stage_gates", "approval_expiry", "change_reopens", "decision_chain"], applies="high_risk"),
             C("Art. 26", "Obligations of deployers", agent=["owner_person", "human_oversight", "tracing"], applies="high_risk"),
@@ -111,6 +112,7 @@ PACKS: dict[str, dict] = {
     },
     "iso_42001": {
         "name": "ISO/IEC 42001", "source": "ISO/IEC 42001:2023 Annex A",
+        "url": "https://www.iso.org/standard/42001",
         "dates": [{"key": "published", "label": "Standard published", "date": "2023-12-18"},
                   {"key": "audit", "label": "Next certification audit", "date": ""}],
         "controls": [
@@ -132,7 +134,8 @@ PACKS: dict[str, dict] = {
             C("A.6.1.3", "Processes for responsible AI system design and development", agent=["arb_approved"], registry=["stage_gates"]),
             C("A.6.2.2", "AI system requirements and specification", agent=["contract"]),
             C("A.6.2.3", "Documentation of AI system design and development", agent=["purpose", "dependencies", "versions"]),
-            C("A.6.2.4", "AI system verification and validation", agent=["evaluation_pass", "security_approved"]),
+            C("A.6.2.4", "AI system verification and validation",
+              outside="Verification and validation results are kept in the tool that tests the agent. The registry holds the review decisions, not test results."),
             C("A.6.2.5", "AI system deployment", agent=["arb_approved", "security_approved", "dp_approved"], applies="production"),
             C("A.6.2.6", "AI system operation and monitoring", agent=["tracing", "risk_scan"], applies="production"),
             C("A.6.2.7", "AI system technical documentation", agent=["purpose", "contract", "context_doc"]),
@@ -156,6 +159,7 @@ PACKS: dict[str, dict] = {
     },
     "nist_ai_rmf": {
         "name": "NIST AI RMF", "source": "NIST AI 100-1 (AI RMF 1.0), categories",
+        "url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-1.pdf",
         "dates": [{"key": "published", "label": "Framework published (voluntary)", "date": "2023-01-26"}],
         "controls": [
             C("GOVERN 1", "Policies, processes and practices for AI risk are in place and followed",
@@ -171,7 +175,8 @@ PACKS: dict[str, dict] = {
             C("MAP 4", "Risks and benefits are mapped for all components, including third parties", agent=["dependencies", "tools_listed"]),
             C("MAP 5", "Impacts on individuals, groups, organizations and society are characterized", agent=["classification", "dp_approved"]),
             C("MEASURE 1", "Methods and metrics are identified and applied", agent=["risk_scan"]),
-            C("MEASURE 2", "AI systems are evaluated for trustworthy characteristics", agent=["evaluation_pass", "security_approved"]),
+            C("MEASURE 2", "AI systems are evaluated for trustworthy characteristics",
+              outside="Evaluation results are kept in the tool that tests the agent. The registry holds the review decisions, not test results."),
             C("MEASURE 3", "Identified AI risks are tracked over time", agent=["tracing", "risk_scan"]),
             C("MEASURE 4", "Feedback about the efficacy of measurement is gathered", outside="Kept with the evaluation team's reviews."),
             C("MANAGE 1", "AI risks are prioritized, responded to and managed", agent=["no_high_findings"]),
@@ -183,6 +188,7 @@ PACKS: dict[str, dict] = {
     },
     "india_dpdp": {
         "name": "India DPDP Act", "source": "Digital Personal Data Protection Act, 2023, and DPDP Rules, 2025",
+        "url": "https://www.meity.gov.in/data-protection-framework",
         "dates": [
             {"key": "act", "label": "Act notified", "date": "2023-08-11"},
             {"key": "rules", "label": "Rules notified", "date": "2025-11-13"},
@@ -256,7 +262,7 @@ def coverage(pack_key: str, agents: list[Mapping[str, Any]], registry: Mapping[s
                      "status": status, "agentsInScope": len(scope), "agentsMissing": len(gaps), "agents": per,
                      "registryMissing": [REGISTRY_EVIDENCE[k] for k in c["registry"] if not registry.get(k)]})
     counted = [r for r in rows if r["status"] in ("evidenced", "missing")]
-    return {"key": pack_key, "name": pack["name"], "source": pack["source"], "controls": rows,
+    return {"key": pack_key, "name": pack["name"], "source": pack["source"], "url": pack.get("url"), "controls": rows,
             "total": len(rows), "evidenced": sum(1 for r in rows if r["status"] == "evidenced"),
             "missing": sum(1 for r in rows if r["status"] == "missing"), "outside": sum(1 for r in rows if r["status"] == "outside"),
             "notApplicable": sum(1 for r in rows if r["status"] == "not_applicable"), "inRegistry": len(counted)}

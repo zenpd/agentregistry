@@ -5,7 +5,7 @@ import { errorMessage } from '../pages/agent/shared'
 
 const SCOPES: { id: string; label: string }[] = [
   { id: 'register', label: 'register — create or update agents from a pipeline' },
-  { id: 'certify_check', label: 'certify_check — ask whether an agent is approved for a stage (this is not the reuse certification)' },
+  { id: 'certify_check', label: 'certify_check — ask whether an agent has the reviews it needs for a stage' },
   { id: 'read', label: 'read — read the registry' },
 ]
 

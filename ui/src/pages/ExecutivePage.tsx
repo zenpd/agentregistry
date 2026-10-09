@@ -33,6 +33,8 @@ export default function ExecutivePage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [, setPagination] = useState<PaginationInfo | null>(null)
   const [risks, setRisks] = useState<RiskSummary | null>(null)
+  // The tile that was clicked: the agents its number is made of are listed under the tiles.
+  const [behind, setBehind] = useState<Behind | null>(null)
   const [economics, setEconomics] = useState<PortfolioEconomics | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -74,6 +76,7 @@ export default function ExecutivePage() {
   const valueOf = (a: { id: string; valueAmount?: number | null }) => { const v = econById.get(a.id)?.valueCents; return v != null ? v / 100 : (a.valueAmount || 0) }
   const running = agents.filter(a => a.stage !== 'Deprecated')
   const atRisk = agents.filter(a => a.atRisk)
+  const toggle = (k: Behind) => setBehind(behind === k ? null : k)
   const pipelineAgents = agents.filter(a => ['Ideation', 'Development', 'Testing'].includes(a.stage))
 
   if (loading) return <div className="p-8 text-center text-slate-600">Loading...</div>
@@ -83,18 +86,48 @@ export default function ExecutivePage() {
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold gradient-text">Executive Overview</h1>
-        <p className="text-slate-600 mt-0.5">AI portfolio health, risk, and economics at a glance.</p>
+        <p className="text-slate-600 mt-0.5">All agents in one view: how many are live, what they are worth and what they cost, and where the risks are.</p>
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        <KPICard label="Total Agents" value={agents.length.toString()} sub={`${inProd.length} in production`} />
+        <KPICard label="Total Agents" value={agents.length.toString()} sub={`${inProd.length} in production`} onOpen={() => toggle('total')} open={behind === 'total'} />
         <KPICard label="Value in Production / month" tip="declared_value" value={fmtMoney(monthlyValue)}
-          sub={economics ? `Production agents. ${fmtMoney(attestedProd)} of it attested by finance` : 'Production agents'} color="#059669" />
-        <KPICard label="In Pipeline" value={pipelineAgents.length.toString()} sub="Ideation → Testing" />
-        <KPICard label="At Risk" value={atRisk.length.toString()} sub="Marked at risk on the agent record" color={atRisk.length > 0 ? '#E06B85' : undefined} />
-        <KPICard label="Open risk findings" tip="risk_register" value={(risks?.totalFindings ?? 0).toString()} sub="Across all risk categories" color={risks && risks.totalFindings > 0 ? '#f59e0b' : undefined} />
+          sub={economics ? `Production agents. ${fmtMoney(attestedProd)} of it attested by finance` : 'Production agents'} color="#059669" onOpen={() => toggle('value')} open={behind === 'value'} />
+        <KPICard label="In Pipeline" value={pipelineAgents.length.toString()} sub="Ideation → Testing" onOpen={() => toggle('pipeline')} open={behind === 'pipeline'} />
+        <KPICard label="At Risk" value={atRisk.length.toString()} sub="Marked at risk on the agent record" color={atRisk.length > 0 ? '#E06B85' : undefined} onOpen={() => toggle('risk')} open={behind === 'risk'} />
+        <KPICard label="Open risk findings" tip="risk_register" value={(risks?.totalFindings ?? 0).toString()} sub="Across all risk categories" color={risks && risks.totalFindings > 0 ? '#f59e0b' : undefined} onOpen={() => toggle('findings')} open={behind === 'findings'} />
       </div>
+
+      {behind && (
+        <div className="card p-5 space-y-2" data-testid="tile-behind">
+          {behind === 'total' && <>
+            <h2 className="font-semibold text-slate-900">The {agents.length} agents behind "Total Agents"</h2>
+            <p className="text-[13px] text-slate-700">{['Ideation', 'Development', 'Testing', 'Production', 'Deprecated'].map(st => `${agents.filter(a => a.stage === st).length} in ${st}`).join(' + ')} = {agents.length}.</p>
+            <AgentLines rows={agents.map(a => ({ id: a.id, name: a.name, note: a.stage }))} />
+          </>}
+          {behind === 'value' && <>
+            <h2 className="font-semibold text-slate-900">The agents behind "Value in Production / month"</h2>
+            <p className="text-[13px] text-slate-700">The value of each agent in Production, added up = <b>{fmtMoney(monthlyValue)}</b>. An agent with no value adds nothing.</p>
+            <AgentLines tab="revenue" rows={inProd.map(a => ({ id: a.id, name: a.name, note: valueOf(a) > 0 ? `${fmtMoney(valueOf(a))} a month, ${WHOSE_VALUE[econById.get(a.id)?.valueState || 'declared']}` : 'no value declared' }))} empty="No agent is in Production." />
+          </>}
+          {behind === 'pipeline' && <>
+            <h2 className="font-semibold text-slate-900">The {pipelineAgents.length} agents behind "In Pipeline"</h2>
+            <p className="text-[13px] text-slate-700">Agents in Ideation, Development or Testing: {['Ideation', 'Development', 'Testing'].map(st => `${pipelineAgents.filter(a => a.stage === st).length} in ${st}`).join(' + ')} = {pipelineAgents.length}.</p>
+            <AgentLines tab="governance" rows={pipelineAgents.map(a => ({ id: a.id, name: a.name, note: a.stage }))} empty="No agent is waiting to go live." />
+          </>}
+          {behind === 'risk' && <>
+            <h2 className="font-semibold text-slate-900">The {atRisk.length} agents behind "At Risk"</h2>
+            <p className="text-[13px] text-slate-700">An agent counts here when a person marked it at risk on its record.</p>
+            <AgentLines tab="risk" rows={atRisk.map(a => ({ id: a.id, name: a.name, note: a.riskNote || 'no note given' }))} empty="No agent is marked at risk." />
+          </>}
+          {behind === 'findings' && risks && <>
+            <h2 className="font-semibold text-slate-900">The {risks.totalFindings} findings behind "Open risk findings"</h2>
+            <p className="text-[13px] text-slate-700">{risks.storedFindings ?? 0} finding{risks.storedFindings === 1 ? '' : 's'} from the risk scan and from people, on the agents below, + {risks.financialFindings ?? 0} cost and spend finding{risks.financialFindings === 1 ? '' : 's'} (listed on each agent's Risk tab) = <b>{risks.totalFindings}</b>.</p>
+            <AgentLines tab="risk" rows={(risks.byAgent || []).map(r => ({ id: r.agentId, name: r.name, note: `${r.count} finding${r.count === 1 ? '' : 's'}, worst is ${r.worst}` }))} empty="No finding from the risk scan or from people is open." />
+          </>}
+        </div>
+      )}
 
       {/* Revenue vs Expenditure */}
       {economics && (
@@ -299,12 +332,31 @@ export default function ExecutivePage() {
   )
 }
 
-function KPICard({ label, value, sub, color, tip }: { label: string; value: string; sub: string; color?: string; tip?: GlossaryKey }) {
+type Behind = 'total' | 'value' | 'pipeline' | 'risk' | 'findings'
+const WHOSE_VALUE: Record<string, string> = { declared: 'declared by the owner', attested: 'confirmed by finance', adjusted: 'adjusted by finance', stale: 'declared again, not confirmed by finance', none: 'not declared' }
+
+// The agents a tile's number is made of, each a link to the agent.
+function AgentLines({ rows, tab, empty }: { rows: { id: string; name: string; note: string }[]; tab?: string; empty?: string }) {
+  if (!rows.length) return <p className="text-[13px] text-slate-600">{empty || 'None.'}</p>
   return (
-    <div className="card p-4">
+    <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-6 text-[13px]">
+      {rows.map(r => (
+        <li key={r.id} className="flex justify-between gap-3 border-b border-slate-100 py-1">
+          <Link to={`/agents/${r.id}${tab ? `?tab=${tab}` : ''}`} className="font-medium text-zen-700 hover:underline">{r.name}</Link>
+          <span className="text-right text-slate-600">{r.note}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function KPICard({ label, value, sub, color, tip, onOpen, open }: { label: string; value: string; sub: string; color?: string; tip?: GlossaryKey; onOpen?: () => void; open?: boolean }) {
+  return (
+    <div className={`card p-4 ${open ? 'ring-2 ring-zen-400' : ''}`}>
       <div className="text-xs text-slate-600 uppercase tracking-wide">{label}{tip && <> <InfoTip term={tip} /></>}</div>
       <div className="text-2xl font-bold mt-1" style={{ color: color || '#111827' }}>{value}</div>
       <div className="text-xs text-slate-500 mt-1">{sub}</div>
+      {onOpen && <button type="button" className="mt-1.5 text-xs font-semibold text-zen-700 hover:underline" aria-expanded={!!open} onClick={onOpen}>{open ? 'Hide the list' : 'Show what is counted'}</button>}
     </div>
   )
 }

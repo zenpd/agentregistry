@@ -16,14 +16,14 @@ import { DISCOVERY_CHANGED, getPhoenixInbox } from '../../services/ops/discovery
 const NAV = [
   { to: '/', label: 'Executive', icon: LayoutGrid },
   { to: '/agents', label: 'AI Registry', icon: Bot },
-  { to: '/discovered', label: 'Discovered', icon: Radar },
-  { to: '/approvals', label: 'Approvals', icon: Inbox },
+  { to: '/discovered', label: 'Discovered Agents', icon: Radar },
+  { to: '/approvals', label: 'Integration Approval', icon: Inbox },
   { to: '/governance', label: 'Governance', icon: ShieldCheck },
   { to: '/compliance', label: 'Compliance', icon: ClipboardCheck },
   { to: '/business', label: 'Business Impact', icon: Briefcase },
   { to: '/programme', label: 'Programme Health', icon: HeartPulse },
   { to: '/platform', label: 'Platform', icon: Cpu },
-  { to: '/dependencies', label: 'Dependencies', icon: GitBranch },
+  { to: '/dependencies', label: 'All Agents Graph', icon: GitBranch },
   { to: '/ask', label: 'Ask the Registry', icon: MessageCircleQuestion },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
@@ -106,19 +106,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
               to={to}
               end={to === '/'}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   isActive ? 'bg-zen-50 text-zen-700' : 'text-slate-700 hover:bg-gray-50'
                 }`
               }
             >
-              <Icon size={18} />
-              {label}
+              <Icon size={18} className="shrink-0" />
+              <span className="whitespace-nowrap">{label}</span>
               {to === '/discovered' && discovered != null && discovered > 0 && (
                 <span className="ml-auto rounded-full bg-zen-600 px-2 py-0.5 text-[12px] font-bold text-white" data-testid="discovered-badge"
                   title={`${discovered} not registered yet`}>{discovered}</span>
               )}
               {to === '/approvals' && pending != null && pending > 0 && (
-                <span className="ml-auto rounded-full bg-zen-600 px-2 py-0.5 text-[12px] font-bold text-white" data-testid="approvals-badge"
+                <span className="ml-auto shrink-0 rounded-full bg-zen-600 px-2 py-0.5 text-[12px] font-bold text-white" data-testid="approvals-badge"
                   title={`${pending} waiting for a decision`}>{pending}</span>
               )}
             </NavLink>

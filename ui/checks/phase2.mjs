@@ -1,6 +1,6 @@
 // Phase 2 browser check: owner and backup owner, away and deputy, ranked approvals with
 // a Decided tab, classification (propose, see in Approvals, confirm), approved tools,
-// controls, versions, the AssureAI and tool-call lines, and the retirement steps.
+// controls, versions, the tool-call line, and the retirement steps.
 // Works on a probe user, a probe agent and a probe tool, and removes them at the end.
 import { chromium } from 'playwright'
 import fs from 'node:fs'
@@ -96,7 +96,6 @@ try {
   await page.waitForFunction(() => /confirmed by/.test(document.querySelector('[data-testid=classification-current]')?.textContent || ''), null, { timeout: 15000 }).catch(() => {})
   ok('the classification is confirmed by the signed-in person', /Limited Risk.*confirmed by Registry Admin/s.test(await text('[data-testid=classification-current]')), await text('[data-testid=classification-current]'))
   ok('the agent now has risk level HIGH', (await j('GET', `/agents/${agentId}`)).body.riskLevel === 'HIGH')
-  ok('the AssureAI line says no verdict and how to add a connector', /No AssureAI verdict recorded/.test(await text('[data-testid=assureai-line]')))
   await page.waitForSelector('[data-testid=tool-calls-line]', { timeout: 30000 }).catch(() => {})
   ok('the tool-call line explains there is no approval to compare with', /No Security Review approval/.test(await text('[data-testid=tool-calls-line]')), await text('[data-testid=tool-calls-line]'))
   await page.screenshot({ path: `${SP}/shots/p2-governance.png`, fullPage: true })

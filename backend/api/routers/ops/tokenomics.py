@@ -127,6 +127,7 @@ def _forecast_view(rows: list[dict], today: date, months: int) -> dict:
         "minDays": FORECAST_MIN_DAYS,
         "daysWithUsage": days_with_cost,
         "dailySlopeCents": f.get("daily_slope_cents"),
+        "last30TotalCents": f.get("last30_total_cents"), "last30DailyAvgCents": f.get("last30_daily_avg_cents"),
         "months": [{"month": m["month"], "projectedCents": m["projected_cents"]} for m in f["months"]],
     }
 
@@ -204,7 +205,7 @@ async def agent_tokenomics(agent_id: str, days: int = Query(30, ge=7, le=90), _=
         share = anomaly_cost_share(history, window_start)
         if share:
             anomaly_share = {"pct": share["pct"], "band": share["band"], "impactCents": share["impact_cents"],
-                             "evaluatedDays": share["evaluated_days"]}
+                             "evaluatedDays": share["evaluated_days"], "totalCents": share["total_cents"], "spikeDays": share["spike_days"]}
 
     return {
         "agentId": agent_id,

@@ -39,6 +39,15 @@ export interface ReuseSummary {
   buildsAvoided: number; medianDaysToFirstCall: number | null; firstCallsMeasured: number
 }
 export interface ProgrammeHealth {
+  // The rows each score is counted from.
+  behind: {
+    notRegistered: { phoenixProjects: string[]; connectorFindings: number }
+    ownerPerson: { agentId: string; name: string; owner: string | null; backup: boolean }[]
+    ownerNameOnly: { agentId: string; name: string; owner: string | null }[]
+    ownerNone: { agentId: string; name: string; owner: string | null }[]
+    decisions: { agentId: string; name: string; review: string; decision: string; submitted: string; decided: string; days: number }[]
+    productionAgents: { agentId: string; name: string; teams: number }[]
+  }
   known: { registered: number; foundNotRegistered: number; share: number | null; text: string }
   owners: { total: number; person: number; nameOnly: number; none: number; withBackup: number; share: number | null }
   approvalSpeed: { medianDays: number | null; decisions: number; days: number; text: string }

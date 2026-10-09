@@ -249,7 +249,9 @@ function ScoreHeader({ data, agentId, onScanned }: { data: AgentRisksResponse; a
             {score.worst ? (
               <>
                 <span className={`text-xs px-2 py-0.5 rounded-full ring-1 font-semibold ${SEVERITY_PILL[score.worst]}`}>{score.worst}</span>
-                <span className="text-xs text-slate-600">worst active severity · {score.total} active risk{score.total === 1 ? '' : 's'}</span>
+                <span className="text-xs text-slate-600" data-testid="risk-working">
+                  the highest level among the {score.total} active risk{score.total === 1 ? '' : 's'}: {(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as RiskSeverity[]).filter(s => score.countsBySeverity[s]).map(s => `${score.countsBySeverity[s]} ${s}`).join(' + ')} = {score.total}
+                </span>
               </>
             ) : (
               <span className="text-xs text-slate-600">No active findings</span>

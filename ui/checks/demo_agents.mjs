@@ -28,13 +28,14 @@ page.on('response', r => {
 const pause = ms => new Promise(r => setTimeout(r, ms))
 
 try {
-  const demo = (await (await fetch(`${API}/agents/?limit=100`, { headers: { Authorization: `Bearer ${TOKEN}`, 'X-Include-Demo': '1' } })).json()).data.filter(a => a.isDemo)
+  const everyone = (await (await fetch(`${API}/agents/?limit=100`, { headers: { Authorization: `Bearer ${TOKEN}`, 'X-Include-Demo': '1' } })).json()).data
+  const demo = everyone.filter(a => a.isDemo), total = everyone.length
   await page.goto(`${B}/`); await page.waitForSelector('[data-testid=user-chip]', { timeout: 30000 }); await page.waitForTimeout(2500)
   ok('the top bar shows no demo label', await page.locator('[data-testid=demo-switch]').count() === 0 && !/demo agents/i.test(await page.textContent('header').catch(() => '')))
-  ok('Executive counts 18 agents', /Total Agents\s*18/.test((await page.textContent('main')).replace(/\s+/g, ' ')))
+  ok(`Executive counts all ${total} agents`, new RegExp(`Total Agents\\s*${total}`).test((await page.textContent('main')).replace(/\s+/g, ' ')))
   await page.goto(`${B}/agents`); await page.waitForSelector('h3', { timeout: 30000 }); await page.waitForTimeout(800)
   const names = await page.locator('h3').allTextContents()
-  ok('the agent list shows 18 agents, 12 labelled Demo', names.length === 18 && names.filter(t => /Demo/.test(t)).length === 12, `${names.length} agents`)
+  ok(`the agent list shows all ${total} agents, ${demo.length} labelled Demo`, names.length === total && names.filter(t => /Demo/.test(t)).length === demo.length, `${names.length} agents`)
   ok('no archived agent is listed', !names.some(t => ARCHIVED.some(a => t.startsWith(a))))
 
   for (const a of demo) {
@@ -53,8 +54,7 @@ try {
 
   await page.goto(`${B}/settings`); await page.waitForSelector('[data-testid=demo-agents]', { timeout: 30000 }); await page.waitForTimeout(1200)
   ok('Settings offers the demo switch, ticked', await page.isChecked('[data-testid=demo-toggle]'))
-  ok('Settings lists the 10 archived agents', await page.locator('[data-testid=archived-agents] li').count() === 10)
-  ok('archived agents have their own card, the last list on Settings, not inside Demo agents', await page.locator('[data-testid=demo-agents] [data-testid=archived-agents]').count() === 0)
+  ok('Settings shows no archived agents card', await page.locator('[data-testid=archived-agents]').count() === 0)
   await page.goto(`${B}/business`); await page.waitForSelector('[data-testid=bu-kpis]', { timeout: 30000 }); await page.waitForTimeout(1500)
   const biz = await page.textContent('main')
   ok('Business Impact shows demo agents and no archived ones', biz.includes('Invoice Reconciliation Agent') && !ARCHIVED.some(a => biz.includes(a)))

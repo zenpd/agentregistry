@@ -142,7 +142,8 @@ def anomaly_cost_share(series: Iterable[Mapping], window_start: date) -> dict | 
     impact = sum(e["impact_cents"] for e in evaluated if e["flagged"])
     pct = round(impact / total * 100, 1) if total > 0 else 0.0
     band = "green" if pct < ANOMALY_COST_GREEN_PCT else "yellow" if pct <= ANOMALY_COST_RED_PCT else "red"
-    return {"pct": pct, "band": band, "impact_cents": round(impact, 4), "evaluated_days": len(evaluated)}
+    return {"pct": pct, "band": band, "impact_cents": round(impact, 4), "evaluated_days": len(evaluated),
+            "total_cents": round(total, 4), "spike_days": len([e for e in evaluated if e["flagged"]])}
 
 
 def _error_burn(by_date: Mapping[date, Mapping], day: date) -> dict | None:

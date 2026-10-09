@@ -55,7 +55,7 @@ ACTION_LABELS = {
     "tool.update": "Approved tool changed", "tool.remove": "Tool removed from the approved list",
     "version.create": "Version recorded", "version.release": "Version released", "consumer.version": "Consumer version changed",
     "retirement.start": "Retirement started", "retirement.step": "Retirement step done", "retirement.finish": "Agent retired",
-    "retirement.cancel": "Retirement cancelled", "evidence.record": "AssureAI verdict recorded",
+    "retirement.cancel": "Retirement cancelled", "evidence.record": "Test verdict recorded",
     "offboard": "Offboarding step", "dismiss": "Governance finding dismissed", "register": "Agent registered from a manifest", "budget.update": "Budget changed",
     "model_alias.upsert": "Model name mapping changed", "settings.update": "Settings changed",
     "api_key.issue": "API key issued", "api_key.revoke": "API key revoked", "adopt_observed_dependencies": "Observed dependencies adopted",

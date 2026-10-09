@@ -377,6 +377,10 @@ export interface RiskSummary {
   byCategory: { category: string; label: string; count: number }[]
   severities: string[]
   heatmap: { category: string; label: string; counts: Record<string, number> }[]
+  // The agents the findings are on, and how many of the total are cost and spend findings.
+  byAgent?: { agentId: string; name: string; count: number; worst: string }[]
+  storedFindings?: number
+  financialFindings?: number
 }
 
 export const getRiskSummary = () => api.get<RiskSummary>('/governance/risks/summary')
@@ -399,9 +403,25 @@ export interface AgentEconomics {
   tokenSource?: string
   infraSource?: string
   costComplete?: boolean
+  // The parts each figure is made of (governance/economics.py build_economics).
+  period?: { month: string; daysElapsed: number; daysInPeriod: number }
+  token?: {
+    status: string; monthToDateCents: number | null; projectedCents: number | null; daysLeft?: number; dailyAvg14Cents?: number | null
+    callsLast30d: number | null; unpricedModels: string[]
+    modelsThisMonth?: { model: string; calls: number; inputTokens: number; outputTokens: number; costCents: number; priced: boolean }[]
+  }
+  infra?: {
+    source: string; cents: number; meteredMonthToDateCents: number | null; meteredThrough: string | null
+    declaredMonthlyCents: number | null; declaredFrom: string | null; estimateCents: number
+    estimateByStage?: Record<string, number>; daysInPeriod?: number
+    components: { name: string; costCents?: number | null; recurring: boolean }[]
+    byResource: { resourceId: string; serviceName: string | null; cents: number; allocation: string | null }[]
+  }
   // Which figure the value is: declared, attested or adjusted by finance, or declared again (stale).
   valueState?: 'none' | 'declared' | 'attested' | 'adjusted' | 'stale'
   valueMethodLabel?: string | null
+  // The owner's own figure, also when finance adjusted the value used.
+  valueDeclaredCents?: number
 }
 
 
@@ -426,7 +446,8 @@ export const getGovernanceOverview = () =>
 
 export interface GovernanceSummary {
   requiredReviews: Record<string, string[]>   // by risk level, from Settings → Governance rules
-  agents: number; cleared: number; blocked: number; inReview: number
+  agents: number; cleared: number; blocked: number; inReview: number; open: number
+  positions: Record<string, 'cleared' | 'blocked' | 'in_review' | 'open'>   // by agent id
 }
 export const getGovernanceSummary = () => api.get<GovernanceSummary>('/governance/summary')
 // The reviews an agent's risk level requires. All three until the rules are loaded.

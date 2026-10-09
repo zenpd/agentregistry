@@ -21,7 +21,7 @@ export default function GovernanceRulesCard({ canEdit }: { canEdit: boolean }) {
     setS({ ...s, templates: { ...s.templates, [tier]: { ...s.templates[tier], ...patch } } })
   async function save() {
     setBusy(true)
-    try { setS((await updateGovernanceSettings({ templates: s!.templates, requiredFields: s!.requiredFields, stallWeeks: s!.stallWeeks, assureaiRequired: s!.assureaiRequired })).data); setMsg('Saved. The rules apply at once to every stage change and new approval.') }
+    try { setS((await updateGovernanceSettings({ templates: s!.templates, requiredFields: s!.requiredFields, stallWeeks: s!.stallWeeks })).data); setMsg('Saved. The rules apply at once to every stage change and new approval.') }
     catch (e) { setMsg(errorMessage(e, 'Not saved')) } finally { setBusy(false) }
   }
 
@@ -31,11 +31,15 @@ export default function GovernanceRulesCard({ canEdit }: { canEdit: boolean }) {
         <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-600"><Scale size={20} /></div>
         <div>
           <h3 className="text-[16px] font-extrabold text-slate-900">Governance rules</h3>
-          <p className="text-[13px] text-slate-600">By risk level: the reviews needed before Production, how long an approval lasts, and whether a broken rule warns or blocks a stage change. The Architecture Review Board is always needed, and already before Testing. The other ticked reviews are needed before Production.</p>
+          <p className="text-[13px] text-slate-600">What an agent must have before it moves to the next stage. You set it once here and the registry applies it to every agent, so a riskier agent gets more checks and nobody has to remember the rules. A Registry Admin can change them.</p>
         </div>
       </div>
+      <div>
+        <div className="text-[13px] font-semibold text-slate-900">Reviews by risk level</div>
+        <p className="text-[12.5px] text-slate-600 mb-1">Tick the reviews an agent of each risk level needs before Production. Architecture is always needed, and already before Testing. "Approval lasts" is how many days an approval counts before the review must be done again. "Warns" lets the stage change happen with a warning on record, and "blocks" refuses it.</p>
+      </div>
       <table className="w-full text-[13px]">
-        <thead><tr className="text-left text-slate-600 border-b"><th className="py-1.5">Risk level</th><th>Reviews before Production</th><th>Approval lasts (days)</th><th>Broken rule</th></tr></thead>
+        <thead><tr className="text-left text-slate-600 border-b"><th className="py-1.5">Risk level</th><th>Reviews before Production</th><th>Approval lasts (days)</th><th>If something is missing</th></tr></thead>
         <tbody>
           {TIERS.map(t => (
             <tr key={t} className="border-b last:border-0">
@@ -54,7 +58,8 @@ export default function GovernanceRulesCard({ canEdit }: { canEdit: boolean }) {
         </tbody>
       </table>
       <div>
-        <div className="text-[13px] font-semibold text-slate-900 mb-1">Fields required before each stage (cumulative)</div>
+        <div className="text-[13px] font-semibold text-slate-900">Details an agent must have before each stage</div>
+        <p className="text-[12.5px] text-slate-600 mb-1">Tick what the record must contain before an agent enters that stage. For example, no agent reaches Production without an owner and a tracing link.</p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {STAGES.map(st => (
             <div key={st} className="rounded-lg bg-slate-50 p-2 ring-1 ring-slate-200">
@@ -70,18 +75,13 @@ export default function GovernanceRulesCard({ canEdit }: { canEdit: boolean }) {
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-3 text-[13px] text-slate-700">
-        <span className="font-semibold text-slate-900">Stalled after (weeks):</span>
+        <span className="font-semibold text-slate-900" title="An agent that stays in a stage longer than this is listed as stalled on Executive and raised as a governance finding.">Flag an agent as stalled after this many weeks in a stage:</span>
         {STALL.map(st => (
           <label key={st} className="flex items-center gap-1">{st}
             <input className="input !w-16 !py-1" type="number" min={1} disabled={!canEdit} value={s.stallWeeks[st]}
               onChange={e => setS({ ...s, stallWeeks: { ...s.stallWeeks, [st]: Number(e.target.value) } })} /></label>
         ))}
       </div>
-      <label className="flex items-start gap-2 text-[13px] text-slate-700">
-        <input type="checkbox" className="mt-0.5" disabled={!canEdit} checked={s.assureaiRequired}
-          onChange={e => setS({ ...s, assureaiRequired: e.target.checked })} data-testid="assureai-required" />
-        <span><span className="font-semibold text-slate-900">AssureAI verdict before Production.</span> AssureAI is the testing tool linked in Settings → Connectors. An agent with no AssureAI verdict, or a failed one, gets a warning before Production or is blocked, like the other rules of its risk level.</span>
-      </label>
       {canEdit && <button type="button" className="btn-primary btn-sm" disabled={busy} onClick={save} data-testid="save-governance-rules">{busy ? 'Saving…' : 'Save the rules'}</button>}
       {msg && <p className="text-[13px] text-slate-700" role="status">{msg}</p>}
     </div>

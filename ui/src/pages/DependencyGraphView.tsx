@@ -439,13 +439,13 @@ export default function DependencyGraphView() {
   return (
     <div className="space-y-3">
       <div>
-        <h1 className="text-2xl font-bold gradient-text">Dependency Graph <InfoTip term="dependency_graph" /></h1>
-        <p className="text-slate-600 mt-0.5">Everything each agent depends on and feeds, as declared by its owner. Click a node for details; hover the totals for what they count.</p>
+        <h1 className="text-2xl font-bold gradient-text">All Agents Graph <InfoTip term="dependency_graph" /></h1>
+        <p className="text-slate-600 mt-0.5">One picture of every agent: what it uses (systems, databases, tools, other agents) and who uses it, as declared by its owner. Click an item for its details and to see what breaks if it goes down.</p>
       </div>
       <div className="grid grid-cols-4 gap-2">
         {([
           ['Agents + resources', graph.stats.nodes, 'Every node in this graph: agents plus the systems, databases, knowledge bases, MCP servers and consumers they use.'],
-          ['Dependencies', graph.stats.edges, 'Every link: agent-to-agent calls plus each declared use of a system, database, knowledge base or MCP server.'],
+          ['Links', graph.stats.edges, 'Every link: agent-to-agent calls plus each declared use of a system, database, knowledge base or MCP server.'],
           ['Production agents', graph.stats.production_agents, 'Agents in the Production stage. The thick green ring on the canvas marks only those that a caller or consumer depends on.'],
           ['Agent→Agent calls', graph.stats.cross_agent_edges, 'Direct agent-to-agent handoffs only.'],
         ] as [string, number, string][]).map(([label, value, hint]) => (

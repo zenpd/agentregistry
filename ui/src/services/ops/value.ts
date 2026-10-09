@@ -67,6 +67,7 @@ export const getSpendReview = () => api.get<SpendReview>('/portfolio/spend-revie
 export interface Scenario {
   agents: { agentId: string; name: string; stage: string; valueCents: number; valueState: ValueState; tokenCents: number; infraCents: number; infraBasis: string }[]
   valueCents: number; costCents: number; netCents: number; attestedShare: number | null; caveat: string
+  tokenCents: number; fixedHostingCents: number; fixedHostingAgents: number; fixedHostingTotalCents: number
 }
 export const getScenario = (ids: string[] = []) => api.get<Scenario>('/portfolio/scenario', { params: { agents: ids.join(',') } })
 

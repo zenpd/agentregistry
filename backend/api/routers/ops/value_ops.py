@@ -406,8 +406,8 @@ async def production_scenario(agents: str = Query("", description="Comma-separat
              "valueState": econ[a.id]["valueState"], "tokenCents": econ[a.id]["tokenCostCents"],
              "infraCents": econ[a.id]["infraCostCents"], "infraSource": econ[a.id]["infraSource"]} for a in rows]
     return {**gv.scenario(data, estimated_infra_cents("Production")),
-            "caveat": "Value is the attested or declared monthly figure. Token cost is today's run rate, which a Production load may raise. "
-                      "Hosting is metered or declared, or the registry's Production estimate."}
+            "caveat": "Value is the figure finance attested, or the owner's declared figure. Token cost is what each agent costs now, "
+                      "and more use in Production would raise it."}
 
 
 # ── Build cost for reuse savings, and the scorecard ──────────────────────────

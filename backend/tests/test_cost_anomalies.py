@@ -147,7 +147,7 @@ def test_anomaly_cost_share_bands():
     share = ca.anomaly_cost_share(daily, TODAY - timedelta(days=9))
     assert share["band"] == "red" and share["pct"] > ca.ANOMALY_COST_RED_PCT
     calm = ca.anomaly_cost_share(series(steady(30)), TODAY - timedelta(days=9))
-    assert calm == {"pct": 0.0, "band": "green", "impact_cents": 0.0, "evaluated_days": 10}
+    assert calm == {"pct": 0.0, "band": "green", "impact_cents": 0.0, "evaluated_days": 10, "total_cents": 940.0, "spike_days": 0}
 
 
 # ── Episodes and reconcile ───────────────────────────────────────────────────

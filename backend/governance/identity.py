@@ -33,7 +33,7 @@ def similarity(a: str | None, b: str | None) -> float:
 
 
 def is_evaluation_project(name: str) -> bool:
-    """Projects AssureAI creates for its experiment runs (Experiment-<hex>): evaluation traffic, not an agent."""
+    """Projects a testing tool creates for its experiment runs (Experiment-<hex>): evaluation traffic, not an agent."""
     return bool(_EVAL_PROJECT.match(name or ""))
 
 

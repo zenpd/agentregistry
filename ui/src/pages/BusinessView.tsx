@@ -2,9 +2,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react'
 import { VALUE_STATE_SHORT } from '../services/ops/value'
 import ValueSpendSection from '../components/ValueSpendSection'
 import { Link, useSearchParams } from 'react-router-dom'
-import {
-  AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, CircleDashed, Coins, Hourglass, Pencil, Rocket, TrendingUp, X,
-} from 'lucide-react'
+import { AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, CircleDashed, Coins, Hourglass, Pencil, Rocket, TrendingUp, X, ChevronRight } from 'lucide-react'
 import { getAgents, getGovernanceSummary, getPortfolioEconomics, requiredReviewsOf, type AgentEconomics, type GovernanceSummary, type RegistryAgent } from '../services/api'
 import InfoTip from '../components/InfoTip'
 import type { GlossaryKey } from '../lib/glossary'
@@ -91,6 +89,8 @@ export default function BusinessView() {
   const [agents, setAgents] = useState<RegistryAgent[]>([])
   const [econ, setEcon] = useState<Map<string, AgentEconomics>>(new Map())
   const [rules, setRules] = useState<GovernanceSummary | null>(null)
+  const [showCost, setShowCost] = useState(false)
+  const [showValue, setShowValue] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [focus, setFocus] = useState<Focus>(null)
@@ -177,14 +177,21 @@ export default function BusinessView() {
         <Kpi label="Agents running" value={running.length.toLocaleString()}
           sub={`${live.length} live in production${list.length > running.length ? ` · ${list.length - running.length} retired (Deprecated) not counted` : ''}`} />
         <Kpi label="Value / month" tip="declared_value" value={fmtMoney(realized + projected)} accent="text-zen-600"
-          sub={`${fmtMoney(realized)} from agents in Production · ${fmtMoney(projected)} from agents not yet in Production`} />
+          sub={`${fmtMoney(realized)} from agents in Production · ${fmtMoney(projected)} from agents not yet in Production`}
+          action={<button type="button" className="mt-1.5 text-xs font-semibold text-zen-700 hover:underline" aria-expanded={showValue}
+            onClick={() => setShowValue(v => !v)} data-testid="value-breakdown-toggle">{showValue ? 'Hide the calculation' : 'Show the calculation'}</button>} />
         <Kpi label="Cost to run / month" tip="cost_to_run" value={`${costUnknown ? '≥' : ''}${fmtCents(costCents)}`} accent="text-rose-600"
-          sub={`tokens + hosting${costUnknown ? ` · ${costUnknown} agent${costUnknown === 1 ? '' : 's'} with no usage data` : ''}`} />
+          sub={`tokens + hosting${costUnknown ? ` · ${costUnknown} agent${costUnknown === 1 ? '' : 's'} with no usage data` : ''}`}
+          action={<button type="button" className="mt-1.5 text-xs font-semibold text-zen-700 hover:underline" aria-expanded={showCost}
+            onClick={() => setShowCost(v => !v)} data-testid="cost-breakdown-toggle">{showCost ? 'Hide the calculation' : 'Show the calculation'}</button>} />
         <Kpi label="Return on cost" tip="return_on_cost" accent="text-zen-700"
           value={costCents > 0 && valueCents > 0 ? fmtTimes(valueCents / costCents) : '—'}
-          sub={costCents > 0 && valueCents > 0 ? `value ÷ cost to run · ${hours.toLocaleString()} h saved (≈ ${Math.round(hours / FTE_HOURS_PER_MONTH)} FTE)`
+          sub={costCents > 0 && valueCents > 0 ? `${fmtMoney(valueCents / 100)} value ÷ ${fmtCents(costCents)} cost to run = ${fmtTimes(valueCents / costCents)} · ${hours.toLocaleString()} h saved (≈ ${Math.round(hours / FTE_HOURS_PER_MONTH)} FTE)`
             : valueCents > 0 ? 'no cost recorded yet' : 'no value declared yet'} />
       </div>
+
+      {showValue && <ValueBreakdown agents={running} econ={econ} valueOf={valueOf} unitLabel={unit ? unit.label : 'all business units'} />}
+      {showCost && <CostBreakdown agents={running} econ={econ} totalCents={costCents} unknown={costUnknown} unitLabel={unit ? unit.label : 'all business units'} />}
 
       <ValueSpendSection unitKey={unit && unit.key !== UNASSIGNED ? unit.key : null} unitLabel={unit ? unit.label : 'all business units'}
         unitAgentIds={unit ? list.map(a => a.id) : null} />
@@ -215,7 +222,7 @@ export default function BusinessView() {
           )}
           {groups.some(g => g.kind === 'reviewing') && (
             <Link to="/approvals" className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-zen-700 hover:underline">
-              Reviewers decide these in Approvals <ArrowRight size={13} />
+              Reviewers decide these in Integration Approval <ArrowRight size={13} />
             </Link>
           )}
         </SummaryCard>
@@ -336,13 +343,195 @@ export default function BusinessView() {
   )
 }
 
-function Kpi({ label, value, sub, accent, tip }: { label: string; value: string; sub: string; accent?: string; tip?: GlossaryKey }) {
+function Kpi({ label, value, sub, accent, tip, action }: { label: string; value: string; sub: string; accent?: string; tip?: GlossaryKey; action?: React.ReactNode }) {
   return (
     <div className="card p-4">
       <div className="text-xs text-slate-600 uppercase tracking-wide">{label}{tip && <> <InfoTip term={tip} /></>}</div>
       <div className={`text-2xl font-bold mt-1 ${accent || 'text-slate-900'}`}>{value}</div>
       <div className="text-xs text-slate-500 mt-1">{sub}</div>
+      {action}
     </div>
+  )
+}
+
+const WHOSE: Record<string, string> = {
+  declared: 'Declared by the owner', attested: 'Confirmed by finance', adjusted: 'Adjusted by finance',
+  stale: 'Declared again by the owner, finance has not confirmed the new figure', none: 'Not declared',
+}
+
+// How "Value / month" is made up: one row per agent with its value and who stands behind the figure.
+function ValueBreakdown({ agents, econ, valueOf, unitLabel }: {
+  agents: RegistryAgent[]; econ: Map<string, AgentEconomics>; valueOf: (a: RegistryAgent) => number; unitLabel: string
+}) {
+  const rows = agents.map(a => ({ a, e: econ.get(a.id), value: valueOf(a) })).sort((x, y) => y.value - x.value)
+  const live = rows.filter(r => r.a.stage === 'Production').reduce((s, r) => s + r.value, 0)
+  const total = rows.reduce((s, r) => s + r.value, 0)
+  const withValue = rows.filter(r => r.value > 0).length
+  return (
+    <section className="card p-5 space-y-3" data-testid="value-breakdown">
+      <div>
+        <h2 className="font-semibold text-slate-900">How the value is calculated</h2>
+        <p className="text-[13px] text-slate-700">
+          Value a month = the value of each agent of {unitLabel} that is not retired, added up: <b>{fmtMoney(live)}</b> from agents in Production + <b>{fmtMoney(total - live)}</b> from
+          agents not yet in Production = <b className="text-zen-700">{fmtMoney(total)}</b>. {withValue} of {rows.length} agent{rows.length === 1 ? ' has' : 's have'} a value.
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="text-left text-slate-600 border-b">
+              <th className="py-1.5 pr-3">Agent</th><th className="pr-3">Stage</th><th className="pr-3 text-right">Value a month</th>
+              <th className="pr-3">Whose figure</th><th className="pr-3">How it was worked out</th><th>Counted as</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ a, e, value }) => {
+              const state = value > 0 ? (e?.valueState || 'declared') : 'none'
+              const owners = e?.valueDeclaredCents
+              return (
+                <tr key={a.id} className="border-b border-slate-100 last:border-0" data-testid="value-row">
+                  <td className="py-1.5 pr-3"><Link to={`/agents/${a.id}?tab=revenue`} className="font-medium text-zen-700 hover:underline">{a.name}</Link></td>
+                  <td className="pr-3 text-slate-600">{a.stage}</td>
+                  <td className="pr-3 text-right font-mono text-slate-900">{value > 0 ? fmtMoney(value) : <span className="text-slate-500">none</span>}</td>
+                  <td className="pr-3">{WHOSE[state] || state}{state === 'adjusted' && owners ? ` (the owner declared ${fmtCents(owners)})` : ''}</td>
+                  <td className="pr-3 text-slate-600">{value > 0 ? (e?.valueMethodLabel || 'Not stated') : ''}</td>
+                  <td className="text-slate-600">{value > 0 ? (a.stage === 'Production' ? 'In Production' : 'Not yet in Production') : 'Adds nothing'}</td>
+                </tr>
+              )
+            })}
+            <tr className="font-semibold text-slate-900"><td className="py-1.5 pr-3" colSpan={2}>Total</td><td className="pr-3 text-right font-mono text-zen-700">{fmtMoney(total)}</td><td colSpan={3} /></tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[12.5px] text-slate-600">The value of an agent is the figure finance confirmed or adjusted. When finance has not looked at it, it is the figure the owner declared. Open an agent to see or change its value.</p>
+    </section>
+  )
+}
+
+const usd = (cents: number | null | undefined, digits = 2) => cents == null ? 'not known' : `$${(cents / 100).toFixed(digits)}`
+
+// The working behind one agent's two figures: token cost from tokens and days, hosting cost from its source.
+function CostWorking({ agent: a, e }: { agent: RegistryAgent; e: AgentEconomics | undefined }) {
+  const t = e?.token, h = e?.infra, days = e?.period
+  if (!e || !t || !h) return <p className="text-[12.5px] text-slate-600">No cost figures for this agent yet.</p>
+  const rest = t.dailyAvg14Cents != null && t.daysLeft != null ? t.dailyAvg14Cents * t.daysLeft : null
+  const stages = Object.entries(h.estimateByStage || {}).filter(([st]) => st !== 'Deprecated')
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-[12.5px] text-slate-700" data-testid="cost-working">
+      <div className="space-y-1.5">
+        <div className="font-semibold text-slate-900">Token cost: {e.tokenCostCents == null ? 'not known' : `${usd(e.tokenCostCents)} a month`}</div>
+        {t.projectedCents == null ? (
+          <p>{t.status === 'unlinked' ? 'No tracing is linked and no usage was entered by hand, so there is nothing to price.' : t.unpricedModels.length ? `Its calls use a model with no price in the price list (${t.unpricedModels.join(', ')}), so the cost cannot be worked out.` : 'No usage has been read for this agent yet.'}</p>
+        ) : (
+          <>
+            <p>Spent so far this month ({days?.daysElapsed} day{days?.daysElapsed === 1 ? '' : 's'}): <b>{usd(t.monthToDateCents, 4)}</b>.<br />
+              Rest of the month: average of the last 14 days <b>{usd(t.dailyAvg14Cents, 4)}</b> a day × <b>{t.daysLeft}</b> day{t.daysLeft === 1 ? '' : 's'} left = <b>{usd(rest, 4)}</b>.<br />
+              {usd(t.monthToDateCents, 4)} + {usd(rest, 4)} = <b className="text-slate-900">{usd(t.projectedCents, 4)}</b> for the full month.</p>
+            {(t.modelsThisMonth || []).length > 0 ? (
+              <table className="w-full">
+                <thead><tr className="text-left text-slate-500"><th className="font-medium">Model (this month so far)</th><th className="font-medium text-right">Calls</th><th className="font-medium text-right">Tokens in</th><th className="font-medium text-right">Tokens out</th><th className="font-medium text-right">Cost</th></tr></thead>
+                <tbody>{t.modelsThisMonth!.map(m => (
+                  <tr key={m.model}><td>{m.model}{!m.priced && <span className="text-amber-700"> (no price)</span>}</td><td className="text-right">{m.calls.toLocaleString()}</td>
+                    <td className="text-right">{m.inputTokens.toLocaleString()}</td><td className="text-right">{m.outputTokens.toLocaleString()}</td><td className="text-right font-mono">{usd(m.costCents, 4)}</td></tr>
+                ))}</tbody>
+              </table>
+            ) : <p>No calls this month so far.</p>}
+            <p className="text-slate-500">Each model's cost is its tokens times the price per token in the model price list. The day-by-day figures are on the agent's <Link to={`/agents/${a.id}?tab=tokenomics`} className="text-zen-700 hover:underline">Tokenomics tab</Link>.</p>
+          </>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        <div className="font-semibold text-slate-900">Hosting cost: {usd(h.cents)} a month</div>
+        {h.source === 'metered' && (
+          <>
+            <p>Measured by Azure Cost Management. Billed so far this month, up to {h.meteredThrough}: <b>{usd(h.meteredMonthToDateCents)}</b>, scaled to the {h.daysInPeriod} days of the month = <b className="text-slate-900">{usd(h.cents)}</b>.</p>
+            <table className="w-full"><thead><tr className="text-left text-slate-500"><th className="font-medium">Azure resource</th><th className="font-medium">Service</th><th className="font-medium text-right">Billed so far</th></tr></thead>
+              <tbody>{h.byResource.map(r => <tr key={r.resourceId}><td className="break-all">{r.resourceId.split('/').pop()}</td><td>{r.serviceName || ''}</td><td className="text-right font-mono">{usd(r.cents)}</td></tr>)}</tbody></table>
+          </>
+        )}
+        {h.source === 'declared' && (
+          <>
+            <p>Declared by the owner{h.declaredFrom ? ` from ${h.declaredFrom}` : ''}: <b className="text-slate-900">{usd(h.declaredMonthlyCents)}</b> a month. It is the owner's figure, not a measured one.</p>
+            {h.components.length > 0 && <ul className="list-disc pl-5">{h.components.map(c => <li key={c.name}>{c.name}{c.costCents != null ? `: ${usd(c.costCents)}${c.recurring ? ' a month' : ' once'}` : ''}</li>)}</ul>}
+          </>
+        )}
+        {h.source === 'estimate' && (
+          <>
+            <p>Not measured and not declared. The registry uses one fixed figure per stage: {stages.map(([st, c]) => `${st} ${usd(c, 0)}`).join(', ')}. This agent is in <b>{a.stage}</b>, so <b className="text-slate-900">{usd(h.cents, 0)}</b>.</p>
+            <p>It is the same for every agent in that stage and is not a measured cost.</p>
+            <p>To replace it with a real figure: declare the hosting cost on the agent's <Link to={`/agents/${a.id}?tab=revenue`} className="text-zen-700 hover:underline">Revenue &amp; Expenditure tab</Link>, or connect Azure Cost Management in Settings → Cost settings.</p>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// How "Cost to run / month" is made up: one row per agent, token cost plus hosting cost, each with where
+// the figure comes from. The rows add up to the figure on the tile.
+function CostBreakdown({ agents, econ, totalCents, unknown, unitLabel }: {
+  agents: RegistryAgent[]; econ: Map<string, AgentEconomics>; totalCents: number; unknown: number; unitLabel: string
+}) {
+  const rows = agents.map(a => {
+    const e = econ.get(a.id)
+    return { a, e, token: e?.tokenCostCents ?? null, hosting: e?.infraCostCents ?? 0, total: e?.totalCostCents || 0 }
+  }).sort((x, y) => y.total - x.total)
+  const max = Math.max(1, ...rows.map(r => r.total))
+  const [openId, setOpenId] = useState<string | null>(null)
+  const tokenSum = rows.reduce((s, r) => s + (r.token || 0), 0)
+  const hostingSum = rows.reduce((s, r) => s + r.hosting, 0)
+  return (
+    <section className="card p-5 space-y-3" data-testid="cost-breakdown">
+      <div>
+        <h2 className="font-semibold text-slate-900">How the cost to run is calculated</h2>
+        <p className="text-[13px] text-slate-700">
+          Cost to run a month = token cost + hosting cost, added up over the {rows.length} agent{rows.length === 1 ? '' : 's'} of {unitLabel} that are not retired:
+          {' '}<b>{fmtCents(tokenSum)}</b> tokens + <b>{fmtCents(hostingSum)}</b> hosting = <b className="text-rose-600">{unknown ? '≥' : ''}{fmtCents(totalCents)}</b>.
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="text-left text-slate-600 border-b">
+              <th className="py-1.5 pr-3">Agent (click a row for its working)</th><th className="pr-3">Stage</th>
+              <th className="pr-3">Token cost</th><th className="pr-3">Hosting cost</th><th className="pr-3 text-right">Total a month</th><th className="w-[26%]">Share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ a, e, token, hosting, total }) => (
+              <Fragment key={a.id}>
+              <tr className="border-b border-slate-100 last:border-0 cursor-pointer hover:bg-slate-50" data-testid="cost-row" onClick={() => setOpenId(openId === a.id ? null : a.id)}>
+                <td className="py-1.5 pr-3"><span className="inline-flex items-center gap-1">
+                  {openId === a.id ? <ChevronDown size={14} className="text-slate-500" /> : <ChevronRight size={14} className="text-slate-500" />}
+                  <Link to={`/agents/${a.id}?tab=revenue`} onClick={ev => ev.stopPropagation()} className="font-medium text-zen-700 hover:underline">{a.name}</Link></span></td>
+                <td className="pr-3 text-slate-600">{a.stage}</td>
+                <td className="pr-3 whitespace-nowrap">{token == null ? <span className="text-slate-500">not known</span> : fmtCents(token)} {e?.tokenSource && <SourceBadge source={e.tokenSource} />}</td>
+                <td className="pr-3 whitespace-nowrap">{fmtCents(hosting)} {e?.infraSource && <SourceBadge source={e.infraSource} />}</td>
+                <td className="pr-3 text-right font-mono text-slate-900">{fmtCents(total)}</td>
+                <td>
+                  <div className="flex h-2.5 overflow-hidden rounded-full bg-slate-100" title={`Tokens ${fmtCents(token || 0)}, hosting ${fmtCents(hosting)}`}>
+                    <div className="h-full bg-sky-400" style={{ width: `${((token || 0) / max) * 100}%` }} />
+                    <div className="h-full bg-rose-300" style={{ width: `${(hosting / max) * 100}%` }} />
+                  </div>
+                </td>
+              </tr>
+              {openId === a.id && <tr className="border-b border-slate-100 bg-slate-50/60"><td colSpan={6} className="px-4 py-3"><CostWorking agent={a} e={e} /></td></tr>}
+              </Fragment>
+            ))}
+            <tr className="font-semibold text-slate-900">
+              <td className="py-1.5 pr-3" colSpan={2}>Total</td>
+              <td className="pr-3">{fmtCents(tokenSum)}</td><td className="pr-3">{fmtCents(hostingSum)}</td>
+              <td className="pr-3 text-right font-mono text-rose-600">{unknown ? '≥' : ''}{fmtCents(totalCents)}</td><td />
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <ul className="text-[12.5px] text-slate-600 space-y-0.5">
+        <li><span className="inline-block h-2 w-2 rounded-full bg-sky-400 mr-1.5" />Token cost: what the agent's model calls cost so far this month, projected to the full month. It comes from the agent's traces or from usage entered by hand.</li>
+        <li><span className="inline-block h-2 w-2 rounded-full bg-rose-300 mr-1.5" />Hosting cost: the metered Azure figure when one exists, otherwise the figure the owner declared, otherwise the registry's estimate for the agent's stage.</li>
+        {unknown > 0 && <li>{unknown} agent{unknown === 1 ? ' has' : 's have'} no usage data, so {unknown === 1 ? 'its' : 'their'} token cost is not known and counts as nothing here. That is why the total is shown as "at least" (≥).</li>}
+      </ul>
+    </section>
   )
 }
 

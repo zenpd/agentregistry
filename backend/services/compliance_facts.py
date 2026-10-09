@@ -1,6 +1,6 @@
 """The evidence the compliance packs are checked against, read from the registry:
 per agent (record, classification, reviews, checklist, tracing, risks, tools,
-versions, AssureAI verdict) and registry-wide (the controls list and the decision chain)."""
+versions) and registry-wide (the controls list and the decision chain)."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -26,7 +26,6 @@ def _ticked(gate: str, item: str, facts: dict, review: dict | None) -> bool:
 
 async def agent_evidence(db, agent: Agent, now: datetime | None = None) -> dict:
     """{evidence: {key: bool}, classified, category, answers, details: {key: text}}"""
-    from api.routers.ops.evidence import latest as latest_verdict
     from governance.economics import load_economics
     from orchestrations import governance_checks as gc
 
@@ -41,7 +40,6 @@ async def agent_evidence(db, agent: Agent, now: datetime | None = None) -> dict:
                                   "databases": agent.databases, "knowledge_bases": agent.knowledge_bases},
                                  [{"name": t.name, "risk_class": t.risk_class} for t in (await db.execute(select(ApprovedTool))).scalars()])
     versions = (await db.execute(select(AgentVersion.id).where(AgentVersion.agent_id == agent.id).limit(1))).scalar()
-    verdict = await latest_verdict(db, agent.id)
     econ = (await load_economics(db, [agent]))[agent.id]
     ev = {
         "owner": lifecycle.filled("owner", f),
@@ -67,7 +65,6 @@ async def agent_evidence(db, agent: Agent, now: datetime | None = None) -> dict:
         "human_oversight": _ticked("arb", "arb.human_oversight", f, reviews.get("arb")),
         "decommission_plan": _ticked("arb", "arb.decommission", f, reviews.get("arb")),
         "context_doc": bool(f.get("context_present")),
-        "evaluation_pass": bool(verdict and verdict.verdict == "pass"),
         "versions": bool(versions),
     }
     return {"id": agent.id, "name": agent.name, "stage": agent.lifecycle_stage, "classified": rec is not None,

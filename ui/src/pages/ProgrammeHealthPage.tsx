@@ -9,15 +9,21 @@ import { errorMessage } from './agent/shared'
 const usd = (c: number) => `$${(c / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 
-function Tile({ icon, label, value, sub, testId }: { icon: React.ReactNode; label: string; value: string; sub: string; testId: string }) {
+function Tile({ icon, label, value, sub, testId, open, onOpen }: { icon: React.ReactNode; label: string; value: string; sub: string; testId: string; open?: boolean; onOpen?: () => void }) {
   return (
-    <div className="card p-4" data-testid={testId}>
+    <div className={`card p-4 ${open ? 'ring-2 ring-zen-400' : ''}`} data-testid={testId}>
       <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-600">{icon}{label}</div>
       <div className="mt-1 text-2xl font-bold text-slate-900">{value}</div>
       <div className="mt-1 text-xs text-slate-600">{sub}</div>
+      {onOpen && <button type="button" className="mt-1.5 text-xs font-semibold text-zen-700 hover:underline" aria-expanded={!!open} onClick={onOpen}>{open ? 'Hide the list' : 'Show what is counted'}</button>}
     </div>
   )
 }
+
+const agentLink = (id: string, name: string, tab = 'overview') => <Link to={`/agents/${id}?tab=${tab}`} className="font-medium text-zen-700 hover:underline">{name}</Link>
+const lines = (items: React.ReactNode[], empty: string) => items.length
+  ? <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-6 text-[13px]">{items.map((x, i) => <li key={i} className="flex justify-between gap-3 border-b border-slate-100 py-1">{x}</li>)}</ul>
+  : <p className="text-[13px] text-slate-600">{empty}</p>
 
 // Programme health: how many agents are known, who owns them, how fast reviews are
 // decided, how much agents are reused, what people searched for and did not find,
@@ -27,6 +33,9 @@ export default function ProgrammeHealthPage() {
   const [cb, setCb] = useState<Awaited<ReturnType<typeof getPortfolioChargeback>>['data'] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [month] = useState(thisMonth())
+  // The score that was clicked: the rows it is counted from are listed under the tiles.
+  const [behind, setBehind] = useState<'known' | 'owners' | 'speed' | 'reuse' | null>(null)
+  const toggle = (k: 'known' | 'owners' | 'speed' | 'reuse') => setBehind(behind === k ? null : k)
   useEffect(() => {
     getProgrammeHealth().then(r => setH(r.data)).catch(e => setError(errorMessage(e, 'Could not load programme health')))
     getPortfolioChargeback(month).then(r => setCb(r.data)).catch(() => setCb(null))
@@ -46,20 +55,50 @@ export default function ProgrammeHealthPage() {
   return (
     <div className="space-y-5 animate-fade-in max-w-6xl" data-testid="programme-health">
       <div>
-        <h1 className="text-2xl font-bold gradient-text">Programme health <InfoTip term="programme_health" /></h1>
-        <p className="text-slate-600 mt-0.5">How the registry programme is doing, from the registry's own records. Retired agents are left out.</p>
+        <h1 className="text-2xl font-bold gradient-text">Programme Health <InfoTip term="programme_health" /></h1>
+        <p className="text-slate-600 mt-0.5">How well the AI programme is run: how many known agents are registered, how many have an owner, how fast reviews are decided and how much agents are reused. Retired agents are left out.</p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Tile testId="tile-known" icon={<Activity size={14} />} label="Known agents that are registered" value={h.known.share === null ? '—' : `${h.known.share}%`}
-          sub={`${h.known.registered} registered, ${h.known.foundNotRegistered} found but not registered (Discovered page).`} />
+          sub={`${h.known.registered} registered, ${h.known.foundNotRegistered} found but not registered (Discovered Agents page).`} open={behind === 'known'} onOpen={() => toggle('known')} />
         <Tile testId="tile-owners" icon={<UserCheck size={14} />} label="Owned by a person" value={h.owners.share === null ? '—' : `${h.owners.share}%`}
-          sub={`${h.owners.person} of ${h.owners.total} have an owner with an account (${h.owners.withBackup} with a backup). ${h.owners.nameOnly} have only a name, ${h.owners.none} none.`} />
+          sub={`${h.owners.person} of ${h.owners.total} have an owner with an account (${h.owners.withBackup} with a backup). ${h.owners.nameOnly} have only a name, ${h.owners.none} none.`} open={behind === 'owners'} onOpen={() => toggle('owners')} />
         <Tile testId="tile-speed" icon={<Clock size={14} />} label="Median time to decide a review" value={h.approvalSpeed.medianDays === null ? '—' : `${h.approvalSpeed.medianDays} days`}
-          sub={`${h.approvalSpeed.text} ${h.approvalSpeed.decisions} decisions. ${h.overdueReviews.count} overdue now (over ${h.overdueReviews.slaDays} days).`} />
+          sub={`${h.approvalSpeed.text} ${h.approvalSpeed.decisions} decisions. ${h.overdueReviews.count} overdue now (over ${h.overdueReviews.slaDays} days).`} open={behind === 'speed'} onOpen={() => toggle('speed')} />
         <Tile testId="tile-reuse" icon={<Recycle size={14} />} label="Reuse rate" value={r.reuseRate === null ? '—' : `${r.reuseRate}%`}
-          sub={`${r.reusedAgents} of ${r.productionAgents} Production agents have an approved consumer team. ${r.buildsAvoided} builds avoided${h.reuseSavings.cents !== null ? `, worth ${usd(h.reuseSavings.cents)} at ${usd(h.reuseSavings.buildCostCents || 0)} a build` : ' (set an agreed build cost in Settings to value them)'}.`} />
+          sub={`${r.reusedAgents} of ${r.productionAgents} Production agents have an approved consumer team. ${r.buildsAvoided} builds avoided${h.reuseSavings.cents !== null ? `, worth ${usd(h.reuseSavings.cents)} at ${usd(h.reuseSavings.buildCostCents || 0)} a build` : ' (set an agreed build cost in Settings to value them)'}.`} open={behind === 'reuse'} onOpen={() => toggle('reuse')} />
       </div>
+
+      {behind && (
+        <div className="card p-5 space-y-2" data-testid="score-behind">
+          {behind === 'known' && <>
+            <h2 className="font-semibold text-slate-900">What "Known agents that are registered" counts</h2>
+            <p className="text-[13px] text-slate-700">{h.known.registered} registered agents ÷ ({h.known.registered} registered + {h.known.foundNotRegistered} found but not registered) = <b>{h.known.share ?? '—'}%</b>. The {h.known.foundNotRegistered} not registered are {h.behind.notRegistered.phoenixProjects.length} Phoenix project{h.behind.notRegistered.phoenixProjects.length === 1 ? '' : 's'} and {h.behind.notRegistered.connectorFindings} finding{h.behind.notRegistered.connectorFindings === 1 ? '' : 's'} from connectors. <Link to="/discovered" className="font-semibold text-zen-700 hover:underline">Open Discovered Agents</Link></p>
+            {lines(h.behind.notRegistered.phoenixProjects.map(n => <span className="text-slate-800">{n}</span>), 'No Phoenix project is waiting to be registered.')}
+          </>}
+          {behind === 'owners' && <>
+            <h2 className="font-semibold text-slate-900">What "Owned by a person" counts</h2>
+            <p className="text-[13px] text-slate-700">{h.owners.person} agents whose owner is a person with an active account ÷ {h.owners.total} agents that are not retired = <b>{h.owners.share ?? '—'}%</b>.</p>
+            <p className="text-[13px] font-semibold text-slate-900">Owner is a person with an account ({h.behind.ownerPerson.length})</p>
+            {lines(h.behind.ownerPerson.map(a => <>{agentLink(a.agentId, a.name)}<span className="text-slate-600">{a.owner}{a.backup ? ', with a backup owner' : ', no backup owner'}</span></>), 'None.')}
+            <p className="text-[13px] font-semibold text-slate-900">Owner is only a name, with no account ({h.behind.ownerNameOnly.length})</p>
+            {lines(h.behind.ownerNameOnly.map(a => <>{agentLink(a.agentId, a.name)}<span className="text-slate-600">{a.owner}</span></>), 'None.')}
+            <p className="text-[13px] font-semibold text-slate-900">No owner ({h.behind.ownerNone.length})</p>
+            {lines(h.behind.ownerNone.map(a => <>{agentLink(a.agentId, a.name)}<span className="text-slate-600">no owner recorded</span></>), 'None.')}
+          </>}
+          {behind === 'speed' && <>
+            <h2 className="font-semibold text-slate-900">What "Median time to decide a review" counts</h2>
+            <p className="text-[13px] text-slate-700">The {h.behind.decisions.length} review{h.behind.decisions.length === 1 ? '' : 's'} decided in the last {h.approvalSpeed.days} days, each from the day it was submitted to the day it was decided. The median is the middle value when they are put in order: <b>{h.approvalSpeed.medianDays ?? '—'} days</b>.</p>
+            {lines(h.behind.decisions.map(d => <>{agentLink(d.agentId, d.name, 'governance')}<span className="text-right text-slate-600">{d.review}: submitted {d.submitted}, {d.decision.toLowerCase()} {d.decided} = <b>{d.days}</b> day{d.days === 1 ? '' : 's'}</span></>), `No review was decided in the last ${h.approvalSpeed.days} days, so there is no figure.`)}
+          </>}
+          {behind === 'reuse' && <>
+            <h2 className="font-semibold text-slate-900">What "Reuse rate" counts</h2>
+            <p className="text-[13px] text-slate-700">{r.reusedAgents} Production agent{r.reusedAgents === 1 ? '' : 's'} with at least one approved consumer team ÷ {r.productionAgents} Production agent{r.productionAgents === 1 ? '' : 's'} = <b>{r.reuseRate ?? '—'}%</b>. Each approved team counts as one build avoided: {r.buildsAvoided} in total.</p>
+            {lines(h.behind.productionAgents.map(a => <>{agentLink(a.agentId, a.name, 'integrate')}<span className="text-slate-600">{a.teams ? `${a.teams} approved team${a.teams === 1 ? '' : 's'}` : 'no approved team'}</span></>), 'No agent is in Production.')}
+          </>}
+        </div>
+      )}
 
       {h.overdueReviews.count > 0 && (
         <div className="card p-5">

@@ -9,7 +9,6 @@ from typing import Any
 
 from sqlalchemy import delete, select
 
-from connectors.assureai import AssureAIConnector
 from connectors.azure_ai import AzureAIConnector
 from connectors.base import ConnectorError, unseal
 from connectors.github import GitHubConnector
@@ -21,9 +20,8 @@ from shared.logger import get_logger
 
 log = get_logger("services.connectors")
 
-KINDS = {"langfuse": LangfuseConnector, "github": GitHubConnector, "azure": AzureAIConnector, "assureai": AssureAIConnector}
-LABELS = {"langfuse": "Langfuse project", "github": "GitHub organisation", "azure": "Azure subscription",
-          "assureai": "AssureAI application (verdicts only)"}
+KINDS = {"langfuse": LangfuseConnector, "github": GitHubConnector, "azure": AzureAIConnector}
+LABELS = {"langfuse": "Langfuse project", "github": "GitHub organisation", "azure": "Azure subscription"}
 
 
 def utcnow() -> datetime:
@@ -94,11 +92,9 @@ async def sync_all(agent_id: str | None = None, trigger: str = "manual", **_: An
         return {"status": "skipped", "reason": "No connector is configured (Settings → Connectors)."}
     results = [await sync(c.id) for c in configs]
     usage = await ingest_langfuse_usage()
-    from api.routers.ops.evidence import refresh_waiting
-    verdicts = await refresh_waiting()
     failed = [r for r in results if r["status"] != "ok"]
     status = "ok" if not failed else ("partial" if len(failed) < len(results) else "error")
-    return {"status": status, "connectors": results, "langfuseUsage": usage, "assureaiVerdicts": verdicts,
+    return {"status": status, "connectors": results, "langfuseUsage": usage,
             "reason": "; ".join(f"{r['message']}" for r in failed)[:300] if failed else None}
 
 

@@ -13,7 +13,7 @@ export const GLOSSARY = {
   agent_card: 'A small public file (/.well-known/agent-card.json) where an agent describes itself: name, what it does, how to call it.',
   openapi_doc: 'The app’s own list of API operations (/openapi.json). Used to fill the description and capabilities, and by Try it.',
   backend_sibling: 'Web apps often come as a -fe (screen) and a -be (API) pair. The registry looks for the API on the -be address.',
-  governance_findings: 'Checks on agents that are already registered (stalled, no reviews, shared systems). They are not new agents.',
+  governance_findings: 'Something the registry noticed on a registered agent: it has stayed too long in a stage, it has no reviews, or it is in Production with no usage.',
   unregistered_ai: 'AI that was found running but is not in the registry. Registering it puts an owner and reviews around it.',
 
   // ── AI insights ──────────────────────────────────────────────────────────────
@@ -32,12 +32,12 @@ export const GLOSSARY = {
   versions: 'Released versions with what changed, and the version each team with access uses. Releasing a version tells those teams.',
   controls: 'Each rule the registry applies. Enforced: the registry refuses the action. Enforced for some tiers: refused for some risk levels and a warning for the others. Recorded only: it warns or logs and a person acts. Off: not applied.',
   chargeback: 'The agent’s token cost for a month, split across the teams with approved access by the calls seen from each team. With no calls seen, it is split in equal shares between those teams and the owner’s unit.',
-  programme_health: 'One page on how the registry programme is doing: how many agents are known, who owns them, how fast reviews are decided, and how much agents are reused.',
+  programme_health: 'One page on how well the AI programme is run: how many agents are known, who owns them, how fast reviews are decided, and how much agents are reused.',
   search_gap: 'A search for agents that found nothing. Searches that many people make are a signal for a new shared agent.',
   measured_outcome: 'A count of what the agent achieved, such as invoices matched, from a CSV file, a webhook or typed in. Cost per outcome divides the cost of the same days by the count.',
   scenario: 'What moving agents to Production would change each month: the value that goes live and the token and hosting cost it brings.',
   idle_spend: 'Idle: a Production agent with no call in 30 days that still costs money for hosting. Duplicate: two agents that look like they do the same job while both cost money.',
-  compliance_pack: 'A framework’s controls (EU AI Act, ISO/IEC 42001, NIST AI RMF, India DPDP Act), each mapped to records the registry holds. Evidenced means the registry holds the record for every agent the control applies to. It is not a statement of compliance.',
+  compliance_pack: 'The controls of one framework (a law or a standard), each mapped to records the registry holds. Evidenced means the registry holds the record for every agent the control applies to. It is not a statement of compliance.',
   decision_chain: 'Every decision (reviews, stage changes, waivers, access, classification, ownership, retirement, stop requests) is sealed with a hash that includes the hash before it, so changing or removing one breaks every hash after it.',
   incident: 'A problem with an agent, linked from PagerDuty, ServiceNow or entered here. Anyone who may change records can ask the owner to stop the agent, and the owner acknowledges.',
   tool_class: 'The highest risk class among the tools, systems, databases and knowledge bases an agent declares, from the approved tool list in Settings.',
@@ -63,7 +63,7 @@ export const GLOSSARY = {
   stage_rules: 'Which reviews an agent needs for each stage. In warn mode they show a warning but never block a change.',
   governance_exception: 'A waiver lets one review that is not approved count as met for a limited time. It needs a reason, an end date and two different signers. A failed Security Review cannot be waived.',
   self_approval: 'A testing setting (ALLOW_SELF_APPROVAL in the backend) that lets a person approve their own access request. Switch it off before going live.',
-  approvals_inbox: 'Everything waiting for someone’s decision across all agents, in one list.',
+  approvals_inbox: 'Everything waiting for someone’s decision across all agents, in one list: requests to use an agent, submitted reviews and classifications, and governance findings.',
   material_change: 'A change that matters to reviewers, such as a new model, tool or endpoint. It can reopen reviews.',
 
   // ── Reuse ────────────────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ export const GLOSSARY = {
   risk_scan: 'Runs the risk rules over every agent and records what it finds.',
   governance_checks: 'Finds approvals that are expiring or expired, and agents that need recertifying.',
   insight_refresh: 'Rewrites the AI insights on each traced agent’s tabs once a day, after the figures are refreshed. It only reads.',
-  phoenix_discovery: 'Finds Phoenix projects that are not registered yet and lists them on the Discovered page.',
+  phoenix_discovery: 'Finds Phoenix projects that are not registered yet and lists them on the Discovered Agents page.',
   audit_log: 'A record of who changed what and when.',
   user_role: 'What a person may do. Registry Admin: everything. Architect Steward, Security Reviewer and Data Protection Officer: change records and decide the review that belongs to their role. Product Owner: register and change agents. Executive Viewer: read only. Auditor: read only, including the audit trail, until a set end date, with every request logged. Finance Reviewer: read, and confirm or adjust the value owners declare.',
 

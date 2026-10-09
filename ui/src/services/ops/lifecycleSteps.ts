@@ -1,7 +1,6 @@
 import api from '../api'
 
-// Retirement steps, versions with the version each team uses, the AssureAI
-// verdict line, the tool-call share and the controls list.
+// Retirement steps, versions with the version each team uses, the tool-call share and the controls list.
 
 const a = (id: string) => `/agents/${encodeURIComponent(id)}`
 
@@ -41,21 +40,6 @@ export const releaseVersion = (id: string, version: string, changelog: string) =
   api.post<{ version: string; told: number }>(`${a(id)}/versions`, { version, changelog })
 export const setConsumerVersion = (id: string, requestId: string, version: string) =>
   api.put(`${a(id)}/access/${encodeURIComponent(requestId)}/version`, { version })
-
-export interface VerdictRow {
-  id: string; runId: string; verdict: 'pass' | 'fail' | null; application: string | null; completedAt: string | null
-  url: string | null; error: string | null; connector: string | null; recordedBy: string | null; fetchedAt: string | null
-}
-export interface Evidence {
-  latest: VerdictRow | null
-  runs: VerdictRow[]
-  connectors: { id: string; label: string; enabled: boolean }[]
-  requiredForProduction: boolean
-  phoenixProject: string | null
-}
-export const getEvidence = (id: string) => api.get<Evidence>(`${a(id)}/evidence`)
-export const recordAssureRun = (id: string, runId: string, connectorId?: string) =>
-  api.post<VerdictRow>(`${a(id)}/evidence/assureai`, { runId, connectorId: connectorId || null })
 
 export interface ToolCallShare {
   status: 'ok' | 'no_tool_calls' | 'no_approval' | 'not_linked' | 'no_traces_yet' | 'phoenix_unreachable'

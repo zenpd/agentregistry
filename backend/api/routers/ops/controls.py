@@ -48,8 +48,6 @@ async def controls(_=Depends(require_read)):
     gate_state = "enforced" if not tiers_warn else ("recorded" if not tiers_block else "partly")
     async with get_db_session() as db:
         tools = (await db.execute(select(ApprovedTool.id))).scalars().all()
-        assureai = (await db.execute(select(ConnectorConfig.id).where(ConnectorConfig.kind == "assureai",
-                                                                      ConnectorConfig.enabled == True))).scalars().all()  # noqa: E712
     cap = await get_setting("ai.monthly_cap_cents")
     ch = notify.channels()
     key = _get_secret_key() or ""
@@ -62,7 +60,7 @@ async def controls(_=Depends(require_read)):
                 ("A stage change is refused for risk level " + ", ".join(tiers_block) + "." if tiers_block else "")
                 + (" For risk level " + ", ".join(tiers_warn) + " it is a warning only: the move happens and the warnings are logged." if tiers_warn else ""),
                 "Settings → Governance rules"),
-        control("required_fields", "Fields required before each stage", gate_state,
+        control("required_fields", "Details an agent must have before each stage", gate_state,
                 "Development: " + ", ".join(_label(k) for k in required.get("Development", [])) + ". Testing adds: "
                 + ", ".join(_label(k) for k in required.get("Testing", []) if k not in required.get("Development", []))
                 + ". Production adds: " + ", ".join(_label(k) for k in required.get("Production", []) if k not in required.get("Testing", [])) + ".",
@@ -90,12 +88,6 @@ async def controls(_=Depends(require_read)):
                 "Settings → Approved tools"),
         control("retirement", "Retirement only through checked steps", "enforced",
                 "The stage becomes Deprecated only after 7 days without calls, consumers told and access revoked.", "Built in"),
-        control("assureai", "AssureAI verdict before Production",
-                ("enforced" if tiers_block and not tiers_warn else "recorded") if await tpl.assureai_required() else "off",
-                ("AssureAI is the testing tool linked in Settings → Connectors. An agent with no verdict or a failed one gets a warning before Production, or is refused, as set for its risk level. " + (f"{len(assureai)} AssureAI connector(s) set up."
-                 if assureai else "No AssureAI connector is set up yet, so every agent shows the warning."))
-                if await tpl.assureai_required() else "Not required. The verdict is shown as evidence when recorded.",
-                "Settings → Governance rules"),
         control("audit", "Audit rows cannot be changed or deleted", "enforced" if await _audit_triggers() else "off",
                 "Database triggers refuse any change or deletion of an audit row." if await _audit_triggers()
                 else "The database triggers are missing. Restart the backend to create them.", "Database"),

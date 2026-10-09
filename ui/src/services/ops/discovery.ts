@@ -61,7 +61,7 @@ export interface PhoenixInbox {
   inbox: InboxRow[]
   dismissed: PhoenixProjectRow[]
   registered: RegisteredProjectRow[]
-  // Projects AssureAI creates for its experiment runs: evaluation traffic, not agents.
+  // Projects a testing tool creates for its experiment runs: evaluation traffic, not agents.
   evaluation: PhoenixProjectRow[]
 }
 

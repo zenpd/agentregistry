@@ -749,11 +749,15 @@ async def governance_summary(_=Depends(require_read)):
         agents = (await db.execute(select(Agent).options(selectinload(Agent.governance_reviews))
                                    .where(Agent.lifecycle_stage != "Deprecated"))).scalars().all()
     counts = {"cleared": 0, "blocked": 0, "in_review": 0, "open": 0}
+    positions = {}
     for a in agents:
         need = required.get((a.risk_level or "LOW").upper(), required.get("LOW", []))
-        counts[review_position({r.gate: r.status for r in a.governance_reviews or []}, need)] += 1
+        positions[a.id] = review_position({r.gate: r.status for r in a.governance_reviews or []}, need)
+        counts[positions[a.id]] += 1
     return {"requiredReviews": required, "agents": len(agents), "cleared": counts["cleared"],
-            "blocked": counts["blocked"], "inReview": counts["in_review"]}
+            "blocked": counts["blocked"], "inReview": counts["in_review"], "open": counts["open"],
+            # Which agents each count is made of: cleared | blocked | in_review | open.
+            "positions": positions}
 
 
 @governance_router.get("/exceptions")

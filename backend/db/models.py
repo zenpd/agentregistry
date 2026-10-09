@@ -946,8 +946,8 @@ class AgentRetirement(Base):
 
 
 class EvidenceVerdict(Base):
-    """The verdict of one AssureAI evaluation run recorded against an agent: pass or
-    fail, the run date and a link. No scores are copied."""
+    """Not used: a pass or fail test verdict once recorded against an agent. The table is kept so
+    the migration chain and existing rows stay as they are."""
     __tablename__ = "evidence_verdicts"
     __table_args__ = (UniqueConstraint("agent_id", "run_id", name="uq_evidence_verdicts"),)
 

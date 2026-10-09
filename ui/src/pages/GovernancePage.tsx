@@ -15,6 +15,8 @@ export default function GovernancePage() {
   const [overview, setOverview] = useState<GovernanceOverview | null>(null)
   const [discoveries, setDiscoveries] = useState<Discovery[]>([])
   const [summary, setSummary] = useState<GovernanceSummary | null>(null)
+  // A tile that was clicked: the table then lists only the agents its count is made of.
+  const [only, setOnly] = useState<'cleared' | 'blocked' | 'in_review' | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [running, setRunning] = useState<string | null>(null)
@@ -92,30 +94,33 @@ export default function GovernancePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold gradient-text">Governance</h1>
-        <p className="text-slate-600 mt-0.5">Every agent’s path through the Architecture, Security and Data Protection reviews. Click a status to open that review on the agent’s Governance tab, where it is submitted and decided.</p>
+        <p className="text-slate-600 mt-0.5">Which reviews each agent has passed: architecture, security and data protection. An agent needs the reviews of its risk level before it runs in Production. Click a status to open that review on the agent.</p>
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-4 gap-4">
-        <div className="card p-4">
+        <button type="button" onClick={() => setOnly(only === 'cleared' ? null : 'cleared')} aria-pressed={only === 'cleared'} data-testid="filter-cleared"
+          className={`card p-4 text-left hover:ring-2 hover:ring-zen-200 ${only === 'cleared' ? 'ring-2 ring-zen-400' : ''}`}>
           <div className="text-2xl font-bold text-green-600" data-testid="tile-cleared">{summary?.cleared ?? "—"}</div>
           <div className="text-xs font-medium text-slate-700">Cleared for production</div>
           <div className="text-[12px] text-slate-500 mt-0.5">Every review its risk level requires is approved (with or without conditions)</div>
-        </div>
-        <div className="card p-4">
+        </button>
+        <button type="button" onClick={() => setOnly(only === 'blocked' ? null : 'blocked')} aria-pressed={only === 'blocked'} data-testid="filter-blocked"
+          className={`card p-4 text-left hover:ring-2 hover:ring-zen-200 ${only === 'blocked' ? 'ring-2 ring-zen-400' : ''}`}>
           <div className="text-2xl font-bold text-red-600">{summary?.blocked ?? "—"}</div>
           <div className="text-xs font-medium text-slate-700">Blocked</div>
           <div className="text-[12px] text-slate-500 mt-0.5">Changes requested on a required review</div>
-        </div>
-        <div className="card p-4">
+        </button>
+        <button type="button" onClick={() => setOnly(only === 'in_review' ? null : 'in_review')} aria-pressed={only === 'in_review'} data-testid="filter-in-review"
+          className={`card p-4 text-left hover:ring-2 hover:ring-zen-200 ${only === 'in_review' ? 'ring-2 ring-zen-400' : ''}`}>
           <div className="text-2xl font-bold text-amber-600">{summary?.inReview ?? "—"}</div>
           <div className="text-xs font-medium text-slate-700">In active review</div>
           <div className="text-[12px] text-slate-500 mt-0.5">A required review awaits a decision</div>
-        </div>
+        </button>
         <Link to="/approvals" className="card p-4 block hover:ring-2 hover:ring-zen-200" data-testid="findings-tile">
           <div className="text-2xl font-bold text-orange-600">{pendingDiscs.length}</div>
           <div className="text-xs font-medium text-slate-700 flex items-center">Governance findings <InfoTip term="governance_findings" className="ml-1" /></div>
-          <div className="text-[12px] text-slate-500 mt-0.5">Checks on registered agents, waiting on Approvals</div>
+          <div className="text-[12px] text-slate-500 mt-0.5">Checks on registered agents, waiting on Integration Approval</div>
         </Link>
       </div>
 
@@ -166,6 +171,13 @@ export default function GovernancePage() {
       )}
 
       {/* Review Status Table */}
+      {only && (
+        <p className="text-[13px] text-slate-700" data-testid="filter-note">
+          Showing the {agents.filter(a => summary?.positions[a.id] === only).length} agent{agents.filter(a => summary?.positions[a.id] === only).length === 1 ? '' : 's'} counted as
+          {' '}<b>{only === 'cleared' ? 'cleared for production' : only === 'blocked' ? 'blocked' : 'in active review'}</b>.{' '}
+          <button type="button" className="font-semibold text-zen-700 hover:underline" onClick={() => setOnly(null)}>Show every agent</button>
+        </p>
+      )}
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -177,7 +189,7 @@ export default function GovernancePage() {
             </tr>
           </thead>
           <tbody>
-            {agents.map(a => (
+            {agents.filter(a => !only || summary?.positions[a.id] === only).map(a => (
               <tr key={a.id} className="border-b last:border-0">
                 <td className="p-3 font-medium"><Link to={`/agents/${a.id}?tab=governance`} className="hover:underline">{a.name}</Link></td>
                 <td className="p-3">{a.stage}</td>

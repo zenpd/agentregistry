@@ -196,17 +196,6 @@ def _readiness(state: dict, target: str, now: datetime, mode: str | None = None)
     result = gp.stage_readiness(state["facts"], state["reviews"], target, state["exceptions"],
                                 state["budget_set"], now, mode or template.get("mode"),
                                 gates=template.get("gates"), missing=missing)
-    if target == "Production" and state.get("assureai_required"):
-        verdict = state["facts"].get("assureai")
-        gap = None
-        if verdict is None:
-            gap = gp._warning("assureai_missing", "No AssureAI verdict is recorded. Record the run id of an AssureAI evaluation run.")
-        elif verdict["verdict"] != "pass":
-            gap = gp._warning("assureai_failed", f"The latest AssureAI verdict is fail (run completed {verdict['completedAt'] or 'on an unknown date'}).")
-        if gap:
-            result["warnings"].append(gap)
-            result["ready"] = False
-            result["blocked"] = result["mode"] == "block"
     return result
 
 

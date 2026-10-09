@@ -58,10 +58,10 @@ export default function ApprovalsPage() {
   return (
     <div className="space-y-5 animate-fade-in max-w-5xl">
       <div>
-        <h1 className="text-2xl font-bold gradient-text">Approvals <InfoTip term="approvals_inbox" /></h1>
+        <h1 className="text-2xl font-bold gradient-text">Integration Approval <InfoTip term="approvals_inbox" /></h1>
         <p className="text-slate-600 mt-0.5">
-          Everything waiting for a decision across the registry: requests to use an agent, reviews submitted for a decision,
-          and governance findings on registered agents.
+          Decisions that are waiting for someone: a team asking to use (integrate with) an agent, a review or classification
+          an owner has submitted, and a governance finding on a registered agent.
         </p>
       </div>
 
@@ -142,7 +142,7 @@ export default function ApprovalsPage() {
 
       {show('discoveries') && counts.total > 0 && (
         <QueueSection title="Governance findings" tip="governance_findings" count={counts.discoveries}
-          hint="Checks on registered agents that look off (for example stalled or unreviewed). AI found in Phoenix is on the Discovered page."
+          hint="Checks on registered agents that look off (for example stalled or unreviewed). AI found in Phoenix is on the Discovered Agents page."
           empty="No governance findings waiting." testId="section-discoveries">
           {data.discoveries.map(d => (
             <li key={d.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3" data-testid="discovery-row">

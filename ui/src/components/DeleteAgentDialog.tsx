@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
-import api, { deleteAgent, type Agent } from '../services/api'
-import { can, useMe } from '../lib/me'
+import { deleteAgent, type Agent } from '../services/api'
 import { errorMessage } from '../pages/agent/shared'
 
 // callers: names of other registered agents that call this one.
@@ -11,22 +10,6 @@ export default function DeleteAgentDialog({ agent, callers, onClose, onDeleted }
   const [typed, setTyped] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const me = useMe()
-  // Archiving keeps every record and can be undone in Settings → Archived agents.
-  const [archiving, setArchiving] = useState(false)
-  const [reason, setReason] = useState('')
-
-  async function archive() {
-    setBusy(true)
-    setError(null)
-    try {
-      await api.post(`/agents/${encodeURIComponent(agent.id)}/archive`, { reason: reason.trim() })
-      onDeleted()
-    } catch (e) {
-      setError(errorMessage(e, 'Could not archive the agent'))
-      setBusy(false)
-    }
-  }
 
   const consumers = agent.consumers?.length || 0
   // Anything live or depended on needs the name typed, not a single click.
@@ -86,23 +69,10 @@ export default function DeleteAgentDialog({ agent, callers, onClose, onDeleted }
           </div>
         )}
 
-        {archiving && (
-          <div data-testid="archive-form">
-            <label htmlFor="archive-reason" className="block text-xs font-semibold uppercase text-slate-600 mb-1 tracking-wide">
-              Why it is archived (at least 10 characters)
-            </label>
-            <input id="archive-reason" className="input" value={reason} onChange={e => setReason(e.target.value)} autoComplete="off" />
-            <p className="mt-1 text-xs text-slate-600">It leaves every page, count and job, keeps all its records, and can be brought back in Settings → Archived agents.</p>
-          </div>
-        )}
-
         {error && <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">{error}</div>}
 
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="btn-secondary btn-sm">Cancel</button>
-          {can(me, 'admin') && (archiving
-            ? <button type="button" onClick={archive} disabled={busy || reason.trim().length < 10} className="btn-primary btn-sm" data-testid="archive-confirm">{busy ? 'Archiving…' : 'Archive agent'}</button>
-            : <button type="button" onClick={() => setArchiving(true)} className="btn-secondary btn-sm" data-testid="archive-instead">Archive instead</button>)}
           <button type="button" onClick={remove} disabled={busy || !confirmed} className="btn-danger btn-sm">
             {busy ? 'Deleting…' : 'Delete agent'}
           </button>

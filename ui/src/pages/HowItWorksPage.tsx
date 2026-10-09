@@ -13,12 +13,12 @@ const STATUS: Record<Status, { label: string; className: string }> = {
 
 // An agent's path through the registry, from first registration to reuse.
 const JOURNEY: { title: string; what: string; where: string; to: string; icon: typeof PlusCircle }[] = [
-  { title: 'Register', what: 'Pick a project found in Phoenix, or paste the app’s address, and the form fills itself. Similar agents are shown first, so a team reuses instead of rebuilding.', where: 'Discovered · AI Registry', to: '/discovered', icon: PlusCircle },
+  { title: 'Register', what: 'Pick a project found in Phoenix, or paste the app’s address, and the form fills itself. Similar agents are shown first, so a team reuses instead of rebuilding.', where: 'Discovered Agents · AI Registry', to: '/discovered', icon: PlusCircle },
   { title: 'Contract', what: 'Endpoint, inputs, outputs, SLA and owner — what another team needs to call it.', where: 'Agent → Integrate', to: '/agents', icon: FileText },
-  { title: 'Reviews', what: 'Architecture, Security and Data Protection each decide, with evidence and an expiry date.', where: 'Approvals · agent Governance tab', to: '/approvals', icon: ShieldCheck },
+  { title: 'Reviews', what: 'Architecture, Security and Data Protection each decide, with evidence and an expiry date.', where: 'Integration Approval · agent Governance tab', to: '/approvals', icon: ShieldCheck },
   { title: 'Stage', what: 'Ideation → Development → Testing → Production. Stage rules list what is still missing.', where: 'Agent → Governance', to: '/governance', icon: ClipboardList },
   { title: 'Certified for reuse', what: 'Automatic once it is in Production, every required review is approved and no high or critical risk is open.', where: 'Agent → Integrate', to: '/agents', icon: BadgeCheck },
-  { title: 'Consume', what: 'Teams try it with their own input, then request access. The owner approves.', where: 'Agent → Integrate · Approvals', to: '/approvals', icon: KeyRound },
+  { title: 'Consume', what: 'Teams try it with their own input, then request access. The owner approves.', where: 'Agent → Integrate · Integration Approval', to: '/approvals', icon: KeyRound },
   { title: 'Monitor', what: 'Usage, cost, risk and last-seen activity are kept current by the daily jobs (the scheduler is on unless the installation turned it off).', where: 'Pipelines', to: '/pipelines', icon: LineChart },
   { title: 'Report', what: 'Leaders see value, cost and what is holding value back, per business unit.', where: 'Executive · Business Impact', to: '/business', icon: BarChart3 },
 ]
@@ -37,7 +37,7 @@ const DISCOVERY: { title: string; when: string; steps: string[]; calls: string }
     calls: 'One-way and read-only: the registry asks, Phoenix answers. Nothing is written to Phoenix. About 1 to 4 requests per project.',
   },
   {
-    title: 'Compare with the registry', when: 'Each time the Discovered page opens',
+    title: 'Compare with the registry', when: 'Each time the Discovered Agents page opens',
     steps: [
       'The saved project list is compared with the “Phoenix project” field of every registered agent.',
       'A project that an agent is linked to goes to Registered. One that was dismissed goes to Dismissed. The rest are New.',
@@ -45,7 +45,7 @@ const DISCOVERY: { title: string; when: string; steps: string[]; calls: string }
     calls: 'No request to Phoenix. The page shows what the last scan saved, so it opens fast and works without the VPN.',
   },
   {
-    title: 'Label and tidy', when: 'On the Discovered page',
+    title: 'Label and tidy', when: 'On the Discovered Agents page',
     steps: [
       'Active: steps in the last 7 days. Quiet: seen before, nothing in 7 days. Stale: nothing for 30 days. No calls: Phoenix lists it but it has no traces.',
       'Dismiss hides a project that is not an application and asks for a reason. It stays hidden across scans until someone brings it back.',
@@ -70,7 +70,7 @@ const DISCOVERY: { title: string; when: string; steps: string[]; calls: string }
       'The new agent is linked to its project, so the registry reads that project’s model calls from Phoenix (30 days the first time).',
       'It then fills in what the record is still missing from what it can see: the model really in use, tools and knowledge sources seen in traces, and the contract from the app’s own API description.',
       'It stores daily tokens per model, works out cost from the price list, then runs the risk and governance checks for that agent.',
-      'The Discovered page shows when this is done, with a link to the agent.',
+      'The Discovered Agents page shows when this is done, with a link to the agent.',
     ],
     calls: 'Read-only requests to Phoenix for that one project and to the app itself. Afterwards the daily jobs keep it current (the scheduler is on unless the installation turned it off).',
   },
@@ -89,8 +89,8 @@ const PERSONAS: { who: string; why: string; pages: { label: string; to: string }
   { who: 'Executives', why: 'Portfolio health, value against cost, risk', pages: [{ label: 'Executive', to: '/' }, { label: 'Business Impact', to: '/business' }] },
   { who: 'Business unit owners', why: 'My unit’s agents, outcomes and blockers', pages: [{ label: 'Business Impact', to: '/business' }] },
   { who: 'Builders and product teams', why: 'Find, register, contract and call agents', pages: [{ label: 'AI Registry', to: '/agents' }] },
-  { who: 'Reviewers (Architecture · Security · Data Protection)', why: 'Decide reviews and access requests', pages: [{ label: 'Approvals', to: '/approvals' }, { label: 'Governance', to: '/governance' }] },
-  { who: 'IT and architecture', why: 'Shared systems, dependencies, blast radius', pages: [{ label: 'Platform', to: '/platform' }, { label: 'Dependencies', to: '/dependencies' }] },
+  { who: 'Reviewers (Architecture · Security · Data Protection)', why: 'Decide reviews and access requests', pages: [{ label: 'Integration Approval', to: '/approvals' }, { label: 'Governance', to: '/governance' }] },
+  { who: 'IT and architecture', why: 'Shared systems, dependencies, blast radius', pages: [{ label: 'Platform', to: '/platform' }, { label: 'All Agents Graph', to: '/dependencies' }] },
   { who: 'Admins', why: 'Tracing endpoint, users, rules, connectors, background jobs', pages: [{ label: 'Settings', to: '/settings' }, { label: 'Pipelines', to: '/pipelines' }] },
   { who: 'Finance reviewers', why: 'Attest or adjust the value owners declare, chargeback', pages: [{ label: 'Business Impact', to: '/business' }, { label: 'Programme Health', to: '/programme' }] },
   { who: 'Compliance and auditors', why: 'Control coverage, evidence packs, the decision log, the audit trail', pages: [{ label: 'Compliance', to: '/compliance' }, { label: 'Audit Trail', to: '/audit' }] },
@@ -106,15 +106,15 @@ const COLUMNS: { title: string; sub: string; rows: Row[] }[] = [
       { item: 'Business Impact', detail: 'Per unit: value, cost to run, return, value waiting to go live, missing numbers', status: 'working' },
       { item: 'AI Registry', detail: 'Search by what agents do, reuse status on every card, registration with a duplicate check', status: 'working' },
       { item: 'Agent page', detail: 'Overview, Diagram, Governance, Tokenomics, Revenue & Expenditure, Risk, Integrate', status: 'working' },
-      { item: 'Discovered', detail: 'Phoenix projects that are not registered yet: register one (the form fills from its traces and from the app itself) or dismiss it. Shows which registered agents have gone quiet', status: 'working' },
+      { item: 'Discovered Agents', detail: 'Phoenix projects that are not registered yet: register one (the form fills from its traces and from the app itself) or dismiss it. Shows which registered agents have gone quiet', status: 'working' },
       { item: 'Ask the Registry', detail: 'A question in plain words, answered from the registry with links to the agents concerned', status: 'working' },
-      { item: 'Approvals', detail: 'Access requests, reviews and classifications awaiting a decision (ranked by findings, risk tier and wait, with who can decide and who is away) and governance findings in one inbox, and a Decided history', status: 'working' },
+      { item: 'Integration Approval', detail: 'Access requests, reviews and classifications awaiting a decision (ranked by findings, risk tier and wait, with who can decide and who is away) and governance findings in one inbox, and a Decided history', status: 'working' },
       { item: 'Programme Health', detail: 'Known against discovered agents, owners, review decision time, overdue reviews, reuse by unit, searches that found nothing, chargeback', status: 'working' },
       { item: 'Compliance', detail: 'EU AI Act, ISO/IEC 42001, NIST AI RMF and India DPDP Act controls mapped to the records the registry holds, with the gaps named per agent, evidence exports, the decision log check, the data and retention report and a GRC export', status: 'working' },
       { item: 'Audit Trail', detail: 'Every event, filterable, with CSV export', status: 'working' },
       { item: 'Platform and Dependencies', detail: 'Shared systems, concentration risk, call network and the dependency graph', status: 'working' },
       { item: 'Try it (Agent → Integrate)', detail: 'Calls an agent from the server; finds the real API paths from its openapi.json', status: 'working' },
-      { item: 'Governance findings', detail: 'Checks on agents already registered (stalled, no reviews, shared systems). They are not new AI; some rows in a fresh install are examples', status: 'working' },
+      { item: 'Governance findings', detail: 'What the registry noticed on a registered agent: too long in a stage, no reviews, or in Production with no usage', status: 'working' },
     ],
   },
   {
@@ -151,7 +151,7 @@ const COLUMNS: { title: string; sub: string; rows: Row[] }[] = [
       { item: 'Model prices', detail: 'Per-model token prices and name aliases for cost', status: 'working' },
       { item: 'Declared value', detail: 'Monthly value with its method and basis, entered by each owner and attested or adjusted by a finance reviewer', status: 'working' },
       { item: 'Usage without tracing', detail: 'Daily calls and tokens typed in or imported for agents with no tracing link', status: 'working' },
-      { item: 'Connectors', detail: 'Langfuse (projects and usage), GitHub (repositories that build agents), Azure (model deployments) and AssureAI (the verdict of a recorded evaluation run), read-only, set up in Settings', status: 'setup' },
+      { item: 'Connectors', detail: 'Langfuse (projects and usage), GitHub (repositories that build agents) and Azure (model deployments), read-only, set up in Settings', status: 'setup' },
       { item: 'Azure hosting cost', detail: 'Metered cost per agent, set up and tested in Settings → Cost settings. Until then the owner’s figure or a stage estimate is used', status: 'setup' },
       { item: 'Agent gateway', detail: 'Lets Try it call agents registered with a relative path', status: 'setup' },
     ],
@@ -175,7 +175,6 @@ const KNOWN_LIMITS = [
   'One organisation per installation. Separate tenants are not built.',
   'Compliance packs show which records the registry holds for each control. They are not a statement that the organisation complies, and the default regulatory dates are to be checked against the official texts.',
   'PagerDuty and ServiceNow are not read: an incident is linked by its address or posted to the registry by their automation.',
-  'An AssureAI verdict is read only for a run whose id is recorded, because an AssureAI run key cannot list runs.',
 ]
 
 function Pill({ status }: { status: Status }) {
@@ -256,7 +255,7 @@ export default function HowItWorksPage() {
         </ol>
         <p className="mt-3 text-[12.5px] text-slate-600">
           Discovery only finds applications that send traces to the Phoenix set in Settings. A Phoenix project is not always one application: some are experiments, and one project can hold several agents.
-          See it on the <Link to="/discovered" className="font-semibold text-zen-700 hover:underline">Discovered</Link> page and the job on <Link to="/pipelines" className="font-semibold text-zen-700 hover:underline">Pipelines</Link>.
+          See it on the <Link to="/discovered" className="font-semibold text-zen-700 hover:underline">Discovered Agents</Link> page and the job on <Link to="/pipelines" className="font-semibold text-zen-700 hover:underline">Pipelines</Link>.
         </p>
       </section>
 

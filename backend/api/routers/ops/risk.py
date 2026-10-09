@@ -311,11 +311,20 @@ async def risks_summary(_=Depends(require_read)):
         # disagree with the sum of its parts.
         live_agents = select(Agent.id).scalar_subquery()
         stored = (await db.execute(
-            select(AgentRisk.category, AgentRisk.severity).where(
+            select(AgentRisk.category, AgentRisk.severity, AgentRisk.agent_id).where(
                 AgentRisk.status.in_(lifecycle.ACTIVE_STATUSES), AgentRisk.agent_id.in_(live_agents),
             )
         )).all()
         financial = await portfolio_financial(db)
-    return lifecycle.portfolio_summary(
-        [{"category": c, "severity": s} for c, s in stored] + financial
-    )
+        names = dict((await db.execute(select(Agent.id, Agent.name))).all())
+    # Which agents the stored findings are on, most findings first, with the worst severity of each.
+    order = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    per: dict[str, dict] = {}
+    for _c, sev, aid in stored:
+        row = per.setdefault(aid, {"agentId": aid, "name": names.get(aid, aid), "count": 0, "worst": "LOW"})
+        row["count"] += 1
+        if sev in order and order.index(sev) > order.index(row["worst"]):
+            row["worst"] = sev
+    return {**lifecycle.portfolio_summary([{"category": c, "severity": s} for c, s, _a in stored] + financial),
+            "byAgent": sorted(per.values(), key=lambda r: (-order.index(r["worst"]), -r["count"], r["name"])),
+            "storedFindings": len(stored), "financialFindings": len(financial)}

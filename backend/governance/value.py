@@ -135,5 +135,9 @@ def scenario(rows: Iterable[Mapping[str, Any]], production_infra_cents: int) -> 
                       "infraCents": round(infra), "infraBasis": r.get("infraSource") if r.get("infraSource") in ("metered", "declared") else "estimate"})
     value = sum(i["valueCents"] for i in items)
     cost = sum(i["tokenCents"] + i["infraCents"] for i in items)
+    fixed = [i for i in items if i["infraBasis"] == "estimate"]
     return {"agents": items, "valueCents": value, "costCents": cost, "netCents": value - cost,
+            # What part of the cost is the registry's fixed Production figure, used where no hosting cost is recorded.
+            "fixedHostingCents": production_infra_cents, "fixedHostingAgents": len(fixed),
+            "fixedHostingTotalCents": sum(i["infraCents"] for i in fixed), "tokenCents": sum(i["tokenCents"] for i in items),
             "attestedShare": round(100 * sum(i["valueCents"] for i in items if i["valueState"] in ("attested", "adjusted")) / value) if value else None}

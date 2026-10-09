@@ -433,7 +433,9 @@ async def test_router_scan_list_act_and_summary(client, db):
     summary = (await client.get("/api/v1/governance/risks/summary")).json()
     listing = (await client.get(base)).json()
     assert summary["totalFindings"] == listing["score"]["total"]
-    assert set(summary) == {"totalFindings", "byCategory", "severities", "heatmap"}
+    assert set(summary) == {"totalFindings", "byCategory", "severities", "heatmap", "byAgent", "storedFindings", "financialFindings"}
+    assert sum(r["count"] for r in summary["byAgent"]) == summary["storedFindings"]
+    assert summary["storedFindings"] + summary["financialFindings"] == summary["totalFindings"]
 
     from db.models import AuditLog
     async with db() as s:

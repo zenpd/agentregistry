@@ -25,7 +25,6 @@ REQUIRABLE = ("owner", "dept", "description", "business_outcome", "sla", "phoeni
 @router.get("/governance/settings")
 async def governance_settings(_=Depends(require_read)):
     return {"templates": await tpl.templates(), "requiredFields": await tpl.required_fields(), "stallWeeks": await tpl.stall_weeks(),
-            "assureaiRequired": await tpl.assureai_required(),
             "requirable": [{"key": k, "label": lifecycle.FIELD_LABELS[k]} for k in REQUIRABLE]}
 
 
@@ -33,7 +32,6 @@ class SettingsBody(BaseModel):
     templates: dict | None = None
     requiredFields: dict | None = None
     stallWeeks: dict | None = None
-    assureaiRequired: bool | None = None
 
 
 @router.put("/governance/settings")
@@ -52,8 +50,6 @@ async def update_governance_settings(body: SettingsBody, user=Depends(require_ad
         if any(not isinstance(v, int) or v < 1 for v in body.stallWeeks.values()) or set(body.stallWeeks) - {"Ideation", "Development", "Testing"}:
             raise HTTPException(status_code=422, detail="Stall limits are whole weeks for Ideation, Development and Testing.")
         await ai_meter.set_setting("stage.stall_weeks", body.stallWeeks, user["user_id"])
-    if body.assureaiRequired is not None:
-        await ai_meter.set_setting("evidence.assureai_required", body.assureaiRequired, user["user_id"])
     await log_audit_event(actor=user["user_id"], action="settings.update", entity_type="governance", entity_id="settings",
                           changes={k: v for k, v in body.model_dump().items() if v is not None})
     return await governance_settings()

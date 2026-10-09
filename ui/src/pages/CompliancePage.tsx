@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Download, FileSearch, Link2, ShieldCheck, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, FileSearch, Link2, ShieldCheck, XCircle } from 'lucide-react'
 import {
   checkExport, controlEvidence, dataReportCsv, getDataReport, getPack, getPacks, grcExport, saveBlob, sha256Hex, updatePackDates,
   verifyDecisionLog, type ChainCheck, type ControlRow, type DataRow, type PackSummary,
@@ -37,7 +37,7 @@ export default function CompliancePage() {
     <div className="space-y-5 animate-fade-in max-w-6xl" data-testid="compliance-page">
       <div>
         <h1 className="text-2xl font-bold gradient-text">Compliance <InfoTip term="compliance_pack" /></h1>
-        <p className="text-slate-600 mt-0.5">{packs.meaning} Checked across {packs.agents} agents that are not retired.</p>
+        <p className="text-slate-600 mt-0.5">For each framework below: how many of its controls the registry holds records for, and which agents are missing a record. It is what you show an auditor, not a statement that you comply. {packs.packs.length} framework{packs.packs.length === 1 ? '' : 's'} checked across {packs.agents} agent{packs.agents === 1 ? '' : 's'} that {packs.agents === 1 ? 'is' : 'are'} not retired.</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3" role="tablist" aria-label="Packs">
@@ -57,14 +57,20 @@ export default function CompliancePage() {
             <div>
               <h2 className="font-semibold text-slate-900">{pack.name} <span className="text-[13px] font-normal text-slate-500">({pack.source})</span></h2>
               <p className="text-[13px] text-slate-700" data-testid="pack-summary">{pack.name}: {pack.evidenced} of {pack.total} controls evidenced.</p>
+              {pack.url && <a href={pack.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[13px] font-semibold text-zen-700 hover:underline" data-testid="pack-source">Read the official text <ExternalLink size={12} /></a>}
             </div>
-            <DatesEditor pack={pack} canEdit={can(me, 'admin')} onSaved={load} />
+            <div className="flex items-start gap-3">
+              <DatesEditor pack={pack} canEdit={can(me, 'admin')} onSaved={load} />
+              <button type="button" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-zen-700" data-testid="pack-download"
+                title={`Download the ${pack.name} list: every control, its status and the agents missing evidence (CSV)`} aria-label={`Download the ${pack.name} list as CSV`}
+                onClick={() => downloadPack(pack)}><Download size={16} /></button>
+            </div>
           </div>
           <table className="w-full text-[13px]">
-            <thead><tr className="text-left text-slate-600 border-b"><th className="py-1.5">Control</th><th>Status</th><th>Applies to</th><th>Agents missing evidence</th><th /></tr></thead>
+            <thead><tr className="text-left text-slate-600 border-b"><th className="py-1.5">Control (click one to open it)</th><th>Status</th><th>Applies to</th><th>Agents missing evidence</th></tr></thead>
             <tbody>
               {pack.controls.map(c => (
-                <ControlLine key={c.id} c={c} packKey={pack.key} open={open === c.id} onToggle={() => setOpen(open === c.id ? null : c.id)} />
+                <ControlLine key={c.id} c={c} packKey={pack.key} packName={pack.name} source={pack.source} url={pack.url} open={open === c.id} onToggle={() => setOpen(open === c.id ? null : c.id)} />
               ))}
             </tbody>
           </table>
@@ -113,7 +119,20 @@ function DatesEditor({ pack, canEdit, onSaved }: { pack: PackSummary; canEdit: b
   )
 }
 
-function ControlLine({ c, packKey, open, onToggle }: { c: ControlRow; packKey: string; open: boolean; onToggle: () => void }) {
+// The whole framework as one CSV, built from what the page already shows.
+function downloadPack(pack: PackSummary & { controls: ControlRow[] }) {
+  const q = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`
+  const lines = [['framework', 'source', 'control', 'title', 'status', 'applies to', 'agents in scope', 'agents missing evidence', 'what the registry checks', 'agents missing it'].map(q).join(',')]
+  for (const c of pack.controls) {
+    lines.push([pack.name, pack.source, c.id, c.title, STATUS[c.status].label, c.appliesText, c.agentsInScope, c.agentsMissing,
+      c.outside || c.evidence.join('. '), c.agents.filter(x => x.status === 'missing').map(x => x.name).join('. ')].map(q).join(','))
+  }
+  saveBlob(new Blob([lines.join('\n')], { type: 'text/csv' }), `${pack.key}-controls.csv`)
+}
+
+function ControlLine({ c, packKey, packName, source, url, open, onToggle }: {
+  c: ControlRow; packKey: string; packName: string; source: string; url?: string | null; open: boolean; onToggle: () => void
+}) {
   async function download(format: 'csv' | 'pdf') {
     const r = await controlEvidence(packKey, c.id, format)
     saveBlob(r.data as Blob, `${packKey}-${c.id.replace(/[^A-Za-z0-9]+/g, '-')}.${format}`)
@@ -122,23 +141,33 @@ function ControlLine({ c, packKey, open, onToggle }: { c: ControlRow; packKey: s
   return (
     <>
       <tr className="border-b border-slate-100 align-top" data-testid="control-line">
-        <td className="py-1.5 pr-2"><button type="button" className="text-left hover:text-zen-700" onClick={onToggle}><b>{c.id}</b> {c.title}</button></td>
+        <td className="py-1.5 pr-2"><button type="button" className="flex items-start gap-1 text-left hover:text-zen-700" onClick={onToggle} aria-expanded={open}>
+          {open ? <ChevronDown size={14} className="mt-0.5 shrink-0 text-slate-500" /> : <ChevronRight size={14} className="mt-0.5 shrink-0 text-slate-500" />}
+          <span><b>{c.id}</b> {c.title}</span></button></td>
         <td className="pr-2"><span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-semibold ring-1 ${s.cls}`}>{s.label}</span></td>
         <td className="pr-2 text-slate-600">{c.appliesText} ({c.agentsInScope})</td>
         <td className="pr-2">{c.status === 'missing' ? (c.agentsMissing ? `${c.agentsMissing} of ${c.agentsInScope}` : 'Registry rule off') : '—'}</td>
-        <td className="whitespace-nowrap text-right">
-          <button type="button" className="btn-ghost btn-sm" onClick={() => download('csv')} title="Evidence of this control, per agent">CSV</button>
-          <button type="button" className="btn-ghost btn-sm" onClick={() => download('pdf')}>PDF</button>
-        </td>
       </tr>
       {open && (
         <tr className="border-b border-slate-100 bg-slate-50/60">
-          <td colSpan={5} className="px-3 py-2 text-[12.5px] text-slate-700 space-y-1">
-            {c.outside ? <p>{c.outside}</p> : <p>Evidence required: {c.evidence.join('. ')}.</p>}
+          <td colSpan={4} className="px-3 py-2 text-[12.5px] text-slate-700 space-y-1.5" data-testid="control-detail">
+            <p><b className="text-slate-900">Where it comes from:</b> {packName}, {c.id} "{c.title}" ({source}).{' '}
+              {url && <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 font-semibold text-zen-700 hover:underline">Read the official text <ExternalLink size={11} /></a>}</p>
+            {c.outside
+              ? <p><b className="text-slate-900">Why the registry holds no record for it:</b> {c.outside}</p>
+              : <p><b className="text-slate-900">What the registry checks for it, on each agent:</b> {c.evidence.join('. ')}.</p>}
+            {!c.outside && c.status !== 'not_applicable' && c.agents.every(x => x.status !== 'missing') && c.registryMissing.length === 0 && <p className="text-emerald-700">Every agent it applies to has these records.</p>}
+            {c.agents.some(x => x.status === 'missing') && <p><b className="text-slate-900">Agents missing a record:</b></p>}
             {c.registryMissing.length > 0 && <p className="text-amber-800">Registry rule off: {c.registryMissing.join(', ')} (Settings → Controls).</p>}
             {c.agents.filter(x => x.status === 'missing').map(x => (
               <p key={x.agentId}><Link to={`/agents/${x.agentId}?tab=governance`} className="font-medium text-zen-700 hover:underline">{x.name}</Link>: {x.missing.join('. ')}.</p>
             ))}
+            {!c.outside && (
+              <p className="flex items-center gap-2 pt-0.5 text-slate-600">Evidence of this control, one row per agent:
+                <button type="button" className="inline-flex items-center gap-1 font-semibold text-zen-700 hover:underline" onClick={() => download('csv')}><Download size={12} /> CSV</button>
+                <button type="button" className="inline-flex items-center gap-1 font-semibold text-zen-700 hover:underline" onClick={() => download('pdf')}><Download size={12} /> PDF</button>
+              </p>
+            )}
           </td>
         </tr>
       )}

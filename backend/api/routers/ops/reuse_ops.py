@@ -141,7 +141,8 @@ async def _approval_pairs(db, since: datetime) -> list[dict]:
             submitted[(agent_id, gate)] = at
         elif after in ("Approved", "Approved with Conditions", "Changes Requested") and (agent_id, gate) in submitted:
             if as_utc(at) >= since:
-                pairs.append({"submittedAt": as_utc(submitted.pop((agent_id, gate))), "decidedAt": as_utc(at)})
+                pairs.append({"submittedAt": as_utc(submitted.pop((agent_id, gate))), "decidedAt": as_utc(at),
+                              "agentId": agent_id, "gate": gate, "decision": after})
     return pairs
 
 
@@ -169,7 +170,22 @@ async def programme_health(_=Depends(require_read)):
                 "days": (now.date() - as_utc(g.updated_at).date()).days} for g, a in waiting
                if g.updated_at and (now.date() - as_utc(g.updated_at).date()).days > sla]
     speed = rm.approval_speed(pairs)
+    names = {a.id: a.name for a in agents}
+    gate_names = {"arb": "Architecture Review Board", "security": "Security Review", "dp": "Data Protection Review"}
+    line = lambda a: {"agentId": a.id, "name": a.name, "owner": (a.owner or "").strip() or None}  # noqa: E731
     return {
+        # The rows each score is counted from.
+        "behind": {
+            "notRegistered": {"phoenixProjects": sorted(p.name for p in projects if p.name not in linked)[:100], "connectorFindings": findings},
+            "ownerPerson": [{**line(a), "owner": users[a.owner_user_id].name, "backup": bool(a.backup_owner_user_id)} for a in with_person],
+            "ownerNameOnly": [line(a) for a in named_only],
+            "ownerNone": [line(a) for a in agents if a not in with_person and a not in named_only],
+            "decisions": sorted(({"agentId": p["agentId"], "name": names.get(p["agentId"], "An agent that has since been deleted or retired"), "review": gate_names.get(p["gate"], p["gate"]),
+                                  "decision": p["decision"], "submitted": p["submittedAt"].date().isoformat(), "decided": p["decidedAt"].date().isoformat(),
+                                  "days": (p["decidedAt"].date() - p["submittedAt"].date()).days} for p in pairs), key=lambda x: -x["days"]),
+            "productionAgents": [{"agentId": x["agentId"], "name": x["name"], "teams": x["buildsAvoided"]}
+                                 for x in figures["agents"] if x.get("stage") == "Production"],
+        },
         "known": {"registered": len(agents), "foundNotRegistered": unregistered,
                   "share": round(100 * len(agents) / (len(agents) + unregistered)) if agents or unregistered else None,
                   "text": "Registered agents, against Phoenix projects and connector findings that are not registered yet."},

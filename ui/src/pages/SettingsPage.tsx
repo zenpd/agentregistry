@@ -10,7 +10,6 @@ import ApprovedToolsCard from '../components/ApprovedToolsCard'
 import ControlsCard from '../components/ControlsCard'
 import CostSettingsCard from '../components/CostSettingsCard'
 import DemoAgentsCard from '../components/DemoAgentsCard'
-import ArchivedAgentsCard from '../components/ArchivedAgentsCard'
 import UsersSection from '../components/UsersSection'
 import InfoTip from '../components/InfoTip'
 import { can, useMe } from '../lib/me'
@@ -84,7 +83,7 @@ export default function SettingsPage() {
     <div className="max-w-4xl space-y-4 animate-fade-in">
       <div>
         <h2 className="text-2xl font-bold text-slate-900">Settings</h2>
-        <p className="text-slate-600 mt-0.5">Settings for the whole registry.</p>
+        <p className="text-slate-600 mt-0.5">Rules, connections and people for the whole registry. Your own notices and time away are here too.</p>
       </div>
       {me && !can(me, 'admin') && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900" data-testid="settings-readonly">
@@ -176,8 +175,6 @@ export default function SettingsPage() {
       {can(me, 'admin') && <ConnectorsCard />}
 
       {can(me, 'admin') && <ApiKeysCard />}
-
-      <ArchivedAgentsCard canEdit={can(me, 'admin')} />
 
       <div className="card p-6 text-sm text-slate-700 space-y-2">
         <p>Other options are set at installation (see <code className="font-mono text-zen-700">backend/.env.example</code>).</p>

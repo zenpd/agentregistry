@@ -39,6 +39,10 @@ KIND = "openinference.span.kind"
 # team already sends owner / department / service identity with its traces.
 _IDENTITY_PREFIXES = ("service.", "deployment.", "agent.", "gen_ai.agent", "metadata.", "k8s.", "cloud.", "host.")
 _PLUMBING = ("next_agent", "langgraph", "__start__", "__end__")
+# Attributes a team can set on its spans to say who owns the agent and what it is
+# (the trace-attribute convention). Their VALUES are read: they are metadata the
+# team chose to publish, not prompt or answer text.
+CONVENTION_KEYS = ("agent.owner", "agent.department", "agent.version", "agent.card_url")
 
 
 def _text(value: Any) -> str | None:
@@ -59,6 +63,9 @@ def summarize_spans(spans: Iterable[Mapping]) -> dict:
     retrievers: Counter = Counter()
     kinds: Counter = Counter()
     keys: set[str] = set()
+    services: Counter = Counter()
+    hints: dict[str, Counter] = {k: Counter() for k in CONVENTION_KEYS}
+    errors = 0
     last_seen: datetime | None = None
     count = 0
     for span in spans:
@@ -93,10 +100,20 @@ def summarize_spans(spans: Iterable[Mapping]) -> dict:
         for key in attributes:
             if isinstance(key, str) and key.startswith(_IDENTITY_PREFIXES):
                 keys.add(key)
+        if str(span.get("status_code") or "").upper() == "ERROR":
+            errors += 1
+        if _text(attributes.get("service.name")):
+            services[_text(attributes["service.name"])[:120]] += 1
+        for key in CONVENTION_KEYS:
+            if _text(attributes.get(key)):
+                hints[key][_text(attributes[key])[:200]] += 1
     return {
         "span_count": count, "last_seen": last_seen, "models": _top(models), "tools": _top(tools),
         "mcp_servers": _top(mcp), "agent_names": _top(agents), "retrievers": _top(retrievers), "span_kinds": _top(kinds),
         "attribute_keys": sorted(keys)[:30],
+        "error_count": errors, "service_names": _top(services, 5),
+        # The most frequent value of each convention attribute (agent.owner, ...).
+        "hints": {k: c.most_common(1)[0][0] for k, c in hints.items() if c},
     }
 
 
@@ -112,6 +129,7 @@ def _slim(span: Mapping) -> dict:
     attributes = span.get("attributes") or {}
     return {
         "name": span.get("name"), "span_kind": span.get("span_kind"), "start_time": span.get("start_time"),
+        "status_code": span.get("status_code"),
         "attributes": {k: v for k, v in attributes.items()
                        if isinstance(k, str) and (k in _KEPT_ATTRIBUTES or k.startswith(_IDENTITY_PREFIXES))},
     }
@@ -198,6 +216,7 @@ async def discover_phoenix(agent_id: str | None = None, trigger: str = "manual",
                 row.models, row.tools, row.mcp_servers = s["models"], s["tools"], s["mcp_servers"]
                 row.agent_names, row.span_kinds, row.attribute_keys = s["agent_names"], s["span_kinds"], s["attribute_keys"]
                 row.retrievers = s["retrievers"]
+                row.error_count, row.service_names, row.hints = s["error_count"], s["service_names"], s["hints"]
                 row.scan_error = None
             else:
                 row.scan_error = errors.get(name, "Not read")

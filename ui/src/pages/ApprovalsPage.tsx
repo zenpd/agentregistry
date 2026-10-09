@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ArrowRight, BadgeCheck, CheckCircle2, KeyRound, Radar, ShieldAlert, ShieldCheck,
+  ArrowRight, BadgeCheck, CheckCircle2, Clock, History, KeyRound, Radar, ShieldAlert, ShieldCheck,
 } from 'lucide-react'
-import { APPROVALS_CHANGED, getApprovals, type ApprovalAccessRequest, type Approvals } from '../services/ops/approvals'
+import {
+  APPROVALS_CHANGED, getApprovalHistory, getApprovals, type ApprovalAccessRequest, type ApprovalReview, type Approvals, type DecisionRow,
+} from '../services/ops/approvals'
 import { decideAccess } from '../services/ops/integrate'
+import { dismissDiscovery } from '../services/api'
 import InfoTip from '../components/InfoTip'
 import type { GlossaryKey } from '../lib/glossary'
 import { STAGE_PILL, errorMessage } from './agent/shared'
@@ -19,7 +22,7 @@ function fmtDate(iso: string | null): string {
 function waiting(iso: string | null): string {
   if (!iso) return ''
   const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
-  return days <= 0 ? 'today' : days === 1 ? 'waiting 1 day' : `waiting ${days} days`
+  return days <= 0 ? 'requested today' : days === 1 ? 'waiting 1 day' : `waiting ${days} days`
 }
 
 // Everything waiting for a decision across the registry. Access requests are
@@ -28,6 +31,7 @@ export default function ApprovalsPage() {
   const [data, setData] = useState<Approvals | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [queue, setQueue] = useState<Queue>('all')
+  const [view, setView] = useState<'waiting' | 'decided'>('waiting')
 
   const load = useCallback(async () => {
     try {
@@ -56,18 +60,30 @@ export default function ApprovalsPage() {
       <div>
         <h1 className="text-2xl font-bold gradient-text">Approvals <InfoTip term="approvals_inbox" /></h1>
         <p className="text-slate-600 mt-0.5">
-          Everything waiting for a decision across the registry — who may use an agent, governance reviews in
-          progress, and AI found running without being registered.
+          Everything waiting for a decision across the registry: requests to use an agent, reviews submitted for a decision,
+          and governance findings on registered agents.
         </p>
       </div>
 
+      <div className="inline-flex rounded-full bg-slate-100 p-1" role="tablist" aria-label="Waiting or decided">
+        {([['waiting', 'Waiting for a decision'], ['decided', 'Decided']] as const).map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)} data-testid={`view-${k}`}
+            className={`rounded-full px-4 py-1.5 text-[13px] font-semibold ${view === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'decided' && <DecidedList />}
+
+      {view === 'waiting' && <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4" role="tablist" aria-label="Approval queues">
         <QueueTile active={queue === 'access'} onClick={() => setQueue(queue === 'access' ? 'all' : 'access')}
           icon={<KeyRound size={20} />} tone="indigo" count={counts.accessRequests}
           label="Access requests" sub="Teams waiting to use an agent" testId="queue-access" />
         <QueueTile active={queue === 'reviews'} onClick={() => setQueue(queue === 'reviews' ? 'all' : 'reviews')}
-          icon={<ShieldCheck size={20} />} tone="amber" count={counts.reviews}
-          label="Reviews awaiting decision" sub="Governance gates in review" testId="queue-reviews" />
+          icon={<ShieldCheck size={20} />} tone="amber" count={counts.reviews + counts.classifications}
+          label="Reviews awaiting decision" sub="Reviews and classifications" testId="queue-reviews" />
         <QueueTile active={queue === 'discoveries'} onClick={() => setQueue(queue === 'discoveries' ? 'all' : 'discoveries')}
           icon={<Radar size={20} />} tone="orange" count={counts.discoveries}
           label="Governance findings" sub="Checks on registered agents" testId="queue-discoveries" />
@@ -97,26 +113,27 @@ export default function ApprovalsPage() {
       )}
 
       {show('reviews') && counts.total > 0 && (
-        <QueueSection title="Reviews awaiting decision" tip="gate" count={counts.reviews}
-          hint="Governance gates the owner has submitted. The reviewer decides on the agent's Governance tab, where the evidence and checklist are."
+        <QueueSection title="Reviews awaiting decision" tip="gate" count={counts.reviews + counts.classifications}
+          hint={`Reviews the owner has submitted, in this order: open critical findings first, then open high findings, then risk level (high first), then the longest wait. A review is overdue after ${data.reviews[0]?.slaDays ?? 5} days. The reviewer decides on the agent's Governance tab, where the evidence and checklist are.`}
           empty="No reviews waiting." testId="section-reviews">
-          {data.reviews.map(g => (
-            <li key={`${g.agentId}-${g.gate}`} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3" data-testid="review-row">
-              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-600"><ShieldAlert size={18} /></div>
+          {data.reviews.map(g => <ReviewRow key={`${g.agentId}-${g.gate}`} g={g} />)}
+          {data.classifications.map(c => (
+            <li key={c.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-violet-200 bg-white px-4 py-3" data-testid="classification-row">
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-violet-50 text-violet-600"><ShieldCheck size={18} /></div>
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-slate-900">{g.gateLabel}</span>
+                  <span className="font-semibold text-slate-900">Classification</span>
                   <span className="text-slate-500">·</span>
-                  <Link to={`/agents/${g.agentId}`} className="font-medium text-slate-700 hover:text-zen-700">{g.agentName}</Link>
-                  <span className={STAGE_PILL[g.agentStage] || 'status-pending'}>{g.agentStage}</span>
+                  <Link to={`/agents/${c.agentId}`} className="font-medium text-slate-700 hover:text-zen-700">{c.agentName}</Link>
                 </div>
                 <div className="mt-0.5 text-[13px] text-slate-600">
-                  Decided by {g.reviewerRole || 'the reviewer'}{g.reviewer ? ` (${g.reviewer})` : ''} · in review {waiting(g.since).replace('waiting ', 'for ')}
+                  Proposed {c.category}, risk level {c.riskLevel}, by {c.proposedBy || 'the owner'} ·{' '}
+                  {c.daysWaiting ? `waiting ${c.daysWaiting} day${c.daysWaiting === 1 ? '' : 's'}` : 'since today'}. Needs confirmation from an Architect Steward, Data Protection Officer or Registry Admin.
                 </div>
               </div>
-              <Link to={`/agents/${g.agentId}?tab=governance`}
+              <Link to={`/agents/${c.agentId}?tab=governance`}
                 className="inline-flex items-center gap-1 rounded-full border border-zen-200 bg-zen-50 px-3 py-1.5 text-[13px] font-semibold text-zen-700 hover:bg-zen-100">
-                Open review <ArrowRight size={14} />
+                Open classification <ArrowRight size={14} />
               </Link>
             </li>
           ))}
@@ -125,7 +142,7 @@ export default function ApprovalsPage() {
 
       {show('discoveries') && counts.total > 0 && (
         <QueueSection title="Governance findings" tip="governance_findings" count={counts.discoveries}
-          hint="Checks on registered agents that look off (for example stalled or unreviewed). Act on them or dismiss them on the Governance page. AI found in Phoenix is on the Discovered page."
+          hint="Checks on registered agents that look off (for example stalled or unreviewed). AI found in Phoenix is on the Discovered page."
           empty="No governance findings waiting." testId="section-discoveries">
           {data.discoveries.map(d => (
             <li key={d.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3" data-testid="discovery-row">
@@ -135,22 +152,129 @@ export default function ApprovalsPage() {
                   <span className="font-semibold text-slate-900">{d.suspectedName}</span>
                   <span className={`rounded-full px-2 py-0.5 text-[12px] font-bold ring-1 ${
                     d.confidence >= 85 ? 'bg-rose-50 text-rose-700 ring-rose-200' : d.confidence >= 70 ? 'bg-amber-50 text-amber-700 ring-amber-200' : 'bg-slate-100 text-slate-700 ring-slate-200'
-                  }`}>{d.confidence}% confidence</span>
+                  }`}>{d.confidence}% sure this needs action</span>
                 </div>
                 <div className="mt-0.5 text-[13px] text-slate-600">
-                  {d.suspectedDept || 'Unknown unit'} · found via {d.source} · first seen {fmtDate(d.firstSeen)}
+                  {d.suspectedDept || 'No business unit'} · raised by {d.source} · first raised {fmtDate(d.firstSeen)}
                 </div>
                 {d.signal && <p className="mt-1 text-[13px] text-slate-700">{d.signal}</p>}
               </div>
-              <Link to="/governance"
-                className="inline-flex items-center gap-1 rounded-full border border-zen-200 bg-zen-50 px-3 py-1.5 text-[13px] font-semibold text-zen-700 hover:bg-zen-100">
-                Register or dismiss <ArrowRight size={14} />
-              </Link>
+              <div className="flex items-center gap-2">
+                {d.agentId && (
+                  <Link to={`/agents/${d.agentId}?tab=governance`} data-testid="finding-open"
+                    className="inline-flex items-center gap-1 rounded-full border border-zen-200 bg-zen-50 px-3 py-1.5 text-[13px] font-semibold text-zen-700 hover:bg-zen-100">
+                    Open the agent <ArrowRight size={14} />
+                  </Link>
+                )}
+                <button type="button" className="btn-secondary btn-sm" data-testid="finding-dismiss"
+                  onClick={async () => { try { await dismissDiscovery(d.id); await load() } catch (e) { setError(errorMessage(e, 'The finding was not dismissed')) } }}>
+                  Dismiss
+                </button>
+              </div>
             </li>
           ))}
         </QueueSection>
       )}
+      </>}
     </div>
+  )
+}
+
+const TIER_PILL: Record<string, string> = {
+  HIGH: 'bg-rose-50 text-rose-700 ring-rose-200',
+  MEDIUM: 'bg-amber-50 text-amber-700 ring-amber-200',
+  LOW: 'bg-slate-100 text-slate-700 ring-slate-200',
+}
+
+function ReviewRow({ g }: { g: ApprovalReview }) {
+  const days = g.daysWaiting
+  const waited = days === null ? '' : days <= 0 ? 'in review since today' : `in review for ${days} day${days === 1 ? '' : 's'}`
+  const nobody = g.deciders.available.length === 0
+  return (
+    <li className={`flex flex-wrap items-start gap-3 rounded-xl border bg-white px-4 py-3 ${g.overdue ? 'border-rose-200' : 'border-slate-200'}`} data-testid="review-row">
+      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-600"><ShieldAlert size={18} /></div>
+      <div className="flex-1 min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold text-slate-900">{g.gateLabel}</span>
+          <span className="text-slate-500">·</span>
+          <Link to={`/agents/${g.agentId}`} className="font-medium text-slate-700 hover:text-zen-700">{g.agentName}</Link>
+          <span className={STAGE_PILL[g.agentStage] || 'status-pending'}>{g.agentStage}</span>
+          <span className={`rounded-full px-2 py-0.5 text-[12px] font-bold ring-1 ${TIER_PILL[g.riskTier] || TIER_PILL.LOW}`}>{g.riskTier} risk tier</span>
+          {g.criticalFindings > 0 && (
+            <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[12px] font-bold text-white" data-testid="critical-findings">
+              {g.criticalFindings} open critical finding{g.criticalFindings === 1 ? '' : 's'}
+            </span>
+          )}
+          {g.highFindings > 0 && (
+            <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[12px] font-bold text-rose-700 ring-1 ring-rose-200">
+              {g.highFindings} open high finding{g.highFindings === 1 ? '' : 's'}
+            </span>
+          )}
+          {g.overdue && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[12px] font-bold text-rose-700 ring-1 ring-rose-200" data-testid="overdue">
+              <Clock size={12} /> Overdue: more than {g.slaDays} days
+            </span>
+          )}
+        </div>
+        <div className="mt-0.5 text-[13px] text-slate-600">
+          To be decided by {g.reviewerRole || 'the reviewer'}{g.reviewer ? ` (${g.reviewer})` : ''} · {waited}
+        </div>
+        <div className="mt-0.5 text-[13px] text-slate-600" data-testid="deciders">
+          {nobody
+            ? <span className="text-rose-700">No {g.reviewerRole || 'reviewer'} is available. A Registry Admin can decide.</span>
+            : <>Can decide now: {g.deciders.available.join(', ')}</>}
+          {g.deciders.away.map(a => (
+            <span key={a.name} className="ml-2 text-amber-800">
+              · {a.name} is away until {fmtDate(a.until)}{a.deputy ? `, deputy ${a.deputy}` : ', no deputy set'}
+            </span>
+          ))}
+        </div>
+      </div>
+      <Link to={`/agents/${g.agentId}?tab=governance`}
+        className="inline-flex items-center gap-1 rounded-full border border-zen-200 bg-zen-50 px-3 py-1.5 text-[13px] font-semibold text-zen-700 hover:bg-zen-100">
+        Open review <ArrowRight size={14} />
+      </Link>
+    </li>
+  )
+}
+
+// Decisions already made, newest first, from the audit trail.
+function DecidedList() {
+  const [rows, setRows] = useState<DecisionRow[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    getApprovalHistory(100).then(r => setRows(r.data.rows)).catch(e => setError(errorMessage(e, 'Could not load decisions')))
+  }, [])
+  if (error) return <p className="text-sm text-rose-700">{error}</p>
+  if (!rows) return <p className="text-sm text-slate-600">Loading…</p>
+  return (
+    <section className="rounded-2xl border border-slate-200/80 bg-slate-50/60 p-5 shadow-sm" data-testid="section-decided">
+      <div className="flex items-center gap-2">
+        <History size={16} className="text-slate-600" />
+        <h2 className="text-[16px] font-extrabold text-slate-900">Decided</h2>
+        <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[12px] font-bold text-slate-700">{rows.length}</span>
+      </div>
+      <p className="mt-0.5 text-[13px] text-slate-600">
+        Gate decisions, access decisions, waivers and stage changes, newest first: the last 100. The Audit Trail page has every event.
+      </p>
+      {rows.length === 0
+        ? <p className="mt-3 text-sm text-slate-600">No decisions recorded yet.</p>
+        : (
+          <ul className="mt-3 divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
+            {rows.map((r, i) => (
+              <li key={i} className="flex flex-wrap items-start gap-x-3 gap-y-0.5 px-4 py-2.5 text-[13px]" data-testid="decided-row">
+                <span className="w-36 shrink-0 text-slate-500">{r.at ? new Date(r.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+                <span className="w-32 shrink-0 font-medium text-slate-800">{r.actor}</span>
+                <span className="w-40 shrink-0 font-semibold text-slate-900">{r.action}</span>
+                <span className="flex-1 min-w-[200px] text-slate-700">
+                  {r.agentId && r.agentName && <Link to={`/agents/${r.agentId}`} className="font-medium text-zen-700 hover:underline">{r.agentName}</Link>}
+                  {r.agentName && r.summary ? ': ' : ''}{r.summary}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+    </section>
   )
 }
 

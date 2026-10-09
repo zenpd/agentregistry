@@ -19,12 +19,31 @@ export interface PhoenixProjectRow {
   scanError: string | null
   dismissReason: string | null
   scannedAt: string | null
+  errorCount: number
+  errorShare: number | null
+  serviceNames: string[]
+  // Values of the trace-attribute convention found on the spans (agent.owner, agent.department, agent.version, agent.card_url).
+  hints: Record<string, string>
+  assigneeUserId: string | null
+  dueDate: string | null
+  triageNote: string | null
+}
+
+export interface ProjectMatch { agentId: string; name: string; owner: string | null; linkedProject: string | null; confidence: 'high' | 'medium' | 'low'; reason: string }
+export interface InboxRow extends PhoenixProjectRow {
+  matches: ProjectMatch[]
+  ownerGuess: { value: string; confidence: 'high' | 'medium' | 'low'; reason: string } | null
+  hygiene: { code: string; text: string }[]
+  assigneeName: string | null
+  overdue: boolean
 }
 
 export interface RegisteredProjectRow extends PhoenixProjectRow {
   agentId: string
   agentName: string
   stage: string
+  // Other records linked to the same project (usually the same app registered twice).
+  sharedWith: { id: string; name: string }[]
 }
 
 export interface PhoenixInbox {
@@ -36,12 +55,14 @@ export interface PhoenixInbox {
   lastScan: JobRun | null
   windowDays: number
   staleDays: number
-  summary: { new: number; newActive: number; dismissed: number; registered: number; quiet: number }
+  summary: { new: number; newActive: number; dismissed: number; registered: number; quiet: number; evaluation: number; assigned: number; overdue: number }
   // Spans read per project; a count at this number means "at least".
   sampleCap: number
-  inbox: PhoenixProjectRow[]
+  inbox: InboxRow[]
   dismissed: PhoenixProjectRow[]
   registered: RegisteredProjectRow[]
+  // Projects AssureAI creates for its experiment runs: evaluation traffic, not agents.
+  evaluation: PhoenixProjectRow[]
 }
 
 // Starting values for the registration form, each with where it came from.
@@ -88,3 +109,12 @@ export const restoreProject = (name: string) => api.post('/discovery/phoenix/res
 export const getPhoenixPrefill = (name: string) => api.get<PhoenixPrefill>('/discovery/phoenix/prefill', { params: { name } })
 export const findApp = (name: string) => api.post<FoundApp>('/discovery/phoenix/find-app', { name })
 export const prefillFromUrl = (url: string) => api.post<UrlPrefill>('/agents/prefill-url', { url })
+
+export const triageProject = (name: string, body: { assigneeUserId?: string | null; dueDate?: string | null; note?: string | null }) =>
+  api.put(`/discovery/phoenix/${encodeURIComponent(name)}/triage`, body)
+export const mergeProject = (name: string, agentId: string) =>
+  api.post<{ agentId: string; agentName: string; phoenixProject: string }>(`/discovery/phoenix/${encodeURIComponent(name)}/merge`, { agentId })
+export const splitProject = (agentId: string) =>
+  api.post<{ agentId: string; unlinkedProject: string }>(`/agents/${encodeURIComponent(agentId)}/phoenix/split`)
+export const projectLinks = (name: string, exclude = '') =>
+  api.get<{ project: string; agents: { id: string; name: string; stage: string }[] }>(`/discovery/phoenix/${encodeURIComponent(name)}/links`, { params: { exclude } })

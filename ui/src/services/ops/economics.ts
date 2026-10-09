@@ -3,7 +3,8 @@ import api from '../api'
 // Revenue & Expenditure tab (backend: api/routers/ops/economics.py).
 // Every cost carries its source; an unknown figure is null, never 0.
 
-export type TokenSource = 'phoenix' | 'seed' | 'none'
+// manual: usage typed in or imported for an agent without tracing.
+export type TokenSource = 'phoenix' | 'langfuse' | 'manual' | 'seed' | 'none'
 export type InfraSource = 'metered' | 'declared' | 'estimate'
 export type TokenStatus = 'measured' | 'demo' | 'no_calls' | 'awaiting_ingestion' | 'no_usage_data'
 export type EfficiencyRating =
@@ -50,8 +51,14 @@ export interface AgentEconomicsDetail {
   hoursSavedMonthly: number
   hourlyRate: number
   period: { month: string; start: string; end: string; daysElapsed: number; daysInPeriod: number; basis: 'run_rate' }
+  // The value used: attested or adjusted by finance when checked, else the owner's figure.
   valueCents: number
   valueDeclared: boolean
+  valueState: 'none' | 'declared' | 'attested' | 'adjusted' | 'stale'
+  valueStateLabel: string
+  valueDeclaredCents: number
+  valueMethod: string | null
+  valueMethodLabel: string | null
   realizedValueCents: number
   tokenCostCents: number | null
   tokenSource: TokenSource
@@ -186,7 +193,16 @@ export interface InfraCostStatus {
   lastRun: JobRunSummary | null
   requiredRole: string
   setup: string[]
+  // settings: saved in Settings → Cost settings; environment: from the backend environment.
+  configSource?: 'settings' | 'environment'
+  tenantId?: string | null
+  clientId?: string | null
+  secretSet?: boolean
 }
+
+export const saveInfraCostConfig = (body: { tenantId: string; clientId: string; clientSecret?: string; scope: string; tagKey: string }) =>
+  api.put<InfraCostStatus>('/infra-costs/config', body)
+export const testInfraCostConfig = () => api.post<{ ok: boolean; status: string; message: string; rows?: number }>('/infra-costs/test')
 
 export const getInfraCostStatus = () => api.get<InfraCostStatus>('/infra-costs/status')
 

@@ -43,6 +43,7 @@ def review_to_dict(review: Any) -> dict:
         "checklist": review.checklist or {},
         "reviewed_at": gp.as_utc(review.reviewed_at),
         "expires_at": gp.as_utc(review.expires_at),
+        "approved_snapshot": getattr(review, "approved_snapshot", None),
     }
 
 
@@ -50,7 +51,9 @@ def exception_to_dict(exc: GovernanceException) -> dict:
     return {
         "id": exc.id, "gate": exc.gate, "reason": exc.reason,
         "expires_at": gp.as_utc(exc.expires_at), "approved_by": exc.approved_by,
-        "created_at": gp.as_utc(exc.created_at),
+        "created_at": gp.as_utc(exc.created_at), "status": exc.status,
+        "first_signer": exc.first_signer, "second_signer": exc.second_signer,
+        "second_signed_at": gp.as_utc(exc.second_signed_at),
     }
 
 
@@ -124,9 +127,11 @@ async def load_state(db: AsyncSession, agent: Agent, now: datetime) -> dict:
     priced = await priced_usage(db, agent.id, since=now.date() - timedelta(days=days))
     usage = gp.usage_summary(priced["rows"], priced["source"], days) if agent.phoenix_project else None
 
-    exceptions = [exception_to_dict(e) for e in (await db.execute(
+    all_exceptions = [exception_to_dict(e) for e in (await db.execute(
         select(GovernanceException).where(GovernanceException.agent_id == agent.id)
     )).scalars().all()]
+    exceptions = [e for e in all_exceptions if e["status"] in (None, "active")]
+    pending_waivers = [e for e in all_exceptions if e["status"] == "pending"]
     budget = (await db.execute(
         select(AgentBudget.monthly_budget_cents).where(AgentBudget.agent_id == agent.id)
     )).scalar_one_or_none()
@@ -152,7 +157,31 @@ async def load_state(db: AsyncSession, agent: Agent, now: datetime) -> dict:
         "auto_filled": await _auto_filled(db, agent),
         "validity_days": gp.validity_days(risk_tier, settings),
     }
+    from governance import lifecycle, templates as tpl
+
+    template = (await tpl.templates())[risk_tier if risk_tier in lifecycle.TIERS else "HIGH"]
+    since = await stage_since(db, agent)
+    weeks = lifecycle.weeks_in_stage(since, now)
+    facts["validity_days"] = template["validityDays"]
+    facts["trace_connector_id"] = agent.trace_connector_id
+    facts["value_amount"] = agent.value_amount
+    facts["capabilities"], facts["inputs"], facts["outputs"] = agent.capabilities or [], agent.inputs or [], agent.outputs or []
+    facts["budget"] = bool(budget and budget > 0)
+    facts["classification_detail"] = await _classification_detail(db, agent.id)
+    facts["classification"] = facts["classification_detail"] is not None
+    facts["reviews"] = any((r.status or "Not Submitted") != "Not Submitted" for r in agent.governance_reviews or [])
+    from api.routers.ops.evidence import latest as latest_verdict
+
+    verdict = await latest_verdict(db, agent.id)
+    facts["assureai"] = {"verdict": verdict.verdict, "completedAt": gp.as_utc(verdict.completed_at).date().isoformat()
+                         if verdict.completed_at else None} if verdict else None
     return {
+        "assureai_required": await tpl.assureai_required(),
+        "stage_since": since, "weeks_in_stage": weeks,
+        "stalled": lifecycle.stalled(agent.lifecycle_stage, weeks, await tpl.stall_weeks()),
+        "pendingWaivers": gp.unexpired_exceptions(pending_waivers, now),
+        "template": template,
+        "required": await tpl.required_fields(),
         "facts": facts,
         "reviews": {r.gate: review_to_dict(r) for r in agent.governance_reviews or [] if r.gate in gp.GATES},
         "exceptions": gp.unexpired_exceptions(exceptions, now),
@@ -163,6 +192,36 @@ async def load_state(db: AsyncSession, agent: Agent, now: datetime) -> dict:
         # 'seed' = demo rows only; they are never used as governance evidence.
         "usage_source": "phoenix" if usage else ("seed" if priced["source"] == "seed" else "none"),
     }
+
+
+async def stage_since(db: AsyncSession, agent: Agent) -> datetime | None:
+    """When the agent entered its current stage: the latest recorded move into it, else its registration."""
+    rows = (await db.execute(select(AuditLog.created_at, AuditLog.changes).where(
+        AuditLog.entity_type == "agent", AuditLog.entity_id == agent.id, AuditLog.action == "stage_change",
+    ).order_by(AuditLog.created_at.desc()))).all()
+    for at, changes in rows:
+        if isinstance(changes, dict) and changes.get("to") == agent.lifecycle_stage:
+            return gp.as_utc(at)
+    return gp.as_utc(agent.created_at)
+
+
+async def _classification_confirmed(db: AsyncSession, agent_id: str) -> bool:
+    """A person confirmed this agent's classification (item 27)."""
+    return await _classification_detail(db, agent_id) is not None
+
+
+async def _classification_detail(db: AsyncSession, agent_id: str) -> dict | None:
+    """The latest confirmed classification: category, risk level, who and when."""
+    from db.models import ClassificationRecord, User
+
+    row = (await db.execute(select(ClassificationRecord).where(
+        ClassificationRecord.agent_id == agent_id, ClassificationRecord.status == "confirmed",
+    ).order_by(ClassificationRecord.confirmed_at.desc()).limit(1))).scalar_one_or_none()
+    if row is None:
+        return None
+    who = await db.get(User, row.confirmed_by) if row.confirmed_by else None
+    return {"category": row.category, "riskLevel": row.risk_level, "by": (who.name if who else row.confirmed_by) or "unknown",
+            "on": gp.as_utc(row.confirmed_at).date().isoformat() if row.confirmed_at else "unknown date"}
 
 
 def recertification(state: dict, now: datetime) -> dict:
@@ -180,13 +239,36 @@ async def run_governance_checks(agent_id: str | None = None, trigger: str = "man
         if agent_id and not agents:
             return {"status": "error", "reason": f"Agent {agent_id} not found"}
 
-        results = []
+        from governance import lifecycle
+
+        results, reopened = [], []
         for agent in agents:
             state = await load_state(db, agent, now)
             gates = {gate: gp.gate_expiry_state(state["reviews"].get(gate), now) for gate in gp.GATES}
+            if state.get("weeks_in_stage") is not None and agent.time_in_stage_weeks != state["weeks_in_stage"]:
+                agent.time_in_stage_weeks = state["weeks_in_stage"]
+            # An approval stops covering a record whose model, tools or systems changed since:
+            # the gates the change touches go back to In Review, saying what changed.
+            record = {k: getattr(agent, k) for k in lifecycle.STRUCTURAL}
+            for review in agent.governance_reviews or []:
+                if review.status not in gp.APPROVED_STATUSES or not review.approved_snapshot:
+                    continue
+                changes = lifecycle.changed_since(review.approved_snapshot, record)
+                if changes and review.gate in lifecycle.affected_gates(changes):
+                    what = lifecycle.describe(changes)
+                    before = review.status
+                    review.status, review.expires_at = "In Review", None
+                    review.notes = (f"Reopened by the registry on {now.date().isoformat()}: changed since the approval: {what}."
+                                    + (f"\n\n{review.notes}" if review.notes else ""))
+                    db.add(AuditLog(org_id="org-default", actor="system", action="gate_update", entity_type="agent",
+                                    entity_id=agent.id, changes={"gate": review.gate, "path": "registry", "source": "changed_since_approval",
+                                                                 "before": {"status": before}, "after": {"status": "In Review"},
+                                                                 "changed": [c["field"] for c in changes]}))
+                    reopened.append({"agentId": agent.id, "name": agent.name, "gate": review.gate, "what": what})
             results.append({
                 "agentId": agent.id, "name": agent.name, "stage": agent.lifecycle_stage,
                 "gates": gates, "recertification": recertification(state, now),
+                "weeksInStage": state.get("weeks_in_stage"), "stalled": state.get("stalled", False),
             })
 
     def with_state(state_name: str) -> list[dict]:
@@ -200,5 +282,7 @@ async def run_governance_checks(agent_id: str | None = None, trigger: str = "man
         "expired": with_state("expired"),
         "expiring": with_state("expiring"),
         "recertificationDue": [r["agentId"] for r in results if r["recertification"]["due"]],
+        "reopened": reopened,
+        "stalled": [{"agentId": r["agentId"], "name": r["name"], "stage": r["stage"], "weeks": r["weeksInStage"]} for r in results if r["stalled"]],
         "agents": results,
     }

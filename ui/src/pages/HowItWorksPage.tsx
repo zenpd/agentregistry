@@ -17,9 +17,9 @@ const JOURNEY: { title: string; what: string; where: string; to: string; icon: t
   { title: 'Contract', what: 'Endpoint, inputs, outputs, SLA and owner — what another team needs to call it.', where: 'Agent → Integrate', to: '/agents', icon: FileText },
   { title: 'Reviews', what: 'Architecture, Security and Data Protection each decide, with evidence and an expiry date.', where: 'Approvals · agent Governance tab', to: '/approvals', icon: ShieldCheck },
   { title: 'Stage', what: 'Ideation → Development → Testing → Production. Stage rules list what is still missing.', where: 'Agent → Governance', to: '/governance', icon: ClipboardList },
-  { title: 'Certified for reuse', what: 'Automatic once it is in Production, every review is approved and no high risk is open.', where: 'Agent → Integrate', to: '/agents', icon: BadgeCheck },
-  { title: 'Consume', what: 'Teams try it with their own input, then request access. The owner approves.', where: 'Playground · Approvals', to: '/approvals', icon: KeyRound },
-  { title: 'Monitor', what: 'Usage, cost, risk and last-seen activity are kept current by the daily pipeline, once the scheduler is on.', where: 'Pipelines', to: '/pipelines', icon: LineChart },
+  { title: 'Certified for reuse', what: 'Automatic once it is in Production, every required review is approved and no high or critical risk is open.', where: 'Agent → Integrate', to: '/agents', icon: BadgeCheck },
+  { title: 'Consume', what: 'Teams try it with their own input, then request access. The owner approves.', where: 'Agent → Integrate · Approvals', to: '/approvals', icon: KeyRound },
+  { title: 'Monitor', what: 'Usage, cost, risk and last-seen activity are kept current by the daily jobs (the scheduler is on unless the installation turned it off).', where: 'Pipelines', to: '/pipelines', icon: LineChart },
   { title: 'Report', what: 'Leaders see value, cost and what is holding value back, per business unit.', where: 'Executive · Business Impact', to: '/business', icon: BarChart3 },
 ]
 
@@ -72,7 +72,7 @@ const DISCOVERY: { title: string; when: string; steps: string[]; calls: string }
       'It stores daily tokens per model, works out cost from the price list, then runs the risk and governance checks for that agent.',
       'The Discovered page shows when this is done, with a link to the agent.',
     ],
-    calls: 'Read-only requests to Phoenix for that one project and to the app itself. Afterwards the daily jobs keep it current, when the scheduler is on.',
+    calls: 'Read-only requests to Phoenix for that one project and to the app itself. Afterwards the daily jobs keep it current (the scheduler is on unless the installation turned it off).',
   },
 ]
 
@@ -88,26 +88,32 @@ const INSIGHT_STEPS: { title: string; text: string }[] = [
 const PERSONAS: { who: string; why: string; pages: { label: string; to: string }[] }[] = [
   { who: 'Executives', why: 'Portfolio health, value against cost, risk', pages: [{ label: 'Executive', to: '/' }, { label: 'Business Impact', to: '/business' }] },
   { who: 'Business unit owners', why: 'My unit’s agents, outcomes and blockers', pages: [{ label: 'Business Impact', to: '/business' }] },
-  { who: 'Builders and product teams', why: 'Find, register, contract and call agents', pages: [{ label: 'AI Registry', to: '/agents' }, { label: 'Playground', to: '/playground' }] },
-  { who: 'Reviewers (ARB · Security · DPO)', why: 'Decide reviews and access requests', pages: [{ label: 'Approvals', to: '/approvals' }, { label: 'Governance', to: '/governance' }] },
+  { who: 'Builders and product teams', why: 'Find, register, contract and call agents', pages: [{ label: 'AI Registry', to: '/agents' }] },
+  { who: 'Reviewers (Architecture · Security · Data Protection)', why: 'Decide reviews and access requests', pages: [{ label: 'Approvals', to: '/approvals' }, { label: 'Governance', to: '/governance' }] },
   { who: 'IT and architecture', why: 'Shared systems, dependencies, blast radius', pages: [{ label: 'Platform', to: '/platform' }, { label: 'Dependencies', to: '/dependencies' }] },
-  { who: 'Admins', why: 'Tracing endpoint, users, background jobs', pages: [{ label: 'Settings', to: '/settings' }, { label: 'Pipelines', to: '/pipelines' }] },
+  { who: 'Admins', why: 'Tracing endpoint, users, rules, connectors, background jobs', pages: [{ label: 'Settings', to: '/settings' }, { label: 'Pipelines', to: '/pipelines' }] },
+  { who: 'Finance reviewers', why: 'Attest or adjust the value owners declare, chargeback', pages: [{ label: 'Business Impact', to: '/business' }, { label: 'Programme Health', to: '/programme' }] },
+  { who: 'Compliance and auditors', why: 'Control coverage, evidence packs, the decision log, the audit trail', pages: [{ label: 'Compliance', to: '/compliance' }, { label: 'Audit Trail', to: '/audit' }] },
+  { who: 'Programme leads', why: 'Known agents, owners, review speed, reuse, searches that found nothing', pages: [{ label: 'Programme Health', to: '/programme' }] },
 ]
 
 type Row = { item: string; detail: string; status: Status }
 const COLUMNS: { title: string; sub: string; rows: Row[] }[] = [
   {
-    title: 'Screens', sub: 'React + Vite + Tailwind',
+    title: 'Screens', sub: 'What you see in the browser',
     rows: [
-      { item: 'Executive overview', detail: 'Totals, revenue against expenditure, risk by category, pipeline, value by unit', status: 'working' },
+      { item: 'Executive overview', detail: 'Totals, value against cost, risk by category, pipeline, value by unit', status: 'working' },
       { item: 'Business Impact', detail: 'Per unit: value, cost to run, return, value waiting to go live, missing numbers', status: 'working' },
       { item: 'AI Registry', detail: 'Search by what agents do, reuse status on every card, registration with a duplicate check', status: 'working' },
       { item: 'Agent page', detail: 'Overview, Diagram, Governance, Tokenomics, Revenue & Expenditure, Risk, Integrate', status: 'working' },
       { item: 'Discovered', detail: 'Phoenix projects that are not registered yet: register one (the form fills from its traces and from the app itself) or dismiss it. Shows which registered agents have gone quiet', status: 'working' },
       { item: 'Ask the Registry', detail: 'A question in plain words, answered from the registry with links to the agents concerned', status: 'working' },
-      { item: 'Approvals', detail: 'Access requests, reviews awaiting a decision and governance findings in one inbox', status: 'working' },
+      { item: 'Approvals', detail: 'Access requests, reviews and classifications awaiting a decision (ranked by findings, risk tier and wait, with who can decide and who is away) and governance findings in one inbox, and a Decided history', status: 'working' },
+      { item: 'Programme Health', detail: 'Known against discovered agents, owners, review decision time, overdue reviews, reuse by unit, searches that found nothing, chargeback', status: 'working' },
+      { item: 'Compliance', detail: 'EU AI Act, ISO/IEC 42001, NIST AI RMF and India DPDP Act controls mapped to the records the registry holds, with the gaps named per agent, evidence exports, the decision log check, the data and retention report and a GRC export', status: 'working' },
+      { item: 'Audit Trail', detail: 'Every event, filterable, with CSV export', status: 'working' },
       { item: 'Platform and Dependencies', detail: 'Shared systems, concentration risk, call network and the dependency graph', status: 'working' },
-      { item: 'Try it and Playground', detail: 'Calls an agent from the server; finds the real API paths from its openapi.json', status: 'working' },
+      { item: 'Try it (Agent → Integrate)', detail: 'Calls an agent from the server; finds the real API paths from its openapi.json', status: 'working' },
       { item: 'Governance findings', detail: 'Checks on agents already registered (stalled, no reviews, shared systems). They are not new AI; some rows in a fresh install are examples', status: 'working' },
     ],
   },
@@ -115,40 +121,61 @@ const COLUMNS: { title: string; sub: string; rows: Row[] }[] = [
     title: 'Server', sub: 'FastAPI + async SQLAlchemy',
     rows: [
       { item: 'Registry and contract APIs', detail: 'Agents, contracts, access requests, users', status: 'working' },
-      { item: 'Governance', detail: 'Three reviews with evidence and expiry, stage rules (warn mode), recertification', status: 'working' },
+      { item: 'Governance', detail: 'Three reviews with evidence and expiry, rules per risk tier (which reviews, how long an approval lasts, warn or block), required fields per stage, a change after approval reopens the affected reviews, waivers with two signers', status: 'working' },
+      { item: 'Classification', detail: 'Questions on purpose, people affected, data and decisions give a suggested EU AI Act category and risk level with reasons. A decider confirms it. The approved tool list raises the risk level of agents that use high-risk tools', status: 'working' },
+      { item: 'Lifecycle', detail: 'Owner and backup owner, away periods with a deputy, versions with a changelog, retirement in checked steps, incidents with stop requests', status: 'working' },
+      { item: 'Decision log', detail: 'Every decision is sealed in a hash chain right after it is saved, so a changed or removed decision is found', status: 'working' },
+      { item: 'Value and cost', detail: 'Value declared with a method and attested or adjusted by finance, measured outcomes and cost per outcome, the same tokens priced at other models, idle and duplicate spend, the Production scenario, a scorecard PDF', status: 'working' },
       { item: 'Reuse certification', detail: 'Worked out from stage, reviews and risk — never stored, so it cannot go stale', status: 'working' },
       { item: 'Risk engine', detail: 'Six categories; findings with a lifecycle (open, acknowledged, mitigating, accepted, resolved)', status: 'working' },
-      { item: 'Background jobs', detail: 'Phoenix discovery, usage, record auto-fill, cost roll-up, risk scan, governance checks and the AI insights refresh, with a run log', status: 'working' },
+      { item: 'Background jobs', detail: 'Phoenix discovery, connector scan, usage, who calls each agent, record auto-fill, Azure cost, cost roll-up, spend review, risk scan, governance checks, the AI insights refresh and daily notifications, with a run log', status: 'working' },
       { item: 'Records fill themselves', detail: 'The registry fills in or corrects eight fields from real usage, traces and the app’s own API description: model, tools, knowledge bases, API address, description, capabilities, inputs, outputs. Each change is logged with the old value and can be undone. It never sets an owner, value, budget, review or stage', status: 'working' },
       { item: 'Register from an address', detail: 'Reads the app’s agent card, OpenAPI document and health check to fill the form; each field shows its source', status: 'working' },
-      { item: 'Daily scheduler', detail: 'Runs the daily jobs by itself, including the Phoenix scan. On in this environment; a new install has it off until SCHEDULER_ENABLED=true is set', status: 'working' },
+      { item: 'Daily scheduler', detail: 'Runs the daily jobs by itself, including the Phoenix scan and the daily notifications. On by default (SCHEDULER_ENABLED=false turns it off)', status: 'working' },
       { item: 'Insight agents (LangGraph)', detail: 'AI agents that read the registry’s own figures through read-only tools and explain them. One card at the bottom of every agent tab: agent brief, how it works and record against reality, review pack, cost root cause, value against cost, risks explained, similar agents by meaning. Also a registration coach, an evidence reader and Ask the Registry. Every point rests on a named record; the insight agents themselves change nothing. Not yet checked against human-labelled test sets', status: 'working' },
       { item: 'Insights write themselves', detail: 'A summary is written the first time a tab is opened, rewritten once a day for agents with real traces, and rewritten when the record changes. “Check again” does it on request', status: 'working' },
       { item: 'Trace content audit', detail: 'Reads a sample of an agent’s real questions and answers to judge quality, personal data and failures. Off for every agent until its owner switches it on; the text is not stored', status: 'setup' },
       { item: 'AI assistance', detail: 'Drafts review notes and context summaries (Azure OpenAI)', status: 'working' },
-      { item: 'Role-based access', detail: 'Roles are recorded; today every signed-in user can do everything', status: 'prototype' },
+      { item: 'Role-based access', detail: 'Eight roles, enforced on every action. A Finance Reviewer attests value, an Auditor has read-only access until an end date with every request logged. Each review gate is decided by its own role (Architect Steward, Security Reviewer, Data Protection Officer) or a Registry Admin, and the signed-in person is recorded as the reviewer', status: 'working' },
+      { item: 'Audit trail', detail: 'Every change, decision and automatic action, filterable by person, action, record and date, with CSV export. Audit rows cannot be changed or deleted, even in the database', status: 'working' },
+      { item: 'Notifications', detail: 'A daily message to each person about what waits for them, and an immediate notice to admins when a scheduled job fails. Always in the in-app inbox (the bell); e-mail and a Teams channel once configured', status: 'working' },
+      { item: 'Demo agents', detail: 'The seeded example agents are labelled Demo and shown on every page, so a first look has agents and graphs. Settings → Demo agents hides them (the choice is kept per browser) and lists archived agents, which are left out everywhere but kept and can be brought back. DEMO_AGENTS_ENABLED=false in the backend environment turns them off for the whole installation', status: 'working' },
     ],
   },
   {
     title: 'Data and connections', sub: 'Where the numbers come from',
     rows: [
-      { item: 'Registry database', detail: 'Agents, reviews, risks, usage, runs (SQLite locally)', status: 'working' },
+      { item: 'Registry database', detail: 'Agents, reviews, risks, usage, runs. SQLite locally; the migrations also build the full schema on PostgreSQL (checked on PostgreSQL 18)', status: 'working' },
+      { item: 'E-mail and Teams', detail: 'Delivery of notifications outside the app. Needs SMTP_HOST and SMTP_FROM, or TEAMS_WEBHOOK_URL', status: 'setup' },
       { item: 'Phoenix traces', detail: 'Finds projects, token usage, trajectories and risk signals, read-only; reachable over the VPN. Needs the address and a key in Settings', status: 'working' },
       { item: 'Model prices', detail: 'Per-model token prices and name aliases for cost', status: 'working' },
-      { item: 'Declared value', detail: 'Monthly value and hours saved, entered by each owner', status: 'working' },
-      { item: 'Azure hosting cost', detail: 'Metered cost per agent; until set up, the owner’s figure or a stage estimate is used', status: 'setup' },
+      { item: 'Declared value', detail: 'Monthly value with its method and basis, entered by each owner and attested or adjusted by a finance reviewer', status: 'working' },
+      { item: 'Usage without tracing', detail: 'Daily calls and tokens typed in or imported for agents with no tracing link', status: 'working' },
+      { item: 'Connectors', detail: 'Langfuse (projects and usage), GitHub (repositories that build agents), Azure (model deployments) and AssureAI (the verdict of a recorded evaluation run), read-only, set up in Settings', status: 'setup' },
+      { item: 'Azure hosting cost', detail: 'Metered cost per agent, set up and tested in Settings → Cost settings. Until then the owner’s figure or a stage estimate is used', status: 'setup' },
       { item: 'Agent gateway', detail: 'Lets Try it call agents registered with a relative path', status: 'setup' },
     ],
   },
 ]
 
 const NEXT = [
-  'Enforce reviewer roles (ARB chair, CISO, DPO) once role-based access is switched on',
-  'Turn the daily scheduler on in the deployed environment',
-  'Discovery beyond Phoenix: Azure, AWS and Google Cloud accounts, code repositories, other trace tools and SaaS agent platforms',
-  'Matching the same agent across sources, with a confidence level for each finding',
-  'Measured business outcomes alongside the value owners declare',
+  'Discovery in AWS and Google Cloud accounts and SaaS agent platforms',
+  'Reading incident status from PagerDuty and ServiceNow directly',
+  'Single sign-on through the company directory',
   'Prototype parity: live ticker, hours reclaimed and units adopting on Executive',
+]
+
+// What the product does not do yet, stated plainly for anyone deploying it.
+const KNOWN_LIMITS = [
+  'Sign-in uses local accounts. Single sign-on through a company directory is not built.',
+  'Rate limits and the Try it limiter are kept in the memory of one server process, so they multiply when the backend runs as several replicas.',
+  'The registry records who may use an agent, but issues no key to call the agent and cannot stop a call: an API gateway does that.',
+  'Phoenix is read over the VPN. When it does not answer, trace-based numbers stay at their last stored values and the pages say so.',
+  'The insight agents have not been checked against human-labelled test sets.',
+  'One organisation per installation. Separate tenants are not built.',
+  'Compliance packs show which records the registry holds for each control. They are not a statement that the organisation complies, and the default regulatory dates are to be checked against the official texts.',
+  'PagerDuty and ServiceNow are not read: an incident is linked by its address or posted to the registry by their automation.',
+  'An AssureAI verdict is read only for a run whose id is recorded, because an AssureAI run key cannot list runs.',
 ]
 
 function Pill({ status }: { status: Status }) {
@@ -304,6 +331,17 @@ export default function HowItWorksPage() {
           {NEXT.map(n => (
             <li key={n} className="flex items-start gap-2 text-[13.5px] text-slate-700">
               <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" aria-hidden />{n}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="card p-5" data-testid="known-limits">
+        <SectionTitle title="Known limits" sub="What this build does not do." />
+        <ul className="space-y-1.5">
+          {KNOWN_LIMITS.map(n => (
+            <li key={n} className="flex items-start gap-2 text-[13.5px] text-slate-700">
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />{n}
             </li>
           ))}
         </ul>

@@ -27,6 +27,8 @@ _ALLOWED_ATTRS = frozenset({
     "embedding.invocation_parameters",
     "agent.name",
     "gen_ai.agent.name",
+    "consumer.team",
+    "caller.team",
 })
 
 _GEN_AI_OPERATION_KIND = {
@@ -187,6 +189,64 @@ def observed_from_spans(spans: Iterable[Mapping[str, Any]]) -> dict[str, list[di
               for name, count in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0].lower()))]
         for key, counter in counters.items()
     }
+
+
+def tool_calls(spans: Iterable[Mapping[str, Any]]) -> list[dict]:
+    """[{tool, server, count}] for every tool call span, grouped by tool and MCP server."""
+    counter: Counter = Counter()
+    for span in spans:
+        attrs = span.get("attributes") or {}
+        if not isinstance(attrs, Mapping):
+            attrs = {}
+        kind = _kind(span, attrs)
+        tool = (_text(_attr(attrs, "tool.name")) or _text(_attr(attrs, "gen_ai.tool.name"))
+                or _text(_attr(attrs, "mcp.tool")) or (_text(span.get("name")) if kind == "TOOL" else None))
+        if tool:
+            counter[(tool, _text(_attr(attrs, "mcp.server")))] += 1
+    return [{"tool": t, "server": srv, "count": n} for (t, srv), n in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0][0].lower()))]
+
+
+CONSUMER_ATTRS = ("consumer.team", "caller.team")
+
+
+def callers(spans: Iterable[Mapping[str, Any]]) -> list[dict]:
+    """[{caller, calls, firstSeen, lastSeen}] for spans whose caller names its team with
+    the span attribute consumer.team (or caller.team). Each trace counts once."""
+    seen: dict[str, dict] = {}
+    traces: set[tuple[str, str]] = set()
+    for span in spans:
+        attrs = span.get("attributes") or {}
+        if not isinstance(attrs, Mapping):
+            continue
+        team = next((t for t in (_text(_attr(attrs, k)) for k in CONSUMER_ATTRS) if t), None)
+        if not team:
+            continue
+        trace = ((span.get("context") or {}).get("trace_id")) or id(span)
+        if (team, str(trace)) in traces:
+            continue
+        traces.add((team, str(trace)))
+        at = _parse_ts(span.get("start_time"))
+        row = seen.setdefault(team, {"caller": team, "calls": 0, "firstSeen": None, "lastSeen": None})
+        row["calls"] += 1
+        if at:
+            row["firstSeen"] = min(filter(None, (row["firstSeen"], at)))
+            row["lastSeen"] = max(filter(None, (row["lastSeen"], at)))
+    return sorted(seen.values(), key=lambda r: -r["calls"])
+
+
+def approved_call_share(calls: list[Mapping[str, Any]], approved_names: Iterable[str]) -> dict:
+    """Share of tool calls whose tool or MCP server is in approved_names (names compared
+    ignoring capitals and extra spaces). {total, approved, share, notApproved: [{name, count}]}."""
+    norm = lambda v: " ".join(str(v).split()).lower()  # noqa: E731
+    names = {norm(n) for n in approved_names if str(n).strip()}
+    total = sum(c["count"] for c in calls)
+    ok = sum(c["count"] for c in calls if norm(c["tool"]) in names or (c.get("server") and norm(c["server"]) in names))
+    missing: Counter = Counter()
+    for c in calls:
+        if not (norm(c["tool"]) in names or (c.get("server") and norm(c["server"]) in names)):
+            missing[c["tool"] + (f" (MCP server {c['server']})" if c.get("server") else "")] += c["count"]
+    return {"total": total, "approved": ok, "share": round(100 * ok / total) if total else None,
+            "notApproved": [{"name": k, "count": v} for k, v in missing.most_common()]}
 
 
 # Node kinds a lineage diagram draws — deliberately narrower than the full

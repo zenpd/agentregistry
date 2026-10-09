@@ -173,10 +173,17 @@ async def build_graph(db: AsyncSession, org_id: str | None = None) -> dict[str, 
             },
         })
 
+    # Registered agents this request does not show (archived, or demo agents the viewer
+    # hid): a call to one is left out, never drawn as unregistered shadow AI.
+    from db.scope import hidden_agent_ids
+    hidden = await hidden_agent_ids(db)
+
     def ensure_ref_node(ref: str) -> str | None:
         """Map a free-text reference to a registered agent node, else an external node."""
         if ref in agent_ids:
             return ref
+        if ref in hidden:
+            return None
         ext_id = _node_id("ext", ref)
         add_node({"id": ext_id, "name": ref, "kind": "external", "attrs": {"ref": ref}})
         return ext_id

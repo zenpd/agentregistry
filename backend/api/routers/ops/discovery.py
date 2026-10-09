@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -24,8 +24,8 @@ from sqlalchemy import select
 from api.auth import require_read, require_update
 from api.routers.ops import integrate
 from db.base import get_db_session
-from db.models import Agent, PhoenixConfig, PhoenixProject
-from governance import reuse
+from db.models import Agent, PhoenixConfig, PhoenixProject, User
+from governance import identity, reuse
 from orchestrations import job_runner
 from orchestrations.phoenix_discovery import ORG_ID
 from orchestrations.risk_scan import as_utc
@@ -56,7 +56,12 @@ def _activity(last_seen: datetime | None, window_days: int, stale_days: int, now
 
 
 def _row(r: PhoenixProject, activity: str) -> dict:
+    spans = r.span_count or 0
     return {
+        "errorCount": r.error_count or 0, "serviceNames": r.service_names or [], "hints": r.hints or {},
+        "errorShare": round((r.error_count or 0) / spans, 3) if spans else None,
+        "assigneeUserId": r.assignee_user_id, "dueDate": r.due_date.isoformat() if r.due_date else None,
+        "triageNote": r.triage_note,
         "name": r.name, "state": r.state, "activity": activity,
         "lastSeen": as_utc(r.last_seen).isoformat() if r.last_seen else None,
         "spanCount": r.span_count or 0, "windowDays": r.window_days,
@@ -88,16 +93,36 @@ async def phoenix_inbox(_=Depends(require_read)):
         if (a.phoenix_project or "").strip():
             by_project.setdefault(a.phoenix_project.strip(), []).append(a)
 
-    inbox, dismissed, registered = [], [], []
+    async with get_db_session() as db:
+        every = list((await db.execute(select(Agent))).scalars())
+        people = dict((await db.execute(select(User.id, User.name))).all())
+    candidates = [{"id": a.id, "slug": a.slug, "name": a.name, "owner": a.owner, "apiEndpoint": a.api_endpoint,
+                   "phoenixProject": a.phoenix_project, "modelName": a.model_name, "mcpServers": a.mcp_servers or []}
+                  for a in every]
+    today = now.date()
+    inbox, dismissed, registered, evaluation = [], [], [], []
     for r in sorted(rows, key=lambda x: (as_utc(x.last_seen) or datetime.min.replace(tzinfo=timezone.utc)), reverse=True):
         act = _activity(r.last_seen, settings.discovery_window_days, settings.discovery_stale_days, now)
+        row = _row(r, act)
         if r.name in by_project:
-            for a in by_project[r.name]:
-                registered.append({**_row(r, act), "agentId": a.id, "agentName": a.name, "stage": a.lifecycle_stage})
+            linked = by_project[r.name]
+            for a in linked:
+                registered.append({**row, "agentId": a.id, "agentName": a.name, "stage": a.lifecycle_stage,
+                                   "sharedWith": [{"id": o.id, "name": o.name} for o in linked if o.id != a.id]})
+        elif identity.is_evaluation_project(r.name):
+            evaluation.append(row)
         elif r.state == "dismissed":
-            dismissed.append(_row(r, act))
+            dismissed.append(row)
         else:
-            inbox.append(_row(r, act))
+            found = identity.matches(row, [c for c in candidates if c["phoenixProject"] != r.name])
+            hygiene = identity.hygiene(row)
+            if r.name == settings.phoenix_project_name:
+                hygiene.insert(0, {"code": "registry_itself", "text": "These are the registry's own traces (its insight agents). "
+                                                                      "Register it only if you want the registry listed as an agent; otherwise dismiss it."})
+            inbox.append({**row, "matches": found, "ownerGuess": identity.owner_guess(row, found[0] if found else None),
+                          "hygiene": hygiene,
+                          "assigneeName": people.get(r.assignee_user_id) if r.assignee_user_id else None,
+                          "overdue": bool(r.due_date and r.due_date < today)})
     return {
         "configured": bool(base_url),
         "scanning": _scan_running() or (last_scan is not None and last_scan["status"] == "running"),
@@ -106,12 +131,13 @@ async def phoenix_inbox(_=Depends(require_read)):
         "lastScan": last_scan,
         "windowDays": settings.discovery_window_days, "staleDays": settings.discovery_stale_days,
         "summary": {
-            "new": len(inbox), "dismissed": len(dismissed), "registered": len(registered),
+            "new": len(inbox), "dismissed": len(dismissed), "registered": len(registered), "evaluation": len(evaluation),
+            "assigned": len([x for x in inbox if x["assigneeUserId"]]), "overdue": len([x for x in inbox if x["overdue"]]),
             "newActive": len([x for x in inbox if x["activity"] == "active"]),
             "quiet": len([x for x in registered if x["activity"] != "active"]),
         },
         "sampleCap": settings.discovery_span_pages * 100,
-        "inbox": inbox, "dismissed": dismissed, "registered": registered,
+        "inbox": inbox, "dismissed": dismissed, "registered": registered, "evaluation": evaluation,
     }
 
 
@@ -192,8 +218,9 @@ def _norm(value: str) -> str:
 @router.get("/discovery/phoenix/prefill")
 async def phoenix_prefill(name: str, _=Depends(require_read)):
     """The registration form's starting values for one Phoenix project, each
-    with where it came from. Only what the traces actually say: no guesses
-    for owner, department or outcome."""
+    with where it came from. Only what the traces actually say: owner,
+    department and version come only from the trace-attribute convention
+    (agent.owner, agent.department, agent.version) when the team set them."""
     async with get_db_session() as db:
         row = await _project_or_404(db, name)
         agents = list((await db.execute(select(Agent.id, Agent.name, Agent.slug))).all())
@@ -220,8 +247,23 @@ async def phoenix_prefill(name: str, _=Depends(require_read)):
     kinds = set(row.span_kinds or [])
     if "AGENT" in kinds or row.agent_names:
         fields["ai_type"], sources["ai_type"] = "Autonomous Agent", f"{evidence} (agent spans present)"
+    hints = row.hints or {}
+    missing = ["owner", "department", "business outcome", "value"]
+    if hints.get("agent.owner"):
+        fields["owner"], sources["owner"] = hints["agent.owner"], f"{evidence} (agent.owner on the spans)"
+        missing.remove("owner")
+    if hints.get("agent.department"):
+        async with get_db_session() as db:
+            from db.models import Department
+            depts = {d.name.lower(): d.id for d in (await db.execute(select(Department))).scalars()}
+        dept = depts.get(hints["agent.department"].strip().lower())
+        if dept:
+            fields["dept"], sources["dept"] = dept, f"{evidence} (agent.department on the spans)"
+            missing.remove("department")
+    if hints.get("agent.version"):
+        fields["version"], sources["version"] = hints["agent.version"], f"{evidence} (agent.version on the spans)"
     return {"project": row.name, "fields": fields, "sources": sources,
-            "missing": ["owner", "department", "business outcome", "value"],
+            "missing": missing,
             "attributeKeys": row.attribute_keys or [],
             "canFindApp": bool(config and config.app_url_template)}
 
@@ -436,3 +478,82 @@ async def find_app(body: FindAppBody, user=Depends(require_update)):
             result["sources"]["api_endpoint"] = note
             return {**result, "found": True, "guessed": True, "tried": tried}
     return {"ok": False, "found": False, "reason": "no_answer", "tried": tried}
+
+
+
+# ── Candidate triage: assign, merge into a record, split from a record ─────
+
+class TriageBody(BaseModel):
+    assigneeUserId: Optional[str] = Field(None, max_length=64)
+    dueDate: Optional[date] = None
+    note: Optional[str] = Field(None, max_length=1000)
+
+
+@router.put("/discovery/phoenix/{name}/triage")
+async def triage_project(name: str, body: TriageBody, user=Depends(require_update)):
+    """Who looks at this candidate and by when. Unset fields stay as they are; an empty assignee clears it."""
+    updates = body.model_dump(exclude_unset=True)
+    async with get_db_session() as db:
+        row = await _project_or_404(db, name)
+        if "assigneeUserId" in updates:
+            uid = updates["assigneeUserId"] or None
+            if uid and (await db.get(User, uid)) is None:
+                raise HTTPException(status_code=422, detail="Unknown person")
+            row.assignee_user_id = uid
+        if "dueDate" in updates:
+            row.due_date = updates["dueDate"]
+        if "note" in updates:
+            row.triage_note = (updates["note"] or "").strip() or None
+        result = {"name": name, "assigneeUserId": row.assignee_user_id,
+                  "dueDate": row.due_date.isoformat() if row.due_date else None, "note": row.triage_note}
+    await log_audit_event(actor=user["user_id"], action="discovery.triage", entity_type="phoenix_project",
+                          entity_id=name[:64], changes={k: str(v) for k, v in updates.items()})
+    return result
+
+
+class MergeBody(BaseModel):
+    agentId: str = Field(..., max_length=64)
+
+
+@router.post("/discovery/phoenix/{name}/merge")
+async def merge_project(name: str, body: MergeBody, user=Depends(require_update)):
+    """This project is that registered agent: link them. The record's other fields do not change;
+    the next refresh fills in what the traces show."""
+    async with get_db_session() as db:
+        await _project_or_404(db, name)
+        agent = await db.get(Agent, body.agentId)
+        if agent is None:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        if agent.phoenix_project and agent.phoenix_project != name:
+            raise HTTPException(status_code=409, detail=(
+                f"{agent.name} is already linked to the project {agent.phoenix_project}. "
+                "Split it from that project first, or register this one as its own agent."))
+        agent.phoenix_project = name
+        agent_name = agent.name
+    await log_audit_event(actor=user["user_id"], action="discovery.merge", entity_type="agent", entity_id=body.agentId,
+                          changes={"phoenixProject": name})
+    return {"agentId": body.agentId, "agentName": agent_name, "phoenixProject": name}
+
+
+@router.post("/agents/{agent_id}/phoenix/split")
+async def split_project(agent_id: str, user=Depends(require_update)):
+    """This agent is not that project after all: unlink it. The project goes back to the Discovered inbox."""
+    async with get_db_session() as db:
+        agent = await db.get(Agent, agent_id)
+        if agent is None:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        project = agent.phoenix_project
+        if not project:
+            raise HTTPException(status_code=409, detail="This agent is not linked to a project.")
+        agent.phoenix_project = None
+    await log_audit_event(actor=user["user_id"], action="discovery.split", entity_type="agent", entity_id=agent_id,
+                          changes={"phoenixProject": project})
+    return {"agentId": agent_id, "unlinkedProject": project}
+
+
+@router.get("/discovery/phoenix/{name}/links")
+async def project_links(name: str, exclude: str = "", _=Depends(require_read)):
+    """Registered agents already linked to this project (the registration form warns when there are any)."""
+    async with get_db_session() as db:
+        rows = (await db.execute(select(Agent.id, Agent.name, Agent.lifecycle_stage).where(Agent.phoenix_project == name))).all()
+    return {"project": name, "agents": [{"id": i, "name": n, "stage": st} for i, n, st in rows if i != exclude]}

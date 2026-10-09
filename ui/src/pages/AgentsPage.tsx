@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { BadgeCheck, Pencil, Trash2 } from 'lucide-react'
 import { getAgents, getTaxonomy, type RegistryAgent, type Taxonomy } from '../services/api'
 import OnboardingModal from '../components/OnboardingModal'
+import ImportModal from '../components/ImportModal'
+import { can, notAllowed, useMe } from '../lib/me'
 import EditAgentModal from '../components/EditAgentModal'
 import DeleteAgentDialog from '../components/DeleteAgentDialog'
 import { fmtCostPerCall } from './agent/shared'
@@ -48,6 +50,7 @@ function CostPerCall({ agent }: { agent: RegistryAgent }) {
 }
 
 export default function AgentsPage() {
+  const me = useMe()
   const navigate = useNavigate()
   const [agents, setAgents] = useState<RegistryAgent[]>([])
   const [taxonomy, setTaxonomy] = useState<Taxonomy | null>(null)
@@ -62,6 +65,7 @@ export default function AgentsPage() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [editing, setEditing] = useState<RegistryAgent | null>(null)
   const [deleting, setDeleting] = useState<RegistryAgent | null>(null)
+  const [importing, setImporting] = useState(false)
 
   async function fetchData() {
     try {
@@ -108,9 +112,13 @@ export default function AgentsPage() {
     <div className="space-y-4 animate-fade-in">
       <div className="page-header">
         <h1 className="text-2xl font-bold gradient-text">AI Registry</h1>
-        <button onClick={() => setShowOnboarding(true)} className="btn-primary">
-          + Register new AI application
-        </button>
+        {can(me, 'create')
+          ? <div className="flex gap-2">
+              <button onClick={() => setImporting(true)} className="btn-secondary" data-testid="import-btn">Import CSV</button>
+              <button onClick={() => setShowOnboarding(true)} className="btn-primary">+ Register an agent</button>
+            </div>
+          : me && <span className="text-[13px] text-slate-600">{notAllowed(me, 'register agents')}</span>}
+        {importing && <ImportModal onClose={() => setImporting(false)} onDone={() => fetchData()} />}
       </div>
 
       {/* Filters */}
@@ -129,7 +137,7 @@ export default function AgentsPage() {
           <option value="Development">Development</option>
           <option value="Testing">Testing</option>
           <option value="Production">Production</option>
-          <option value="Deprecated">Deprecated</option>
+          <option value="Deprecated">Deprecated (retired)</option>
         </select>
         <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="input w-auto">
           <option value="">All types</option>
@@ -147,7 +155,7 @@ export default function AgentsPage() {
           onClick={() => setCertifiedOnly(v => !v)}
           aria-pressed={certifiedOnly}
           data-testid="certified-filter"
-          title="Production, every governance gate approved, and no HIGH or CRITICAL risk open"
+          title="Production, every required review approved, and no HIGH or CRITICAL risk open"
           className={`text-xs px-3 py-1 rounded-full border transition-colors flex items-center gap-1 ${
             certifiedOnly
               ? 'bg-emerald-600 text-white border-emerald-600'
@@ -175,7 +183,7 @@ export default function AgentsPage() {
       {search.trim() && (
         <p className="text-xs text-slate-600" data-testid="search-summary">
           {filtered.length} agent{filtered.length === 1 ? '' : 's'} match “{search.trim()}”, best match first.
-          {filtered.length === 0 && ' Nothing registered does this yet, so registering a new application is justified.'}
+          {filtered.length === 0 && ' Nothing registered does this yet, so registering a new agent is justified.'}
         </p>
       )}
 
@@ -189,7 +197,9 @@ export default function AgentsPage() {
             data-testid="registry-card"
           >
             <div className="flex justify-between items-start gap-2">
-              <h3 className="font-semibold text-slate-900">{a.name}</h3>
+              <h3 className="font-semibold text-slate-900">{a.name}
+                {a.isDemo && <span className="ml-1.5 align-middle rounded-full bg-amber-50 px-2 py-0.5 text-[11.5px] font-semibold text-amber-800 ring-1 ring-amber-300" title="A seeded example agent with demo data.">Demo</span>}
+              </h3>
               <span className={`shrink-0 ${STAGE_PILL[a.stage] || 'status-pending'}`}>{a.stage}</span>
             </div>
             {a.reuse.certified ? (
@@ -219,7 +229,7 @@ export default function AgentsPage() {
                 <span key={m} className="text-xs bg-purple-50 text-purple-700 ring-1 ring-purple-200 px-1.5 py-0.5 rounded">{m}</span>
               ))}
               {a.calls?.length > 0 && (
-                <span className="text-xs bg-blue-50 text-blue-700 ring-1 ring-blue-200 px-1.5 py-0.5 rounded">calls {a.calls.length}</span>
+                <span className="text-xs bg-blue-50 text-blue-700 ring-1 ring-blue-200 px-1.5 py-0.5 rounded">calls {a.calls.length} agent{a.calls.length === 1 ? '' : 's'}</span>
               )}
             </div>
 
@@ -232,21 +242,21 @@ export default function AgentsPage() {
                 <span>{a.aiType}</span>
                 {/* stopPropagation: the tile itself opens the agent. */}
                 <span className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-                  <button type="button" onClick={() => setEditing(a)} aria-label={`Edit ${a.name}`} title="Edit"
+                  {can(me, 'update') && <button type="button" onClick={() => setEditing(a)} aria-label={`Edit ${a.name}`} title="Edit"
                     className="p-1.5 rounded-lg text-slate-500 hover:text-teal-700 hover:bg-teal-50 transition-colors">
                     <Pencil size={14} />
-                  </button>
-                  <button type="button" onClick={() => setDeleting(a)} aria-label={`Delete ${a.name}`} title="Delete"
+                  </button>}
+                  {can(me, 'delete') && <button type="button" onClick={() => setDeleting(a)} aria-label={`Delete ${a.name}`} title="Delete"
                     className="p-1.5 rounded-lg text-slate-500 hover:text-rose-700 hover:bg-rose-50 transition-colors">
                     <Trash2 size={14} />
-                  </button>
+                  </button>}
                 </span>
               </div>
               <div className="flex justify-between gap-2 border-t border-gray-100 pt-1.5">
                 <CostPerCall agent={a} />
                 <span title="Teams and systems consuming this agent">{a.card.consumerCount} consumer{a.card.consumerCount === 1 ? '' : 's'}</span>
                 {a.valueAmount ? (
-                  <span className="font-mono" title="Declared value per month">${(a.valueAmount / 1000).toFixed(0)}K/mo</span>
+                  <span className="font-mono" title="Value per month declared by the owner">{a.valueAmount >= 1000 ? `$${(a.valueAmount / 1000).toFixed(a.valueAmount >= 10000 ? 0 : 1)}K` : `$${Math.round(a.valueAmount)}`}/mo</span>
                 ) : (
                   <span className="text-slate-500" title="No monthly value declared on the agent record">Not declared</span>
                 )}

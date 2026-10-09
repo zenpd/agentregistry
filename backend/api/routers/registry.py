@@ -21,6 +21,8 @@ from db.models import (
     CostAnomaly, User, AuditLog, AgentIdentity, AgentMetric, PhoenixConfig, AgentRisk, AgentAccessRequest,
     ModelRouting, AgentInfraProfile, AgentResourceLink, AgentInfraCost, AgentContextVersion, AgentContextInsight,
     Insight, InsightFeedback, ContentAuditOptIn, AgentFieldUpdate, AgentRecordCheck,
+    ClassificationRecord, AgentVersion, AgentRetirement, EvidenceVerdict, ObservedConsumer,
+    ValueAttestation, AgentOutcome, Incident,
 )
 from api.auth import (
     hash_password, verify_password, create_access_token,
@@ -37,6 +39,8 @@ _AGENT_OWNED_TABLES = (
     AgentAccessRequest, GovernanceException, WasteFinding, CostAnomaly, AgentRisk, AgentMetric, ModelRouting,
     AgentInfraProfile, AgentResourceLink, AgentInfraCost, AgentContextVersion, AgentContextInsight,
     Insight, ContentAuditOptIn, AgentFieldUpdate, AgentRecordCheck,
+    ClassificationRecord, AgentVersion, AgentRetirement, EvidenceVerdict, ObservedConsumer,
+    ValueAttestation, AgentOutcome, Incident,
 )
 
 # ── Routers ──────────────────────────────────────────────────────────────────
@@ -101,6 +105,12 @@ class AgentCreate(BaseModel):
     owner_contact: str = Field("", max_length=255)
     # Required when similar agents already exist: why none of them fit.
     reuse_justification: str = Field("", max_length=4000)
+    # Required when the agent is registered at a stage after Ideation (for
+    # example an agent that is already live): why it skips the earlier gates.
+    stage_reason: str = Field("", max_length=1000)
+    version: str = Field("", max_length=50)
+    # A certified agent whose contract this registration started from.
+    started_from_agent_id: str = Field("", max_length=64)
 
     @validator("capabilities", "inputs", "outputs")
     def validate_lists(cls, v):
@@ -224,7 +234,8 @@ class LoginRequest(BaseModel):
 
 # The persona roles. Recorded on every user; enforced only when RBAC is on
 # (USE_Rbac in api/auth.py).
-USER_ROLES = ("Registry Admin", "Architect Steward", "Security Reviewer", "Product Owner", "Executive Viewer")
+from api.auth import ROLES as _ROLES
+USER_ROLES = tuple(_ROLES)
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -233,6 +244,16 @@ class UserCreate(BaseModel):
     name: str = Field(..., max_length=255)
     role: str = "Executive Viewer"
     password: str = Field(..., min_length=8, max_length=128)
+    # Required for an Auditor: the last day the account can sign in.
+    accessUntil: Optional[date] = None
+
+
+def _auditor_end(role: str, access_until: Optional[date]) -> None:
+    if role == "Auditor":
+        if access_until is None:
+            raise HTTPException(status_code=422, detail="An Auditor needs an end date: the last day the account can sign in.")
+        if access_until < date.today():
+            raise HTTPException(status_code=422, detail="The end date of an Auditor cannot be in the past.")
 
 
 # ── Auth Router ──────────────────────────────────────────────────────────────
@@ -252,9 +273,46 @@ async def login(req: LoginRequest):
         }}
 
 
+@auth_router.get("/config")
+async def auth_config():
+    """Public, before sign-in: whether the login page may show the local demo
+    account (development only)."""
+    return {"showDemoLogin": get_settings().app_env == "development"}
+
+
+class AwayBody(BaseModel):
+    awayUntil: Optional[date] = None
+    deputyUserId: Optional[str] = None
+
+
+@auth_router.put("/me/away")
+async def set_my_away(body: AwayBody, user=Depends(get_current_user)):
+    """Away until a date, with a deputy who receives your review notices meanwhile. Empty clears it."""
+    async with get_db_session() as db:
+        me_row = await db.get(User, user.get("user_id"))
+        if me_row is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        if body.deputyUserId and (body.deputyUserId == me_row.id or await db.get(User, body.deputyUserId) is None):
+            raise HTTPException(status_code=422, detail="The deputy must be another existing user.")
+        before = (str(me_row.away_until) if me_row.away_until else None, me_row.deputy_user_id)
+        me_row.away_until, me_row.deputy_user_id = body.awayUntil, body.deputyUserId or None
+        db.add(AuditLog(org_id="org-default", actor=me_row.id, action="user_update", entity_type="user", entity_id=me_row.id,
+                        changes={"awayUntil": {"from": before[0], "to": str(body.awayUntil) if body.awayUntil else None},
+                                 "deputyUserId": {"from": before[1], "to": body.deputyUserId or None}}))
+    return {"awayUntil": body.awayUntil.isoformat() if body.awayUntil else None, "deputyUserId": body.deputyUserId or None}
+
+
 @auth_router.get("/me")
 async def me(user=Depends(get_current_user)):
-    return user
+    """Who is signed in: shown in the top bar, and used by screens that act as this person."""
+    async with get_db_session() as db:
+        row = await db.get(User, user.get("user_id"))
+    from api.auth import permissions_of
+
+    return {**user, "name": row.name if row else None, "email": row.email if row else None,
+            "accountRole": row.role if row else None, **permissions_of(user.get("role", "")),
+            "awayUntil": row.away_until.isoformat() if row and row.away_until else None,
+            "deputyUserId": row.deputy_user_id if row else None}
 
 
 # ── Agents Router ────────────────────────────────────────────────────────────
@@ -268,7 +326,7 @@ async def list_agents(
     type: str = "",
     q: str = "",
     certified: bool = False,
-    _=Depends(require_read)
+    user=Depends(require_read)
 ):
     """q searches what agents do (name, capabilities, tags, description,
     outcome, inputs/outputs), not only names; with q, results are ranked by
@@ -298,6 +356,10 @@ async def list_agents(
             agents = [a for a in agents if certs[a.id]["certified"]]
 
         total = len(agents)
+        if q.strip() and page == 1 and not (dept or stage or type or certified):
+            # Searches that find nothing are the signal for a new shared agent (Programme health).
+            from api.routers.ops.reuse_ops import log_search
+            await log_search(user.get("user_id"), q, total)
         page_agents = agents[(page - 1) * limit: page * limit]
         if not certified:
             certs = await reuse_repo.certifications(db, page_agents)
@@ -389,7 +451,12 @@ async def get_agent(agent_id: str, _=Depends(require_read)):
         # Reuse status rides along so the agent page can show the full
         # certification checklist above every tab, not only on Integrate.
         reuse_status = (await reuse_repo.certifications(db, [agent]))[agent.id]
-        return {**_agent_to_dict(agent, dept_name=dept_name), "reuse": reuse_status}
+        # Other records linked to the same Phoenix project: usually the same app registered twice.
+        shared = []
+        if agent.phoenix_project:
+            shared = [{"id": i, "name": n} for i, n in (await db.execute(
+                select(Agent.id, Agent.name).where(Agent.phoenix_project == agent.phoenix_project, Agent.id != agent.id))).all()]
+        return {**_agent_to_dict(agent, dept_name=dept_name), "reuse": reuse_status, "sharedProject": shared}
 
 
 @agents_router.post("/")
@@ -401,6 +468,13 @@ async def create_agent(agent: AgentCreate, user=Depends(require_create)):
             "name": agent.name, "description": agent.description, "business_outcome": agent.business_outcome,
             "capabilities": agent.capabilities, "api_endpoint": agent.api_endpoint,
         })
+        stage_reason = agent.stage_reason.strip()
+        if agent.stage != "Ideation" and len(stage_reason) < MIN_REUSE_JUSTIFICATION_CHARS:
+            raise HTTPException(status_code=422, detail={
+                "code": "stage_reason_required",
+                "message": f"A new agent starts at Ideation. To register it at {agent.stage}, say in at least "
+                           f"{MIN_REUSE_JUSTIFICATION_CHARS} characters why (for example: already live before the registry existed).",
+            })
         justification = agent.reuse_justification.strip()
         if similar and len(justification) < MIN_REUSE_JUSTIFICATION_CHARS:
             raise HTTPException(status_code=409, detail={
@@ -428,12 +502,16 @@ async def create_agent(agent: AgentCreate, user=Depends(require_create)):
             phoenix_endpoint=agent.phoenix_endpoint or None,
             context_md=agent.context_md or None,
             capabilities=agent.capabilities,
+            version=agent.version.strip() or None,
             rate_limit=agent.rate_limit.strip() or None,
             owner_contact=agent.owner_contact.strip() or None,
             reuse_checked=[{"id": m["id"], "name": m["name"], "score": m["score"], "certified": m["certified"]}
                            for m in similar],
             reuse_justification=justification if similar else None,
+            started_from_agent_id=agent.started_from_agent_id.strip() or None,
         )
+        if db_agent.started_from_agent_id and await db.get(Agent, db_agent.started_from_agent_id) is None:
+            raise HTTPException(status_code=422, detail="The agent this registration starts from does not exist.")
         db.add(db_agent)
         for gate in ["arb", "security", "dp"]:
             db.add(GovernanceReview(
@@ -450,6 +528,13 @@ async def create_agent(agent: AgentCreate, user=Depends(require_create)):
             changes={"name": agent.name, "stage": agent.stage, "ai_type": agent.ai_type,
                      "similar_shown": [m["id"] for m in similar]},
         ))
+        if agent.stage != "Ideation":
+            # Shown in the Governance tab's decision history like any other stage move.
+            db.add(AuditLog(
+                org_id="org-default", actor=user.get("user_id", "unknown"), action="stage_change",
+                entity_type="agent", entity_id=agent_id,
+                changes={"from": None, "to": agent.stage, "atRegistration": True, "overrideReason": stage_reason},
+            ))
 
         return {"id": agent_id, "status": "created"}
 
@@ -462,6 +547,16 @@ async def update_agent(agent_id: str, update: AgentUpdate, user=Depends(require_
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         update_data = update.model_dump(exclude_unset=True)
+        # Stage and risk level decide which reviews an agent needs, so they change
+        # only through the routes that check and record that.
+        if "lifecycle_stage" in update_data:
+            raise HTTPException(status_code=422, detail="Change the stage on the Governance tab "
+                                "(PUT /api/v1/agents/{id}/stage), which checks readiness and records the move.")
+        if "risk_level" in update_data and update_data["risk_level"] != agent.risk_level:
+            raise HTTPException(status_code=422, detail="Change the risk level through the classification "
+                                "on the Governance tab, which records who confirmed it and why.")
+        update_data.pop("risk_level", None)
+
         # Columns the table requires; an explicit null would fail in the DB.
         for required in ("name", "owner", "description", "ai_type", "lifecycle_stage"):
             if required in update_data and update_data[required] is None:
@@ -561,10 +656,9 @@ async def offboard_agent(agent_id: str, stage: int = 1, user=Depends(require_upd
         elif stage == 6:
             agent.risk_note = (agent.risk_note or "") + f" | Data sanitization: traces archived, PII purged {now.date()}"
         elif stage == 7:
-            agent.lifecycle_stage = "Deprecated"
-            agent.deprecated_at = now
-            agent.sunset_date = (now + timedelta(days=7)).date()
-            agent.risk_note = (agent.risk_note or "") + f" | Residual validation: 7-day wait started {now.date()}"
+            # The stage changes only through the retirement steps, which check traffic first.
+            raise HTTPException(status_code=409, detail="Set the stage to Deprecated with the retirement steps on the Governance tab "
+                                "(POST /api/v1/agents/{id}/retirement).")
 
         db.add(AuditLog(
             org_id=agent.org_id,
@@ -617,13 +711,49 @@ VALID_GATES = ["arb", "security", "dp"]
 @governance_router.get("/")
 async def governance_overview(_=Depends(require_read)):
     async with get_db_session() as db:
+        from db.scope import hidden_agent_ids
+
+        hidden = await hidden_agent_ids(db)
         overview = {}
         for gate in VALID_GATES:
             result = await db.execute(
-                select(GovernanceReview.status, func.count()).where(GovernanceReview.gate == gate).group_by(GovernanceReview.status)
+                select(GovernanceReview.status, func.count())
+                .where(GovernanceReview.gate == gate, GovernanceReview.agent_id.notin_(hidden))
+                .group_by(GovernanceReview.status)
             )
             overview[gate] = {status: count for status, count in result.all()}
         return overview
+
+
+def review_position(statuses: dict, required: list) -> str:
+    """Where an agent stands on the reviews its risk level requires: cleared (each one approved, with or
+    without conditions), blocked (changes requested on one), in_review (one awaits a decision), else open."""
+    held = [statuses.get(g) or "Not Submitted" for g in required]
+    if "Changes Requested" in held:
+        return "blocked"
+    if "In Review" in held:
+        return "in_review"
+    return "cleared" if all(s in ("Approved", "Approved with Conditions") for s in held) else "open"
+
+
+@governance_router.get("/summary")
+async def governance_summary(_=Depends(require_read)):
+    """The reviews each risk level requires (Settings, Governance rules) and how many agents that are
+    not retired stand where on them. Counted over every agent, by the same rule as the stage checks."""
+    from governance import templates as tpl
+    from sqlalchemy.orm import selectinload
+
+    rules = await tpl.templates()
+    required = {tier: list(v.get("gates") or []) for tier, v in rules.items()}
+    async with get_db_session() as db:
+        agents = (await db.execute(select(Agent).options(selectinload(Agent.governance_reviews))
+                                   .where(Agent.lifecycle_stage != "Deprecated"))).scalars().all()
+    counts = {"cleared": 0, "blocked": 0, "in_review": 0, "open": 0}
+    for a in agents:
+        need = required.get((a.risk_level or "LOW").upper(), required.get("LOW", []))
+        counts[review_position({r.gate: r.status for r in a.governance_reviews or []}, need)] += 1
+    return {"requiredReviews": required, "agents": len(agents), "cleared": counts["cleared"],
+            "blocked": counts["blocked"], "inReview": counts["in_review"]}
 
 
 @governance_router.get("/exceptions")
@@ -668,6 +798,10 @@ async def shadow_ai(_=Depends(require_read)):
         return [_discovery_to_dict(d) for d in result.scalars().all()]
 
 
+# Sources written by the governance checks (orchestrations/discovery_pipeline.py): each is about a registered agent or a shared system.
+CHECK_SOURCES = {"agents_table", "concentration_risk", "governance_gap", "idle_detection", "model_overkill"}
+
+
 @discovery_router.post("/{discovery_id}/register")
 async def register_discovery(discovery_id: str, user=Depends(require_update)):
     async with get_db_session() as db:
@@ -675,6 +809,10 @@ async def register_discovery(discovery_id: str, user=Depends(require_update)):
         discovery = result.scalar_one_or_none()
         if not discovery:
             raise HTTPException(status_code=404, detail="Discovery not found")
+        # Findings from the governance checks name agents that are already registered: never make a second record.
+        if discovery.source in CHECK_SOURCES or (await db.execute(select(Agent.id).where(Agent.name == discovery.suspected_name))).first():
+            raise HTTPException(status_code=409, detail="This finding is about an agent or system that is already known. "
+                                "Open the agent instead. New agents are registered on AI Registry or Discovered.")
 
         agent_id = f"agent-{secrets.token_hex(6)}"
         slug = discovery.suspected_name.lower().replace(" ", "-")[:80]
@@ -721,6 +859,9 @@ async def dismiss_discovery(discovery_id: str, user=Depends(require_update)):
         if discovery:
             discovery.status = "dismissed"
             discovery.resolved_at = datetime.now(timezone.utc)
+            db.add(AuditLog(org_id=discovery.org_id, actor=user.get("user_id", "unknown"), action="dismiss",
+                            entity_type="discovery", entity_id=discovery_id,
+                            changes={"name": discovery.suspected_name, "source": discovery.source}))
         return {"status": "dismissed"}
 
 
@@ -939,13 +1080,30 @@ async def optimizations(_=Depends(require_read)):
 
 # ── Admin Router ─────────────────────────────────────────────────────────────
 
+@admin_router.get("/scope")
+async def view_scope(_=Depends(require_read)):
+    """How many demo agents exist, whether this request includes them, and whether
+    the installation has them turned on (DEMO_AGENTS_ENABLED), for Settings → Demo agents."""
+    from db.scope import demo_enabled, hiding_demo, set_scope, reset_scope
+
+    including = not hiding_demo()
+    tokens = set_scope(False)
+    try:
+        async with get_db_session() as db:
+            count = (await db.execute(select(func.count(Agent.id)).where(Agent.is_demo == True))).scalar() or 0  # noqa: E712
+    finally:
+        reset_scope(tokens)
+    enabled = demo_enabled()
+    return {"demoAgents": count if enabled else 0, "includingDemo": including and enabled, "demoEnabled": enabled}
+
+
 @admin_router.get("/taxonomy")
 async def taxonomy(_=Depends(require_read)):
     return {
         "stages": ["Ideation", "Development", "Testing", "Production", "Deprecated"],
         "gates": ["arb", "security", "dp"],
         "reviewStatuses": ["Not Submitted", "In Review", "Changes Requested", "Approved with Conditions", "Approved"],
-        "riskLevels": ["LOW", "HIGH", "UNACCEPTABLE"],
+        "riskLevels": ["LOW", "MEDIUM", "HIGH"],
         "aiTypes": ["Autonomous Agent", "Copilot / Assistant", "Predictive / ML Model", "Generative AI Feature", "Conversational AI / Chatbot", "Computer Vision Model"],
         "userRoles": list(USER_ROLES),
     }
@@ -956,6 +1114,14 @@ async def runtime_settings(_=Depends(require_read)):
     """Switches the UI has to reflect, e.g. the testing-only self-approval
     mode, so Settings can say plainly that it is on."""
     return {"selfApprovalAllowed": get_settings().allow_self_approval}
+
+
+@admin_router.get("/directory")
+async def user_directory(_=Depends(require_read)):
+    """Active people, for pickers (owner, deputy). Names, emails and roles only."""
+    async with get_db_session() as db:
+        rows = (await db.execute(select(User).where(User.is_active == True).order_by(User.name))).scalars().all()  # noqa: E712
+    return [{"id": u.id, "name": u.name, "email": u.email, "role": u.role} for u in rows]
 
 
 @admin_router.get("/users")
@@ -975,18 +1141,21 @@ async def create_user(user: UserCreate, actor=Depends(require_admin)):
         raise HTTPException(status_code=422, detail="Enter the person's name")
     if user.role not in USER_ROLES:
         raise HTTPException(status_code=422, detail=f"Role must be one of: {', '.join(USER_ROLES)}")
+    _auditor_end(user.role, user.accessUntil)
     async with get_db_session() as db:
         if (await db.execute(select(User).where(func.lower(User.email) == email))).scalar_one_or_none():
             raise HTTPException(status_code=409, detail=f"A user with {email} already exists")
         db_user = User(
             id=secrets.token_hex(8), org_id="org-default", email=email,
             name=name, role=user.role, password_hash=hash_password(user.password), is_active=True,
+            access_until=user.accessUntil if user.role == "Auditor" else None,
         )
         db.add(db_user)
         # Who added whom; never the password.
         db.add(AuditLog(org_id="org-default", actor=actor.get("user_id", "unknown"), action="user_create",
                         entity_type="user", entity_id=db_user.id,
-                        changes={"email": email, "name": name, "role": user.role}))
+                        changes={"email": email, "name": name, "role": user.role,
+                                 **({"accessUntil": str(user.accessUntil)} if user.role == "Auditor" else {})}))
         return {"id": db_user.id, "status": "created", "user": _user_to_dict(db_user)}
 
 
@@ -1016,6 +1185,11 @@ def _agent_to_dict(agent: Agent, dept_name: str | None = None) -> dict:
         "contextMd": agent.context_md,
         "capabilities": agent.capabilities or [],
         "rateLimit": agent.rate_limit,
+        "isDemo": bool(agent.is_demo),
+        "archivedAt": agent.archived_at.isoformat() if agent.archived_at else None,
+        "sourceRepo": agent.source_repo, "cloudResourceId": agent.cloud_resource_id,
+        "traceConnectorId": agent.trace_connector_id, "ownerUserId": agent.owner_user_id,
+        "backupOwnerUserId": agent.backup_owner_user_id,
     }
 
 
@@ -1063,6 +1237,8 @@ def _user_to_dict(u: User) -> dict:
     return {
         "id": u.id, "email": u.email, "name": u.name,
         "role": u.role, "isActive": u.is_active,
+        "awayUntil": u.away_until.isoformat() if u.away_until else None, "deputyUserId": u.deputy_user_id,
+        "accessUntil": u.access_until.isoformat() if u.access_until else None,
     }
 
 
@@ -1096,12 +1272,12 @@ async def portfolio_tokens(_=Depends(require_read)):
 async def update_model_price(model_name: str, prices: dict, _=Depends(require_admin)):
     """Update model pricing."""
     async with get_db_session() as db:
-        # Expire current price
+        # Close the price in force, so exactly one price applies from now on.
+        now = datetime.now(timezone.utc)
         await db.execute(
-            select(ModelTokenPrice).where(
-                ModelTokenPrice.model_name == model_name,
-                ModelTokenPrice.effective_to.is_(None)
-            )
+            sql_update(ModelTokenPrice)
+            .where(ModelTokenPrice.model_name == model_name, ModelTokenPrice.effective_to.is_(None))
+            .values(effective_to=now)
         )
         # Insert new price
         db.add(ModelTokenPrice(
@@ -1112,7 +1288,11 @@ async def update_model_price(model_name: str, prices: dict, _=Depends(require_ad
             output_price_per_1m=prices.get("outputPrice", 0),
             cache_read_price_per_1m=prices.get("cacheReadPrice", 0),
             tier=prices.get("tier", "mid"),
+            effective_from=now,
         ))
+        db.add(AuditLog(org_id="org-default", actor=_.get("user_id", "unknown") if isinstance(_, dict) else "unknown",
+                        action="price.update", entity_type="model_price", entity_id=model_name[:64],
+                        changes={k: prices.get(k) for k in ("inputPrice", "outputPrice", "cacheReadPrice", "provider", "tier")}))
         return {"status": "updated", "model": model_name}
 
 
@@ -1139,34 +1319,96 @@ async def impact_analysis(node_id: str, node_type: str = "agent", _=Depends(requ
 
 # ── Additional Admin Endpoints ────────────────────────────────────────────────
 
+class UserUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=255)
+    role: Optional[str] = None
+    isActive: Optional[bool] = None
+    awayUntil: Optional[date] = None
+    deputyUserId: Optional[str] = None
+    accessUntil: Optional[date] = None
+
+
+class PasswordReset(BaseModel):
+    password: str = Field(..., min_length=8, max_length=128)
+
+
+async def _active_admins(db) -> list[str]:
+    rows = (await db.execute(select(User.id).where(User.is_active == True, User.role == "Registry Admin"))).scalars().all()  # noqa: E712
+    return list(rows)
+
+
 @admin_router.put("/users/{user_id}")
-async def update_user(user_id: str, user_data: dict, _=Depends(require_admin)):
-    """Update a user."""
+async def update_user(user_id: str, body: UserUpdate, actor=Depends(require_admin)):
+    """Change a person's name, role or whether they can sign in. The last active
+    Registry Admin cannot be demoted or deactivated, so the registry always has one."""
     async with get_db_session() as db:
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
+        user = await db.get(User, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        if "email" in user_data:
-            user.email = user_data["email"]
-        if "name" in user_data:
-            user.name = user_data["name"]
-        if "role" in user_data:
-            user.role = user_data["role"]
-        if "isActive" in user_data:
-            user.is_active = user_data["isActive"]
+        before = {"name": user.name, "role": user.role, "isActive": user.is_active,
+                  "awayUntil": str(user.away_until) if user.away_until else None, "deputyUserId": user.deputy_user_id,
+                  "accessUntil": str(user.access_until) if user.access_until else None}
+        sent = body.model_dump(exclude_unset=True)
+        if body.role is not None and body.role not in USER_ROLES:
+            raise HTTPException(status_code=422, detail=f"Role must be one of: {', '.join(USER_ROLES)}")
+        losing_admin = user.role == "Registry Admin" and user.is_active and (
+            (body.role is not None and body.role != "Registry Admin") or body.isActive is False)
+        if losing_admin and await _active_admins(db) == [user.id]:
+            raise HTTPException(status_code=409, detail="This is the only active Registry Admin. Make someone else an admin first.")
+        if body.isActive is False and user.id == actor.get("user_id"):
+            raise HTTPException(status_code=409, detail="You cannot deactivate your own account.")
+        if body.name is not None:
+            name = " ".join(body.name.split())
+            if not name:
+                raise HTTPException(status_code=422, detail="Enter the person's name")
+            user.name = name
+        if body.role is not None:
+            user.role = body.role
+        if body.isActive is not None:
+            user.is_active = body.isActive
+        # Sent as null, these clear the away period or the deputy.
+        if "awayUntil" in sent:
+            user.away_until = body.awayUntil
+        if "deputyUserId" in sent:
+            if body.deputyUserId and (body.deputyUserId == user.id or await db.get(User, body.deputyUserId) is None):
+                raise HTTPException(status_code=422, detail="The deputy must be another existing user.")
+            user.deputy_user_id = body.deputyUserId or None
+        if "accessUntil" in sent:
+            user.access_until = body.accessUntil
+        if "accessUntil" in sent or "role" in sent:          # an unrelated edit never trips an end date already passed
+            _auditor_end(user.role, user.access_until)
+        if user.role != "Auditor":
+            user.access_until = None
+        after = {"name": user.name, "role": user.role, "isActive": user.is_active,
+                 "awayUntil": str(user.away_until) if user.away_until else None, "deputyUserId": user.deputy_user_id,
+                 "accessUntil": str(user.access_until) if user.access_until else None}
+        db.add(AuditLog(org_id="org-default", actor=actor.get("user_id", "unknown"), action="user_update",
+                        entity_type="user", entity_id=user.id,
+                        changes={k: {"from": before[k], "to": after[k]} for k in after if before[k] != after[k]}))
+        result = {"status": "updated", "user": _user_to_dict(user)}
+    if body.isActive is False and before["isActive"]:
+        from services.ownership import on_deactivated
+        result["ownership"] = await on_deactivated(user_id, actor.get("user_id", "unknown"))
+    return result
+
+
+@admin_router.post("/users/{user_id}/password")
+async def reset_password(user_id: str, body: PasswordReset, actor=Depends(require_admin)):
+    """Set a new password for someone. Logged without the password."""
+    async with get_db_session() as db:
+        user = await db.get(User, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        user.password_hash = hash_password(body.password)
+        db.add(AuditLog(org_id="org-default", actor=actor.get("user_id", "unknown"), action="user_password_reset",
+                        entity_type="user", entity_id=user.id, changes={"email": user.email}))
         return {"status": "updated"}
 
 
 @admin_router.delete("/users/{user_id}")
-async def delete_user(user_id: str, _=Depends(require_admin)):
-    """Deactivate a user."""
-    async with get_db_session() as db:
-        result = await db.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        if user:
-            user.is_active = False
-        return {"status": "deactivated"}
+async def delete_user(user_id: str, actor=Depends(require_admin)):
+    """Deactivate a user (the record stays, so past decisions keep their name)."""
+    return await update_user(user_id, UserUpdate(isActive=False), actor)
 
 
 @admin_router.post("/seed-identities")
@@ -1325,6 +1567,32 @@ async def update_phoenix_config(update: PhoenixConfigUpdate, user=Depends(requir
                      "keyCleared": bool(row and repointed and not update.api_key),
                      "appUrlTemplate": update.app_url_template}))
         return {"status": "saved"}
+
+
+class ConnectionTest(BaseModel):
+    endpoint: str = Field("", max_length=500)
+    apiKey: str = Field("", max_length=500)
+    project: str = Field("", max_length=255)
+
+
+@phoenix_router.post("/test-connection")
+async def phoenix_test_connection(body: ConnectionTest, user=Depends(require_read)):
+    """Check a Phoenix connection step by step and say which step fails. With no
+    endpoint in the body, the saved common connection is tested; testing a typed
+    address needs an admin, because it makes the server call that address."""
+    from api.auth import has_permission
+    from discovery.connection import test_connection
+
+    endpoint = body.endpoint.strip()
+    if endpoint and not has_permission(user.get("role", ""), "admin"):
+        raise HTTPException(status_code=403, detail="Only a Registry Admin can test a typed address.")
+    async with get_db_session() as db:
+        saved_url, saved_key = await _resolve_phoenix_endpoint(db, agent=None)
+    base_url = endpoint or saved_url
+    api_key = body.apiKey.strip() or (saved_key if not endpoint or endpoint == saved_url else None)
+    result = await test_connection(base_url, api_key, body.project.strip() or None,
+                                   allow_loopback=get_settings().app_env == "development")
+    return {"endpoint": base_url, **result}
 
 
 @phoenix_router.get("/projects")

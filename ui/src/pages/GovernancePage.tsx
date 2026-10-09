@@ -1,17 +1,20 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  getAgents, getGovernanceOverview, updateGate, getDiscoveries,
-  registerDiscovery, dismissDiscovery, runGovernance,
-  type Agent, type GovernanceOverview, type Discovery
+  getAgents, getGovernanceOverview, getDiscoveries, getGovernanceSummary, requiredReviewsOf,
+  type Agent, type GovernanceOverview, type Discovery, type GovernanceSummary
 } from '../services/api'
+import { applyRuleProposal, getRuleProposal, type GateKey, type RuleProposal } from '../services/ops/governance'
 import InfoTip from '../components/InfoTip'
+import { can, useMe } from '../lib/me'
 import { errorMessage } from './agent/shared'
 
 export default function GovernancePage() {
+  const me = useMe()
   const [agents, setAgents] = useState<Agent[]>([])
   const [overview, setOverview] = useState<GovernanceOverview | null>(null)
   const [discoveries, setDiscoveries] = useState<Discovery[]>([])
+  const [summary, setSummary] = useState<GovernanceSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [running, setRunning] = useState<string | null>(null)
@@ -23,14 +26,16 @@ export default function GovernancePage() {
   async function fetchData() {
     try {
       setLoading(true)
-      const [agentsRes, overviewRes, discRes] = await Promise.all([
+      const [agentsRes, overviewRes, discRes, summaryRes] = await Promise.all([
         getAgents(1, 100),
         getGovernanceOverview(),
-        getDiscoveries()
+        getDiscoveries(),
+        getGovernanceSummary()
       ])
       setAgents(agentsRes.data.data)
       setOverview(overviewRes.data)
       setDiscoveries(discRes.data)
+      setSummary(summaryRes.data)
       setError(null)
     } catch (e: any) {
       setError(e.response?.data?.detail || e.message || 'Failed to fetch')
@@ -39,64 +44,46 @@ export default function GovernancePage() {
     }
   }
 
-  async function handleUpdateGate(agentId: string, gate: string, status: string) {
-    const name = agents.find(a => a.id === agentId)?.name || agentId
-    try {
-      await updateGate(agentId, gate, status)
-      await fetchData()
-      setNotice({ tone: 'ok', text: `${name}: ${gateLabels[gate]} set to ${status}.` })
-    } catch (e: any) {
-      setNotice({ tone: 'error', text: `${name}: ${gateLabels[gate]} was not changed — ${errorMessage(e, 'the update failed')}` })
-    }
-  }
+  // Reviews are decided in one place, the agent's Governance tab, where the checklist and evidence are.
+  const [proposal, setProposal] = useState<RuleProposal | null>(null)
+  const [proposalReason, setProposalReason] = useState('')
 
   async function handleRunGovernance(agentId: string) {
     const name = agents.find(a => a.id === agentId)?.name || agentId
     setRunning(agentId)
+    setNotice(null)
     try {
-      const res = (await runGovernance(agentId)).data as { status?: string; message?: string; reviews?: Record<string, string> }
-      await fetchData()
-      if (res?.reviews) {
-        const set = gates.map(g => `${gateLabels[g]}: ${res.reviews![g]}`).join(' · ')
-        setNotice({ tone: 'ok', text: `Auto-review of ${name} set ${set}.` })
-      } else {
-        setNotice({ tone: 'error', text: `Auto-review of ${name} did not run — ${res?.message || 'no result returned'}.` })
-      }
+      setProposalReason('')
+      setProposal((await getRuleProposal(agentId)).data)
     } catch (e: any) {
-      setNotice({ tone: 'error', text: `Auto-review of ${name} failed — ${errorMessage(e, 'the request failed')}` })
+      setNotice({ tone: 'error', text: `Rule checks for ${name} failed — ${errorMessage(e, 'the request failed')}` })
     } finally {
       setRunning(null)
     }
   }
 
-  async function handleRegister(disc: Discovery) {
+  async function acceptProposal() {
+    if (!proposal) return
+    const name = agents.find(a => a.id === proposal.agentId)?.name || proposal.agentId
     try {
-      await registerDiscovery(disc.id)
+      await applyRuleProposal(proposal.agentId, proposalReason.trim())
+      setProposal(null)
       await fetchData()
+      setNotice({ tone: 'ok', text: `${name}: the rule-check proposal was recorded in your name. Approvals from it expire in ${proposal.validityDays} days, so a full review follows.` })
     } catch (e: any) {
-      console.error('Register failed:', e)
+      setNotice({ tone: 'error', text: `${name}: the proposal was not saved — ${errorMessage(e, 'the request failed')}` })
     }
   }
 
-  async function handleDismiss(disc: Discovery) {
-    try {
-      await dismissDiscovery(disc.id)
-      await fetchData()
-    } catch (e: any) {
-      console.error('Dismiss failed:', e)
-    }
-  }
-
-  const gates = ['arb', 'security', 'dp']
+  const gates: GateKey[] = ['arb', 'security', 'dp']
   const gateLabels: Record<string, string> = { arb: 'Architecture Review Board', security: 'Security Review', dp: 'Data Protection Review' }
-  const statuses = ['Not Submitted', 'In Review', 'Changes Requested', 'Approved with Conditions', 'Approved']
   const pendingDiscs = discoveries.filter(d => d.status === 'pending')
 
-  // KPI calculations
-  // Approved with conditions is still approved, as on the reuse checklist and in the prototype.
-  const cleared = agents.filter(a => ['arb', 'security', 'dp'].every(g => ['Approved', 'Approved with Conditions'].includes(a.reviews?.[g] || ''))).length
-  const blocked = agents.filter(a => ['arb', 'security', 'dp'].some(g => a.reviews?.[g] === 'Changes Requested')).length
-  const inReview = agents.filter(a => ['arb', 'security', 'dp'].some(g => a.reviews?.[g] === 'In Review')).length
+  const STATUS_PILL: Record<string, string> = {
+    'Approved': 'bg-emerald-50 text-emerald-700 ring-emerald-200', 'Approved with Conditions': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    'In Review': 'bg-amber-50 text-amber-700 ring-amber-200', 'Changes Requested': 'bg-rose-50 text-rose-700 ring-rose-200',
+    'Not Submitted': 'bg-slate-100 text-slate-700 ring-slate-200',
+  }
 
   if (loading) return <div className="p-8 text-center text-slate-600">Loading...</div>
   if (error) return <div className="p-8 text-center text-red-500">Error: {error}</div>
@@ -105,31 +92,31 @@ export default function GovernancePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold gradient-text">Governance</h1>
-        <p className="text-slate-600 mt-0.5">Every agent’s path through Architecture, Security and Data Protection review, plus checks on registered agents that look off. New AI found in Phoenix is on the <Link to="/discovered" className="font-medium text-zen-700 hover:underline">Discovered</Link> page.</p>
+        <p className="text-slate-600 mt-0.5">Every agent’s path through the Architecture, Security and Data Protection reviews. Click a status to open that review on the agent’s Governance tab, where it is submitted and decided.</p>
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-4 gap-4">
         <div className="card p-4">
-          <div className="text-2xl font-bold text-green-600">{cleared}</div>
+          <div className="text-2xl font-bold text-green-600" data-testid="tile-cleared">{summary?.cleared ?? "—"}</div>
           <div className="text-xs font-medium text-slate-700">Cleared for production</div>
-          <div className="text-[12px] text-slate-500 mt-0.5">All three reviews approved (with or without conditions)</div>
+          <div className="text-[12px] text-slate-500 mt-0.5">Every review its risk level requires is approved (with or without conditions)</div>
         </div>
         <div className="card p-4">
-          <div className="text-2xl font-bold text-red-600">{blocked}</div>
+          <div className="text-2xl font-bold text-red-600">{summary?.blocked ?? "—"}</div>
           <div className="text-xs font-medium text-slate-700">Blocked</div>
-          <div className="text-[12px] text-slate-500 mt-0.5">Changes requested on at least one review</div>
+          <div className="text-[12px] text-slate-500 mt-0.5">Changes requested on a required review</div>
         </div>
         <div className="card p-4">
-          <div className="text-2xl font-bold text-amber-600">{inReview}</div>
+          <div className="text-2xl font-bold text-amber-600">{summary?.inReview ?? "—"}</div>
           <div className="text-xs font-medium text-slate-700">In active review</div>
-          <div className="text-[12px] text-slate-500 mt-0.5">At least one review awaiting a decision</div>
+          <div className="text-[12px] text-slate-500 mt-0.5">A required review awaits a decision</div>
         </div>
-        <div className="card p-4">
+        <Link to="/approvals" className="card p-4 block hover:ring-2 hover:ring-zen-200" data-testid="findings-tile">
           <div className="text-2xl font-bold text-orange-600">{pendingDiscs.length}</div>
           <div className="text-xs font-medium text-slate-700 flex items-center">Governance findings <InfoTip term="governance_findings" className="ml-1" /></div>
-          <div className="text-[12px] text-slate-500 mt-0.5">Checks on registered agents, waiting for a decision</div>
-        </div>
+          <div className="text-[12px] text-slate-500 mt-0.5">Checks on registered agents, waiting on Approvals</div>
+        </Link>
       </div>
 
       {/* Gate Breakdown */}
@@ -158,6 +145,26 @@ export default function GovernancePage() {
         </div>
       )}
 
+      {proposal && (
+        <div className="card p-4 space-y-3 border-zen-200" data-testid="rule-proposal">
+          <div>
+            <p className="text-sm font-semibold text-slate-900">Rule-check proposal for {agents.find(a => a.id === proposal.agentId)?.name} — not saved</p>
+            <p className="text-[13px] text-slate-700">The registry checked fixed rules against this record (model, systems, service level, owner, risk level, databases). Accepting records these decisions in your name, marked as rule-proposed, and any approval expires in {proposal.validityDays} days so a full review follows.</p>
+          </div>
+          <ul className="space-y-1.5">
+            {proposal.gates.map(g => (
+              <li key={g.gate} className="text-[13px]"><span className="font-semibold text-slate-900">{g.label}: {g.status}</span> <span className="text-slate-700">— {g.note}</span></li>
+            ))}
+          </ul>
+          <textarea className="input text-sm" rows={2} placeholder="Why you accept this proposal (at least 20 characters) — required"
+            value={proposalReason} onChange={e => setProposalReason(e.target.value)} />
+          <div className="flex gap-2">
+            <button className="btn-primary btn-sm" disabled={proposalReason.trim().length < 20} onClick={acceptProposal}>Accept and record</button>
+            <button className="btn-secondary btn-sm" onClick={() => setProposal(null)}>Discard</button>
+          </div>
+        </div>
+      )}
+
       {/* Review Status Table */}
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
@@ -166,33 +173,34 @@ export default function GovernancePage() {
               <th className="p-3">Agent</th>
               <th className="p-3">Stage</th>
               {gates.map(g => <th key={g} className="p-3">{gateLabels[g]}</th>)}
-              <th className="p-3" title="Auto-review runs rule checks and overwrites all three review statuses with its result">Actions</th>
+              <th className="p-3" title="Rule checks propose a decision for all three reviews. Nothing is saved until you accept it with a reason.">Actions</th>
             </tr>
           </thead>
           <tbody>
             {agents.map(a => (
               <tr key={a.id} className="border-b last:border-0">
-                <td className="p-3 font-medium">{a.name}</td>
+                <td className="p-3 font-medium"><Link to={`/agents/${a.id}?tab=governance`} className="hover:underline">{a.name}</Link></td>
                 <td className="p-3">{a.stage}</td>
-                {gates.map(g => (
-                  <td key={g} className="p-3">
-                    <select
-                      value={a.reviews?.[g] || 'Not Submitted'}
-                      onChange={e => handleUpdateGate(a.id, g, e.target.value)}
-                      className="border rounded px-2 py-1 text-xs"
-                    >
-                      {statuses.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </td>
-                ))}
+                {gates.map(g => {
+                  const status = a.reviews?.[g] || 'Not Submitted'
+                  const needed = requiredReviewsOf(summary, a.riskLevel).includes(g)
+                  return (
+                    <td key={g} className="p-3">
+                      {!needed && status === 'Not Submitted'
+                        ? <span className="text-xs text-slate-500" title={`Not required for ${a.riskLevel || 'LOW'} risk (Settings → Governance rules)`}>Not required</span>
+                        : <Link to={`/agents/${a.id}?tab=governance`} data-testid="review-status"
+                            className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ring-1 hover:underline ${STATUS_PILL[status] || STATUS_PILL['Not Submitted']}`}>{status}</Link>}
+                    </td>
+                  )
+                })}
                 <td className="p-3">
                   <button
                     onClick={() => handleRunGovernance(a.id)}
-                    disabled={running === a.id}
+                    disabled={running === a.id || !can(me, 'update')}
                     className="btn-secondary btn-sm whitespace-nowrap"
-                    title="Runs rule-based checks and overwrites all three review statuses with the result"
+                    title="Rule checks propose a decision for all three reviews. Nothing is saved until you accept it with a reason."
                   >
-                    {running === a.id ? 'Running…' : 'Run auto-review'}
+                    {running === a.id ? 'Checking…' : 'Propose by rules'}
                   </button>
                 </td>
               </tr>
@@ -201,46 +209,6 @@ export default function GovernancePage() {
         </table>
       </div>
 
-      {/* Discovery Feed */}
-      {pendingDiscs.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold mb-3 flex items-center">Governance findings <InfoTip term="governance_findings" className="ml-1" /></h2>
-          <div className="grid grid-cols-2 gap-4">
-            {pendingDiscs.map(d => (
-              <div key={d.id} className="card p-4">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <div className="font-medium">{d.suspectedName}</div>
-                    <div className="text-xs text-slate-600 mt-1">{d.suspectedDept} · {d.source}</div>
-                  </div>
-                  <span className={`text-xs px-2 py-1 rounded border ${
-                    d.confidence >= 85 ? 'bg-green-50 text-green-700 border-green-200' :
-                    d.confidence >= 70 ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                    'bg-red-50 text-red-700 border-red-200'
-                  }`}>
-                    {d.confidence}% confidence
-                  </span>
-                </div>
-                {d.signal && <div className="text-xs text-slate-700 mt-2">{d.signal}</div>}
-                <div className="flex gap-2 mt-3">
-                  <button
-                    onClick={() => handleRegister(d)}
-                    className="text-xs bg-zen-600 text-white px-3 py-1.5 rounded hover:bg-zen-700"
-                  >
-                    Register agent
-                  </button>
-                  <button
-                    onClick={() => handleDismiss(d)}
-                    className="text-xs bg-gray-100 text-slate-700 px-3 py-1.5 rounded hover:bg-gray-200"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

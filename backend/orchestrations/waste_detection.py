@@ -1,10 +1,16 @@
-"""Waste Detection Orchestration — detects various types of AI waste.
+"""Spend review: idle and duplicate spend (item 53 of the improvement plan).
 
-Detects:
-- Idle agents (Production but no usage)
-- Model overkill (frontier model on simple task)
-- Always-on agents (high invocations with low value)
-- RAG bloat (excessive knowledge base usage)
+- Idle spend: a Production agent with no call in the last 30 days that still costs
+  money for hosting.
+- Duplicate spend: two agents that look like they do the same job (the reuse
+  similarity rule) while both cost money.
+
+Each becomes an open waste finding with the monthly amount, which the risk scan
+shows as a FINANCIAL risk. A finding that no longer applies is resolved.
+
+run_legacy_waste_heuristics below is the earlier placeholder (idle by any token
+usage ever, model overkill by name, prompt bloat from the description length).
+It is no longer called: it is kept until the final cleanup of the product.
 """
 from sqlalchemy import select, func
 from db.base import get_db_session
@@ -17,8 +23,8 @@ async def _existing_finding_ids(db, agent_id: str) -> set:
     return set(r[0] for r in result.all())
 
 
-async def run_waste_detection(org_id: str) -> dict:
-    """Run waste detection across all agents."""
+async def run_legacy_waste_heuristics(org_id: str) -> dict:
+    """The earlier placeholder checks. Not called any more (see the module note)."""
     findings_saved = []
     total_waste_cents = 0
 
@@ -144,3 +150,48 @@ async def run_waste_detection(org_id: str) -> dict:
         "findings_created": len(findings_saved),
         "total_waste_cents": total_waste_cents,
     }
+
+
+
+SPEND_TYPES = ("idle_spend", "duplicate_spend")
+
+
+async def review_spend(agent_id: str | None = None, trigger: str = "manual", **_) -> dict:
+    """The daily job: store idle and duplicate spend as open waste findings."""
+    from datetime import datetime, timezone
+
+    from api.routers.ops.value_ops import spend_review_data
+
+    async with get_db_session() as db:
+        data = await spend_review_data(db)
+        wanted: dict[str, dict] = {}
+        for i in data["idle"]:
+            wanted[f"spend-idle-{i['agentId']}"] = {"agent_id": i["agentId"], "waste_type": "idle_spend", "severity": "medium",
+                                                     "monthly_waste_cents": i["monthlyCents"], "recommendation": i["text"] + " Retire it or stop the hosting."}
+        for d in data["duplicates"]:
+            a, b = d["agents"]
+            wanted[f"spend-dup-{min(a['id'], b['id'])}-{max(a['id'], b['id'])}"] = {
+                "agent_id": a["id"], "waste_type": "duplicate_spend", "severity": "low",
+                "monthly_waste_cents": d["possibleSavingCents"], "recommendation": d["text"]}
+        existing = {w.id: w for w in (await db.execute(select(WasteFinding).where(WasteFinding.waste_type.in_(SPEND_TYPES)))).scalars()}
+        opened = resolved = 0
+        for fid, v in wanted.items():
+            row = existing.get(fid)
+            if row is None:
+                db.add(WasteFinding(id=fid, status="open", **v))
+                opened += 1
+            else:
+                row.monthly_waste_cents, row.recommendation, row.severity = v["monthly_waste_cents"], v["recommendation"], v["severity"]
+                if row.status != "open":
+                    row.status, row.resolved_at = "open", None
+        for fid, row in existing.items():
+            if fid not in wanted and row.status == "open":
+                row.status, row.resolved_at = "resolved", datetime.now(timezone.utc)
+                resolved += 1
+    return {"status": "ok", "idle": len(data["idle"]), "duplicates": len(data["duplicates"]), "opened": opened, "resolved": resolved,
+            "monthlyCents": sum(v["monthly_waste_cents"] or 0 for v in wanted.values())}
+
+
+async def run_waste_detection(org_id: str = "org-default") -> dict:
+    """The older trigger (POST /orchestrations/waste-detection) runs the spend review."""
+    return await review_spend(trigger="manual")

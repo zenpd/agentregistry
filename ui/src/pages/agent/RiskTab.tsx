@@ -21,6 +21,7 @@ import {
   type RiskStatus,
 } from '../../services/ops/risk'
 import { CATEGORY_COLORS, CATEGORY_LABELS, Loading, MiniStat, SectionLabel, SEVERITIES, SEVERITY_PILL, SOURCE_BADGE, SourceBadge, type TabProps, useReloadOn } from './shared'
+import IncidentsPanel from './IncidentsPanel'
 
 const STATUS_PILL: Record<RiskStatus, string> = {
   open: 'bg-rose-50 text-rose-700 ring-rose-200',
@@ -111,7 +112,7 @@ function ErrorLine({ text }: { text: string | null }) {
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
-export default function RiskTab({ agentId, onChanged, dataVersion }: TabProps) {
+export default function RiskTab({ agent, agentId, onChanged, dataVersion }: TabProps) {
   const [data, setData] = useState<AgentRisksResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active')
@@ -160,6 +161,7 @@ export default function RiskTab({ agentId, onChanged, dataVersion }: TabProps) {
     <div className="space-y-5">
       {error && <ErrorLine text={`Refresh failed: ${error}`} />}
       <ScoreHeader data={data} agentId={agentId} onScanned={load} />
+      <IncidentsPanel agentId={agentId} ownerUserId={agent.ownerUserId} backupOwnerUserId={agent.backupOwnerUserId} />
       <TraceSignalsPanel data={data} />
       <Charts active={active} financial={data.financial} />
 
@@ -247,7 +249,7 @@ function ScoreHeader({ data, agentId, onScanned }: { data: AgentRisksResponse; a
             {score.worst ? (
               <>
                 <span className={`text-xs px-2 py-0.5 rounded-full ring-1 font-semibold ${SEVERITY_PILL[score.worst]}`}>{score.worst}</span>
-                <span className="text-xs text-slate-600">worst active severity · {score.total} active finding(s)</span>
+                <span className="text-xs text-slate-600">worst active severity · {score.total} active risk{score.total === 1 ? '' : 's'}</span>
               </>
             ) : (
               <span className="text-xs text-slate-600">No active findings</span>
@@ -331,7 +333,7 @@ function TraceSignalsPanel({ data }: { data: AgentRisksResponse }) {
     return (
       <Notice tone="gray">
         Trace-based rules ({TRACE_RULES_TEXT}) need a linked Phoenix project. None is linked, so they are not
-        checked. That means no trace data, not a clean result. Link a project on the Overview tab.
+        checked. That means no trace data, not a clean result. Link a project on the Diagram tab.
       </Notice>
     )
   }
@@ -379,8 +381,8 @@ function TraceSignalsPanel({ data }: { data: AgentRisksResponse }) {
           accent={kri.error_spans ? 'text-amber-600' : undefined}
         />
         <MiniStat label="p95 latency" value={kri.p95_latency_ms == null ? '—' : `${Math.round(kri.p95_latency_ms).toLocaleString()} ms`} hint="Whole-trace duration" />
-        <MiniStat label="PII spans" value={String(kri.pii_spans)} accent={kri.pii_spans ? 'text-rose-600' : undefined} hint="Spans with pii.detected=true" />
-        <MiniStat label="Injection" value={String(kri.injection_spans)} accent={kri.injection_spans ? 'text-rose-600' : undefined} hint="Spans with guardrail.injection_detected=true" />
+        <MiniStat label="Spans with personal data" value={String(kri.pii_spans)} accent={kri.pii_spans ? 'text-rose-600' : undefined} hint="Spans with pii.detected=true" />
+        <MiniStat label="Prompt-injection spans" value={String(kri.injection_spans)} accent={kri.injection_spans ? 'text-rose-600' : undefined} hint="Spans with guardrail.injection_detected=true" />
         <MiniStat label="LLM calls" value={kri.llm_calls.toLocaleString()} />
       </div>
       {(smallSample || scan.sampleCapped) && (
@@ -697,7 +699,7 @@ function AddRiskForm({ agentId, today, onDone }: { agentId: string; today: strin
   return (
     <div className="card p-4 space-y-2">
       <p className="text-xs text-slate-600">
-        Risks added here are never changed or closed by a scan. Only a person moves them through the lifecycle.
+        Risks added here are never changed or closed by a scan. Only a person changes their status.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <label className="text-xs text-slate-600 space-y-1 block">
@@ -746,11 +748,11 @@ function FinancialSection({ financial }: { financial: FinancialFinding[] }) {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <SectionLabel>Financial findings (live)</SectionLabel>
+        <SectionLabel>Financial flags (live)</SectionLabel>
         {hasDemo && <SourceBadge source="seed" />}
       </div>
       <p className="text-[12px] text-slate-500">
-        Read live from cost anomalies, waste findings and the Revenue & Expenditure rules each time this tab loads.
+        Read live from cost anomalies, waste findings and the financial flags of the Revenue & Expenditure tab each time this tab loads.
         They are not stored in the register and clear when the underlying condition clears. Visibility only: nothing
         here pauses or limits the agent.
       </p>

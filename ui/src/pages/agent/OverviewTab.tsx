@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactN
 import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { Agent, GraphV2Response } from '../../services/api'
+import { getDirectory, setOwnership, type Agent, type GraphV2Response } from '../../services/api'
+import { can, notAllowed, useMe } from '../../lib/me'
 import InfoTip from '../../components/InfoTip'
 import type { GlossaryKey } from '../../lib/glossary'
 import {
@@ -29,7 +30,7 @@ import {
 import { CATEGORY_LABELS, Loading, SEVERITIES, SEVERITY_PILL, FieldLabel, SectionLabel, SourceBadge, fmtCents, fmtNumber, type TabProps, useReloadOn } from './shared'
 
 const GATES: { key: GateKey; label: string }[] = [
-  { key: 'arb', label: 'ARB' },
+  { key: 'arb', label: 'Architecture' },
   { key: 'security', label: 'Security' },
   { key: 'dp', label: 'Data Protection' },
 ]
@@ -47,7 +48,7 @@ const APPROVED = ['Approved', 'Approved with Conditions']
 
 const BUDGET_STATE: Record<string, { label: string; className: string }> = {
   on_track: { label: 'On track', className: 'text-emerald-700' },
-  at_threshold: { label: 'At alert threshold', className: 'text-amber-700' },
+  at_threshold: { label: 'Alert threshold reached', className: 'text-amber-700' },
   over_budget: { label: 'Over budget', className: 'text-rose-700' },
   no_usage_data: { label: 'No usage data', className: 'text-slate-500' },
 }
@@ -158,9 +159,9 @@ function RiskTile({ header, agentId }: { header: OverviewHeader; agentId: string
   const { worst, openCounts, total } = header.riskScore
   const counts = [...SEVERITIES].reverse().filter(s => openCounts[s])
   return (
-    <Tile label="Open risks" tip="risk_register" to={`/agents/${agentId}?tab=risk`}>
+    <Tile label="Active risks" tip="risk_register" to={`/agents/${agentId}?tab=risk`}>
       {total === 0 || !worst ? (
-        <p className="text-sm font-semibold text-emerald-700">None open</p>
+        <p className="text-sm font-semibold text-emerald-700">None active</p>
       ) : (
         <div className="flex items-center gap-2">
           <span className="text-lg font-bold text-slate-900">{total}</span>
@@ -170,7 +171,7 @@ function RiskTile({ header, agentId }: { header: OverviewHeader; agentId: string
       {counts.length > 0 && (
         <p className="text-[12px] text-slate-600">{counts.map(s => `${openCounts[s]} ${s.toLowerCase()}`).join(' · ')}</p>
       )}
-      <p className="text-[12px] text-slate-500">Declared risk level: {header.riskLevel || '—'}</p>
+      <p className="text-[12px] text-slate-500">Risk level: {header.riskLevel || '—'}</p>
     </Tile>
   )
 }
@@ -178,7 +179,7 @@ function RiskTile({ header, agentId }: { header: OverviewHeader; agentId: string
 function GatesTile({ header, agentId }: { header: OverviewHeader; agentId: string }) {
   const approved = GATES.filter(g => APPROVED.includes(header.gates[g.key])).length
   return (
-    <Tile label="Governance gates" tip="gate" to={`/agents/${agentId}?tab=governance`}>
+    <Tile label="Governance reviews" tip="gate" to={`/agents/${agentId}?tab=governance`}>
       <p className={`text-sm font-semibold ${approved === GATES.length ? 'text-emerald-700' : 'text-slate-900'}`}>
         {approved} of {GATES.length} approved
       </p>
@@ -199,7 +200,7 @@ function GatesTile({ header, agentId }: { header: OverviewHeader; agentId: strin
 function BudgetTile({ header, agentId }: { header: OverviewHeader; agentId: string }) {
   const b = header.budget
   return (
-    <Tile label="Budget (month to date)" tip="budget" to={`/agents/${agentId}?tab=tokenomics`}>
+    <Tile label="Budget (this period)" tip="budget" to={`/agents/${agentId}?tab=tokenomics`}>
       {!b ? (
         <p className="text-sm text-slate-500">No budget set</p>
       ) : (
@@ -219,7 +220,7 @@ function BudgetTile({ header, agentId }: { header: OverviewHeader; agentId: stri
           {b.unpriced.length > 0 && <p className="text-[12px] text-amber-700">Unpriced model: {b.unpriced.join(', ')}</p>}
         </>
       )}
-      <p className="text-[12px] text-slate-500">Visibility only, never enforced</p>
+      <p className="text-[12px] text-slate-500">For information only: the registry never pauses or stops an agent</p>
     </Tile>
   )
 }
@@ -227,13 +228,13 @@ function BudgetTile({ header, agentId }: { header: OverviewHeader; agentId: stri
 function TelemetryTile({ header, agentId }: { header: OverviewHeader; agentId: string }) {
   const t = header.telemetry
   return (
-    <Tile label="Telemetry" to={`/agents/${agentId}?tab=diagram`}>
+    <Tile label="Usage data" to={`/agents/${agentId}?tab=diagram`}>
       <div className="flex items-center gap-2 flex-wrap">
         <SourceBadge source={t.source} />
-        {t.freshness && <Pill className={FRESHNESS_PILL[t.freshness]}>{t.freshness}</Pill>}
+        {t.freshness && <Pill className={FRESHNESS_PILL[t.freshness]}>{({ fresh: 'Up to date', aging: 'Getting old', stale: 'Out of date' } as Record<string, string>)[t.freshness] ?? t.freshness}</Pill>}
       </div>
       {t.status === 'not_linked' && (
-        <p className="text-[12px] text-slate-600">No Phoenix project linked, so no usage data. Link one on the Diagram tab.</p>
+        <p className="text-[12px] text-slate-600">No tracing linked, so no usage data. Link a Phoenix project on the Diagram tab.</p>
       )}
       {t.status === 'no_usage_yet' && (
         <p className="text-[12px] text-slate-600">
@@ -287,36 +288,111 @@ function Fact({ label, children, wide, tip }: { label: string; children: ReactNo
   )
 }
 
-function FactsGrid({ agent, facts }: { agent: Agent; facts: OverviewFacts | null }) {
+type Person = { id: string; name: string; email: string; role: string }
+
+// The accountable owner and the backup owner, who takes over when the owner's account is deactivated.
+function OwnerFact({ agent, onChanged }: { agent: Agent; onChanged: () => void }) {
+  const me = useMe()
+  const [people, setPeople] = useState<Person[] | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [owner, setOwner] = useState('')
+  const [backup, setBackup] = useState('')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => { getDirectory().then(r => setPeople(r.data)).catch(() => setPeople([])) }, [])
+  const name = (id?: string | null) => (id && people?.find(p => p.id === id)?.name) || null
+  const backupName = name(agent.backupOwnerUserId)
+
+  function start() {
+    setOwner(agent.ownerUserId || ''); setBackup(agent.backupOwnerUserId || ''); setReason(''); setError(null); setEditing(true)
+  }
+  async function save() {
+    setBusy(true); setError(null)
+    try {
+      await setOwnership(agent.id, { ...(owner ? { ownerUserId: owner } : {}), backupOwnerUserId: backup, reason })
+      setEditing(false); onChanged()
+    } catch (e) {
+      setError(errorMessage(e, 'The owner was not changed'))
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div data-testid="owner-fact">
+      <FieldLabel tip="owner">Owner</FieldLabel>
+      {!editing && (
+        <div className="text-sm text-slate-900">
+          {agent.owner || 'Unassigned'}
+          {!agent.ownerUserId && agent.owner && <span className="ml-1 text-xs text-slate-500">(a name, not a person with an account)</span>}
+          {agent.ownerContact && <span className="block text-xs text-slate-600">{agent.ownerContact}</span>}
+          <span className="block text-xs text-slate-600" data-testid="backup-owner">
+            Backup owner: {backupName || <span className="text-amber-700">none set</span>}
+          </span>
+          {can(me, 'update')
+            ? <button type="button" className="mt-1 text-xs font-semibold text-zen-700 hover:underline" onClick={start} data-testid="change-owner">Change owner or backup</button>
+            : me && <span className="mt-1 block text-xs text-slate-500">{notAllowed(me, 'change the owner')}</span>}
+        </div>
+      )}
+      {editing && (
+        <div className="mt-1 space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+          <label className="block text-xs text-slate-600">Owner (a person with an account)
+            <select className="input mt-0.5 text-sm" value={owner} onChange={e => setOwner(e.target.value)} aria-label="Owner" data-testid="owner-select">
+              <option value="">Keep the current owner ({agent.owner || 'Unassigned'})</option>
+              {(people || []).map(p => <option key={p.id} value={p.id}>{p.name} · {p.role}</option>)}
+            </select>
+          </label>
+          <label className="block text-xs text-slate-600">Backup owner (takes over if the owner's account is deactivated)
+            <select className="input mt-0.5 text-sm" value={backup} onChange={e => setBackup(e.target.value)} aria-label="Backup owner" data-testid="backup-select">
+              <option value="">None</option>
+              {(people || []).filter(p => p.id !== owner).map(p => <option key={p.id} value={p.id}>{p.name} · {p.role}</option>)}
+            </select>
+          </label>
+          <input className="input text-sm" value={reason} onChange={e => setReason(e.target.value)} placeholder="Why (optional, kept in the audit trail)" aria-label="Reason" />
+          <div className="flex gap-2">
+            <button type="button" className="btn-primary btn-sm" disabled={busy} onClick={save} data-testid="save-owner">{busy ? 'Saving…' : 'Save'}</button>
+            <button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={() => setEditing(false)}>Cancel</button>
+          </div>
+          {error && <p className="text-xs text-rose-700">{error}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FactsGrid({ agent, facts, onChanged }: { agent: Agent; facts: OverviewFacts | null; onChanged: () => void }) {
   const model = facts?.modelName ?? agent.modelName
   const provider = facts?.modelProvider
   const endpoint = facts?.apiEndpoint ?? agent.apiEndpoint
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-      <Fact label="Owner" tip="owner">
-        {agent.owner || 'Unassigned'}
-        {agent.ownerContact && <span className="block text-xs text-slate-600">{agent.ownerContact}</span>}
-      </Fact>
+      <OwnerFact agent={agent} onChanged={onChanged} />
       <Fact label="Department" tip="department">{facts?.dept ?? agent.dept ?? '—'}</Fact>
       <Fact label="Type" tip="ai_type">{agent.aiType || '—'}</Fact>
       <Fact label="Model">
         {model ? <span className="font-mono">{model}</span> : '—'}
         {provider && <span className="block text-xs text-slate-600">{provider}</span>}
       </Fact>
-      <Fact label="Value" tip="declared_value">
-        {agent.valueAmount ? <span className="font-mono">${(agent.valueAmount / 1000).toFixed(0)}K/mo</span> : 'Not declared'}
+      <Fact label="Declared value" tip="declared_value">
+        {agent.valueAmount ? <span className="font-mono">{agent.valueAmount >= 1000 ? `$${(agent.valueAmount / 1000).toFixed(agent.valueAmount >= 10000 ? 0 : 1)}K` : `$${Math.round(agent.valueAmount)}`}/mo</span> : 'Not declared'}
         {agent.valueType && <span className="block text-xs text-slate-600">{agent.valueType}</span>}
       </Fact>
       <Fact label="Hours saved" tip="hours_saved">{agent.hoursSavedMonthly ? `${fmtNumber(agent.hoursSavedMonthly)} h/mo` : 'Not declared'}</Fact>
       <Fact label="SLA" tip="sla">{agent.sla || '—'}</Fact>
-      <Fact label="EU AI Act category">{facts?.euAiActCategory || '—'}</Fact>
+      <Fact label="EU AI Act category" tip="classification">
+        {facts?.euAiActCategory || '—'}
+        <span className="block text-xs text-slate-600" data-testid="classification-status">
+          {facts?.classification
+            ? `Confirmed by ${facts.classification.by} on ${facts.classification.on}`
+            : <Link to="?tab=governance" className="text-amber-700 hover:underline">Not confirmed: classify on the Governance tab</Link>}
+        </span>
+      </Fact>
       <Fact label="Version">{agent.version || '—'}</Fact>
       <Fact label="API endpoint" tip="api_endpoint" wide>
         <span className="font-mono text-slate-700 break-all">{endpoint || 'N/A'}</span>
         {facts?.apiEndpointWarning && (
           <span className="mt-1 flex items-start gap-1 text-xs text-amber-700">
             <span aria-hidden>⚠</span>
-            <span>{facts.apiEndpointWarning} Update it in the agent profile if the agent has its own API.</span>
+            <span>{facts.apiEndpointWarning} Update it on the Integrate tab (Contract, Edit) if the agent has its own API.</span>
           </span>
         )}
       </Fact>
@@ -362,7 +438,7 @@ function DeclaredDependencies({ agent, agentId, graph }: { agent: Agent; agentId
             {deps.map((e, i) => {
               const otherId = e.from === agentId ? e.to : e.from
               const otherName = graph?.nodes.find(n => n.id === otherId)?.name ?? otherId
-              const typeLabel = e.type === 'CALLS' ? 'calls' : e.type === 'CONSUMED_BY' ? 'feeds' : e.type === 'ACCESSES' ? 'accesses' : e.type === 'USES_KB' ? 'knowledge' : 'tool'
+              const typeLabel = e.type === 'CALLS' ? 'calls' : e.type === 'CONSUMED_BY' ? 'feeds' : e.type === 'ACCESSES' ? 'accesses' : e.type === 'USES_KB' ? 'uses knowledge base' : 'uses tool'
               const direction = e.from === agentId ? typeLabel : 'needed by'
               return (
                 <div key={i} className="text-xs flex gap-2">
@@ -393,7 +469,7 @@ function CompletenessBar({ pct, missing }: { pct: number; missing: string[] }) {
       </div>
       {missing.length > 0 && (
         <div className="flex flex-wrap items-center gap-1">
-          <span className="text-[12px] text-slate-500">Missing or under 20 characters:</span>
+          <span className="text-[12px] text-slate-500">Sections missing or shorter than 20 characters:</span>
           {missing.map(s => <Pill key={s} className="bg-gray-50 text-slate-600 ring-gray-200">{s}</Pill>)}
         </div>
       )}
@@ -468,7 +544,7 @@ function Suggestions({ insight, busy, onAction }: {
                 </div>
                 <Excerpt text={d.excerpt} />
               </div>
-              {buttons('dependency', d.name, 'Add to declared')}
+              {buttons('dependency', d.name, 'Add to declared dependencies')}
             </div>
           ))}
         </div>
@@ -482,7 +558,7 @@ function Signals({ insight }: { insight: ContextInsight }) {
   if (labels.length === 0) return null
   return (
     <div className="flex flex-wrap items-center gap-1">
-      <span className="text-[12px] text-slate-500">Mentions:</span>
+      <span className="text-[12px] text-slate-500">Topics mentioned in context.md:</span>
       {labels.map(l => <Pill key={l} className="bg-gray-50 text-slate-700 ring-gray-200">{l}</Pill>)}
     </div>
   )
@@ -864,7 +940,7 @@ export default function OverviewTab({ agent, agentId, onChanged, dataVersion, gr
     <div className="space-y-6">
       <KpiStrip overview={overview} error={overviewError} onRetry={load} agentId={agentId} />
 
-      <FactsGrid agent={agent} facts={overview?.facts ?? null} />
+      <FactsGrid agent={agent} facts={overview?.facts ?? null} onChanged={onChanged} />
 
       {(agent.description || agent.businessOutcome) && (
         <div className="space-y-3">

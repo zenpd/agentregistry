@@ -282,7 +282,7 @@ export default function TryItPanel({ agentId, tryIt, endpointAdvice, onEndpointS
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-slate-500">
           Sent from the registry server. Your login is not passed to the agent. Calls are logged without their
-          content and limited per minute.
+          content, and each person can send a limited number of calls a minute (10 unless the installation changed it).
         </p>
         <button type="button" onClick={send} disabled={busy || badPath} className="btn-primary btn-sm flex items-center gap-1.5 shrink-0">
           <Send size={14} /> {busy ? 'Calling…' : 'Send'}

@@ -74,9 +74,37 @@ class Settings(BaseSettings):
     arize_phoenix_api_key: str = ""          # resolved from KV
     arize_phoenix_api_key_kv_uri: str = ""
 
+    # ── Access ─────────────────────────────────────────────────────────────────
+    # Role checks (api/auth.py ROLES). Turn off only for a one-person test setup.
+    rbac_enabled: bool = True
+
+    # ── Demo agents ────────────────────────────────────────────────────────────
+    # The seeded example agents (is_demo, labelled Demo). True: an empty database
+    # is seeded with them and every page shows them (each browser can hide them in
+    # Settings → Demo agents). False: they are not seeded, and any already in the
+    # database are left out of every page, count, graph and job (kept, not deleted).
+    demo_agents_enabled: bool = True
+
+    # ── Notifications ──────────────────────────────────────────────────────────
+    # Every notification is in the in-app inbox. E-mail is sent when SMTP_HOST
+    # is set, and a Teams channel gets the daily summary when the webhook is set.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+    teams_webhook_url: str = ""
+    # Approvals that expire within this many days are listed in the digest.
+    notify_expiry_days: int = 14
+    # A review waiting longer than this many days is marked overdue (queue and digest).
+    review_sla_days: int = 5
+    # Base address of the UI, for links in e-mail and Teams messages.
+    app_base_url: str = "http://localhost:5174"
+
     # ── Agent operations ───────────────────────────────────────────────────────
     # In-process daily jobs (usage ingestion, cost rollup, risk scan, ...).
-    scheduler_enabled: bool = False
+    scheduler_enabled: bool = True
     # Days of Phoenix history to backfill the first time an agent is ingested.
     usage_backfill_days: int = 30
     # Phoenix discovery: how far back each project's spans are read, how many
@@ -114,7 +142,9 @@ class Settings(BaseSettings):
     api_discovery_timeout_seconds: float = 45.0
     # API rate limits. One agent page costs roughly ten requests, so this is
     # per signed-in user, not per IP — behind a proxy every user shares one IP.
-    api_rate_limit_per_minute: int = 300
+    # Per signed-in person. Opening the seven tabs of one agent makes about 175 requests in the
+    # development server (90 in a production build), so a limit of 300 refused requests during a quick walk-through.
+    api_rate_limit_per_minute: int = 1000
     login_attempts_per_5_min: int = 5
     # Only enable where a trusted proxy (nginx, ACA ingress) sets
     # X-Forwarded-For; a client can otherwise spoof the header to dodge limits.

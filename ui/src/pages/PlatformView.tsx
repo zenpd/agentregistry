@@ -1,14 +1,14 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { getAgents, getConcentrationRisk, getGraphV2, type Agent } from '../services/api'
 import InfoTip from '../components/InfoTip'
 import type { GlossaryKey } from '../lib/glossary'
-import TraceNetworkGraph, { type TraceNode, type TraceEdge } from '../components/TraceNetworkGraph'
+import type { TraceNode, TraceEdge } from '../components/TraceNetworkGraph'
 
 export default function PlatformView() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [concentrationRisk, setConcentrationRisk] = useState<{ name: string; count: number }[]>([])
   const [graph, setGraph] = useState<{ nodes: TraceNode[]; edges: TraceEdge[] } | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -61,23 +61,6 @@ export default function PlatformView() {
 
   const maxConcentration = Math.max(1, ...concentrationRisk.map(r => r.count))
 
-  const selectedNode = useMemo(
-    () => (graph && selectedId ? graph.nodes.find(n => n.id === selectedId) ?? null : null),
-    [graph, selectedId],
-  )
-  const selectedAgent = useMemo(
-    () => (selectedId ? agents.find(a => a.id === selectedId) ?? null : null),
-    [agents, selectedId],
-  )
-  const calls = useMemo(
-    () => (graph && selectedId ? graph.edges.filter(e => e.from === selectedId).map(e => e.to) : []),
-    [graph, selectedId],
-  )
-  const calledBy = useMemo(
-    () => (graph && selectedId ? graph.edges.filter(e => e.to === selectedId).map(e => e.from) : []),
-    [graph, selectedId],
-  )
-
   // Aggregate systems, databases, MCP servers, knowledge bases
   const systems: Record<string, number> = {}
   const databases: Record<string, number> = {}
@@ -97,8 +80,8 @@ export default function PlatformView() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold gradient-text">Platform & Dependencies</h1>
-        <p className="text-slate-600 mt-0.5">Every system, database, MCP server and knowledge base the AI fleet uses, where dependency is concentrated, and how agents call each other.</p>
+        <h1 className="text-2xl font-bold gradient-text">Platform</h1>
+        <p className="text-slate-600 mt-0.5">Every system, database, MCP server and knowledge base the AI fleet uses, and where dependency is concentrated.</p>
       </div>
 
       {/* Mini Cards Grid */}
@@ -136,92 +119,16 @@ export default function PlatformView() {
         </div>
       )}
 
-      {/* Cross-AI Call Network */}
+      {/* Agent → system matrix */}
       {graph && graph.nodes.length > 0 && (
         <div className="card p-4">
-          <h2 className="font-semibold mb-3">Cross-AI Call Network <InfoTip term="dependency_graph" /></h2>
-          <p className="text-xs text-slate-500 mb-3">
-            Agent-to-agent handoffs only — every registered agent is plotted, most have none. The systems,
-            databases and MCP servers each agent uses are in the cards above and the matrix below. Drag, scroll to
-            zoom, click a node for its detail.
-          </p>
-          <div className="relative rounded-lg border border-gray-100 overflow-hidden">
-            <TraceNetworkGraph
-              nodes={graph.nodes}
-              edges={graph.edges}
-              height={420}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-            />
-          </div>
-          {selectedNode && (
-            <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-slate-800">{selectedNode.name}</span>
-                {selectedNode.kind === 'external' ? (
-                  <span className="rounded-full bg-violet-50 px-2 py-0.5 text-violet-700 ring-1 ring-violet-200">
-                    Not registered
-                  </span>
-                ) : selectedAgent ? (
-                  <span className="text-slate-500">{selectedAgent.aiType} · {selectedAgent.stage}</span>
-                ) : null}
-              </div>
-              <div className="mt-1.5 grid grid-cols-2 gap-2 text-slate-600">
-                <div>
-                  <div className="text-[12px] uppercase text-slate-500">Calls</div>
-                  {calls.length ? calls.map(n => (
-                    <div key={n}>→ {graph.nodes.find(x => x.id === n)?.name || n}</div>
-                  )) : <div>—</div>}
-                </div>
-                <div>
-                  <div className="text-[12px] uppercase text-slate-500">Called by</div>
-                  {calledBy.length ? calledBy.map(n => (
-                    <div key={n}>← {graph.nodes.find(x => x.id === n)?.name || n}</div>
-                  )) : <div>—</div>}
-                </div>
-              </div>
-              {selectedNode.kind === 'external' && (
-                <p className="mt-1.5 text-slate-500">
-                  Referenced by another agent's declared "calls" but not itself registered — a shadow-AI candidate.
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Edge Table */}
-          {graph.edges.length > 0 && (
-            <div className="mt-4">
-              <h3 className="text-sm font-medium text-slate-700 mb-2">Agent Call Edges</h3>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-slate-600 border-b">
-                    <th className="pb-1">Caller</th>
-                    <th className="pb-1"></th>
-                    <th className="pb-1">Callee</th>
-                    <th className="pb-1">Why</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {graph.edges.map((e, i) => {
-                    const caller = graph.nodes.find(n => n.id === e.from)?.name || e.from
-                    const callee = graph.nodes.find(n => n.id === e.to)?.name || e.to
-                    return (
-                      <tr key={i} className="border-b last:border-0">
-                        <td className="py-1 font-medium">{caller}</td>
-                        <td className="py-1 text-slate-500">→</td>
-                        <td className="py-1 font-mono text-zen-600">{callee}</td>
-                        <td className="py-1 text-slate-600">Hands off work to this agent</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
           {/* Initiative -> Integration Matrix */}
-          <div className="mt-4">
-            <h3 className="text-sm font-medium text-slate-700">Initiative → Integration Dependency Matrix <InfoTip term="dependency_graph" /></h3>
+          <div>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="font-semibold">Which systems and databases each agent uses <InfoTip term="dependency_graph" /></h2>
+              {/* The agent-to-agent call graph lives on one page only. */}
+              <Link to="/dependencies" className="text-[13px] font-semibold text-zen-700 hover:underline" data-testid="to-dependencies">Which agents call which: open Dependencies</Link>
+            </div>
             {(() => {
               const cols = [
                 ...Object.keys(systems).sort((a, b) => systems[b] - systems[a]).map(name => ({ name, kind: 'system' as const })),
@@ -241,7 +148,7 @@ export default function PlatformView() {
                     <table className="text-xs border-collapse">
                       <thead>
                         <tr>
-                          <th className="border p-1.5 bg-gray-50 text-left align-bottom">Initiative</th>
+                          <th className="border p-1.5 bg-gray-50 text-left align-bottom">Agent</th>
                           {cols.map(c => (
                             <th key={c.kind + c.name} className="border p-1.5 bg-gray-50 text-center align-bottom font-medium text-slate-700 min-w-[64px] max-w-[88px] leading-tight"
                               style={{ borderTop: `3px solid ${c.kind === 'system' ? '#3DDBD9' : '#8C7CF0'}` }}>

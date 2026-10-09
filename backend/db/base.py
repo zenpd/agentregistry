@@ -44,6 +44,10 @@ class Base(DeclarativeBase):
     pass
 
 
+import db.scope  # noqa: E402,F401  registers the demo-agent filter on every session
+import services.decision_chain  # noqa: E402,F401  flags sessions that write decisions, for sealing
+
+
 async def create_all_tables() -> None:
     """Create all ORM tables if they don't exist. Prefer Alembic in production —
     run `alembic upgrade head` as a pre-deploy step. Kept for local dev only."""
@@ -63,6 +67,18 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+    if session.info.pop("seal_decisions", False):
+        await _seal()
+
+
+async def _seal() -> None:
+    """Seals new decision rows into the hash chain (services/decision_chain.py)."""
+    from services.decision_chain import seal_pending
+    try:
+        await seal_pending()
+    except Exception as exc:  # sealing again later picks the row up; a decision is never lost over it
+        import logging
+        logging.getLogger("db.base").warning("decision chain seal failed: %s", type(exc).__name__)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -79,3 +95,5 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+    if session.info.pop("seal_decisions", False):
+        await _seal()

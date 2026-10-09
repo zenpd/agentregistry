@@ -51,7 +51,8 @@ async def test_a_new_user_is_cleaned_listed_audited_and_can_sign_in(client):
     created = await client.post("/api/v1/admin/users", json=NEW)
     assert created.status_code == 200
     assert created.json()["user"] == {"id": created.json()["id"], "email": "bob.approver@example.com",
-                                      "name": "Bob Approver", "role": "Security Reviewer", "isActive": True}
+                                      "name": "Bob Approver", "role": "Security Reviewer", "isActive": True,
+                                      "awayUntil": None, "deputyUserId": None, "accessUntil": None}
     names = [u["name"] for u in (await client.get("/api/v1/admin/users")).json()]
     assert names == ["Admin", "Bob Approver"]
     async with get_db_session() as s:

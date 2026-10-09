@@ -72,20 +72,28 @@ class JobSpec:
 JOBS: dict[str, JobSpec] = {s.name: s for s in (
     JobSpec("phoenix_discovery", "Discover agents in Phoenix", "Discovery",
             "orchestrations.phoenix_discovery:discover_phoenix", time(0, 30)),
+    JobSpec("connector_sync", "Connector scan (Langfuse, GitHub, Azure)", "Connectors",
+            "services.connectors:sync_all", time(0, 45)),
     JobSpec("usage_ingestion", "Usage ingestion (Phoenix)", "Usage",
             "orchestrations.usage_ingestion:ingest_usage", time(1, 0)),
+    JobSpec("consumer_observation", "Who calls each agent (from traces)", "Consumers",
+            "orchestrations.consumer_observation:observe_consumers", time(1, 10)),
     JobSpec("record_autofill", "Fill in records automatically", "Auto-fill",
             "orchestrations.record_autofill:autofill_records", time(1, 15)),
     JobSpec("infra_costs", "Infra cost pull (Azure Cost Management)", "Infra cost",
             "costs.azure_cost_collector:collect_infra_costs", time(1, 30), admin_only=True),
     JobSpec("cost_rollup", "Cost rollup, budget status, anomalies", "Cost rollup",
             "orchestrations.cost_rollup:rollup_costs", time(2, 0)),
+    JobSpec("spend_review", "Idle and duplicate spend", "Spend review",
+            "orchestrations.waste_detection:review_spend", time(2, 15)),
     JobSpec("risk_scan", "Risk scan", "Risk scan",
             "orchestrations.risk_scan:scan_risks", time(2, 30)),
     JobSpec("governance_checks", "Governance checks (expiry, recertification)", "Governance",
             "orchestrations.governance_checks:run_governance_checks", time(3, 0)),
     JobSpec("insight_refresh", "AI insights refresh", "Insights",
             "orchestrations.insight_refresh:refresh_insights", time(3, 30)),
+    JobSpec("notifications", "Daily notifications", "Notifications",
+            "orchestrations.notifications:send_daily_notifications", time(6, 0)),
 )}
 
 
@@ -483,6 +491,13 @@ async def run_job(job: str, agent_id: str | None = None, trigger: str = "manual"
 
     log.info("job.finished", job=job, agent_id=agent_id, trigger=trigger, status=status,
              ms=int((monotonic() - clock) * 1000))
+    # Nobody watches a scheduled run, so its failure is sent to the admins.
+    if trigger == "scheduled" and status in _FAILED and status not in ("not_configured", "cancelled") and job != "notifications":
+        try:
+            from services import notify
+            await notify.job_failed(job, spec.label, status, error)
+        except Exception as exc:  # a notification problem never fails the job
+            log.warning("job.failure_notice_failed", job=job, error=describe_error(exc))
     if error:
         log.warning("job.error", job=job, agent_id=agent_id, error=error)
     if finished is None:

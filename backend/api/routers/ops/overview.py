@@ -131,7 +131,7 @@ async def _usage(db: AsyncSession, agent: Agent, today: date) -> tuple[dict, dic
         "source": source,
         "lastIngestedAt": usage["last_ingested_at"],
         "lastActivityDate": last_day.isoformat() if last_day else None,
-        "freshness": freshness(agent.lifecycle_stage, last_day, today) if source == "phoenix" else None,
+        "freshness": freshness(agent.lifecycle_stage, last_day, today) if source in ("phoenix", "langfuse") else None,
     }
 
     row = await db.get(AgentBudget, agent.id)
@@ -163,6 +163,11 @@ async def _versions(db: AsyncSession, agent_id: str) -> list[dict]:
     versions = await ctx.list_versions(db, agent_id)
     names = await _user_names(db, (v.saved_by for v in versions))
     return [{**ctx.version_to_dict(v), "savedBy": names.get(v.saved_by, v.saved_by)} for v in versions]
+
+
+async def _classification_detail(db: AsyncSession, agent_id: str) -> dict | None:
+    from orchestrations.governance_checks import _classification_detail as detail
+    return await detail(db, agent_id)
 
 
 def _facts(agent: Agent, dept_name: str | None, telemetry_urls: list[str | None]) -> dict:
@@ -238,7 +243,8 @@ async def agent_overview(agent_id: str, _=Depends(require_read)):
                 "budget": budget,
                 "telemetry": telemetry,
             },
-            "facts": _facts(agent, dept.name if dept else None, telemetry_urls),
+            "facts": {**_facts(agent, dept.name if dept else None, telemetry_urls),
+                      "classification": await _classification_detail(db, agent.id)},
             "context": _context_block(agent, insight, versions),
         }
 

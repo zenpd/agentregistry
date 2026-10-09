@@ -240,7 +240,7 @@ def evaluate_financial_flags(
 # ── Pure: one agent from plain data ──────────────────────────────────────────
 
 def _token_status(source: str, linked: bool, ingested: bool) -> str:
-    if source == "phoenix":
+    if source in ("phoenix", "langfuse", "manual"):
         return "measured"
     if linked and ingested:
         return "no_calls"
@@ -289,7 +289,8 @@ def build_economics(
     linked = bool((agent.get("phoenix_project") or "").strip())
     status = _token_status(usage.get("source", "none"), linked, usage_ingested)
     rows = list(usage.get("rows") or []) if status in ("measured", "demo") else []
-    token_source = {"measured": "phoenix", "no_calls": "phoenix", "demo": "seed"}.get(status, "none")
+    # The source the measured rows came from (Phoenix, Langfuse or entered by hand).
+    token_source = usage.get("source") if status == "measured" else {"no_calls": "phoenix", "demo": "seed"}.get(status, "none")
     priced_flags = [r.get("priced", True) for r in rows]
     pricing = "missing" if rows and not any(priced_flags) else "partial" if not all(priced_flags) else "ok"
     if pricing == "missing":
@@ -481,17 +482,34 @@ async def load_economics(db: Any, agents: Sequence[Any], today: date | None = No
     ingested = await _ingested_agent_ids(db, set(ids))
     rate = get_settings().blended_hourly_rate_usd
 
+    from db.models import ValueAttestation
+    from governance import value as gv
+
+    latest: dict[str, dict] = {}
+    for v in (await db.execute(select(ValueAttestation).where(ValueAttestation.agent_id.in_(ids))
+                               .order_by(ValueAttestation.attested_at))).scalars().all():
+        latest[v.agent_id] = {"status": v.status, "declaredCents": v.declared_cents, "declaredMethod": v.declared_method,
+                              "attestedCents": v.attested_cents}
+
     out = {}
     for a in agents:
+        method = gv.method_of(a.value_method, a.value_type, a.hours_saved_monthly)
+        declared = max(int(a.value_amount or 0), 0) * 100
+        state = gv.value_state(declared, a.value_method, latest.get(a.id))
         agent = {
-            "id": a.id, "name": a.name, "stage": a.lifecycle_stage, "value_amount": a.value_amount,
+            "id": a.id, "name": a.name, "stage": a.lifecycle_stage, "value_amount": state["cents"] // 100,
             "value_type": a.value_type, "hours_saved_monthly": a.hours_saved_monthly,
             "phoenix_project": a.phoenix_project, "created_at": _as_date(a.created_at),
         }
-        out[a.id] = build_economics(
-            agent, await priced_usage(db, a.id, since), infra_rows.get(a.id, []), profiles.get(a.id),
-            has_budget=a.id in budgeted, usage_ingested=a.id in ingested, today=today, hourly_rate=rate,
-        )
+        out[a.id] = {
+            **build_economics(
+                agent, await priced_usage(db, a.id, since), infra_rows.get(a.id, []), profiles.get(a.id),
+                has_budget=a.id in budgeted, usage_ingested=a.id in ingested, today=today, hourly_rate=rate,
+            ),
+            # Which figure the value is (declared, attested, adjusted) and how it is worked out.
+            "valueState": state["state"], "valueStateLabel": state["label"], "valueDeclaredCents": declared,
+            "valueMethod": method, "valueMethodLabel": gv.METHODS.get(method) if method else None,
+        }
     return out
 
 

@@ -38,6 +38,7 @@ FIELD_LABELS: dict[str, str] = {
     "capabilities": "Capabilities",
     "inputs": "Inputs",
     "outputs": "Outputs",
+    "version": "Version",
 }
 LIST_FIELDS = frozenset({"mcp_servers", "knowledge_bases", "capabilities", "inputs", "outputs"})
 SOURCE_LABELS: dict[str, str] = {
@@ -48,8 +49,10 @@ SOURCE_LABELS: dict[str, str] = {
     "ai_draft": "an AI draft from its traces",
 }
 # What only a person can give. Listed for the page and for the insight agents; never set automatically.
-ONLY_A_PERSON = ("an accountable owner", "the department", "the business outcome", "the declared value and hours saved",
-                 "a budget", "a service level", "the EU AI Act tier", "review decisions", "the lifecycle stage")
+ONLY_A_PERSON = ("an accountable owner", "a backup owner", "the department", "the business outcome",
+                 "the declared value, how it was worked out, and hours saved", "a budget", "a service level",
+                 "the answers to the classification questions (the EU AI Act category is suggested from them and confirmed by a reviewer)",
+                 "review decisions", "the lifecycle stage")
 
 MIN_REAL_CALLS = 5          # fewer calls than this is too little to correct a declared model
 MIN_TOP_SHARE = 0.6         # the most-used model must carry this share of the calls
@@ -222,11 +225,20 @@ def _plan_from_draft(record: Mapping, evidence: Mapping, history: Sequence[Past]
     return out
 
 
+def _plan_version(record: Mapping, evidence: Mapping, history: Sequence[Past]) -> list[dict]:
+    """The version the team puts on its spans (agent.version, the trace-attribute convention)."""
+    hinted = str((evidence.get("hints") or {}).get("agent.version") or "").strip()[:50]
+    current = record.get("version")
+    if not hinted or same(current, hinted) or owned_by_person("version", current, history):
+        return []
+    return [_update("version", current, hinted, "traces", f"Its spans carry agent.version = {hinted}.")]
+
+
 def plan_updates(record: Mapping[str, Any], evidence: Mapping[str, Any], history: Sequence[Past] = ()) -> list[dict]:
     """The updates to apply now: [{field, old, new, source, reason}]. Empty when
     the evidence is too thin, the record is already right, or a person owns the field."""
     updates = [*_plan_model(record, evidence, history), *_plan_dependencies(record, evidence, history),
-               *_plan_from_app(record, evidence, history)]
+               *_plan_from_app(record, evidence, history), *_plan_version(record, evidence, history)]
     updates += _plan_from_draft(record, evidence, history, {u["field"] for u in updates})
     return [u for u in updates if u["field"] in FIELD_LABELS and not same(u["old"], u["new"])]
 
@@ -266,8 +278,12 @@ def missing_from_person(facts: Mapping[str, Any]) -> list[dict]:
     def need(key: str, label: str, why: str) -> None:
         out.append({"key": key, "label": label, "why": why})
 
+    hints = facts.get("hints") or {}
     if blank(facts.get("owner")) or _norm(facts.get("owner")) == "unassigned":
         need("owner", "An accountable owner", "Nobody is named as answerable for this agent.")
+        if hints.get("agent.owner"):
+            out[-1]["suggested"] = {"value": str(hints["agent.owner"])[:255], "label": str(hints["agent.owner"])[:255],
+                                    "source": "agent.owner on its spans"}
     if blank(facts.get("business_outcome")):
         need("business_outcome", "The business outcome", "The record does not say what result this agent is for.")
     if not (facts.get("value_amount") or 0):                  # hours saved alone give no return on cost
@@ -282,6 +298,9 @@ def missing_from_person(facts: Mapping[str, Any]) -> list[dict]:
         need("sla", "A service level", "Teams that want to reuse it cannot see what availability to expect.")
     if blank(facts.get("dept_id")):
         need("department", "The department", "It does not appear under any business unit.")
+        if facts.get("hint_dept"):
+            out[-1]["suggested"] = {"value": facts["hint_dept"]["id"], "label": facts["hint_dept"]["name"],
+                                    "source": "agent.department on its spans"}
     return out
 
 

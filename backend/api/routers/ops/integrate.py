@@ -174,9 +174,25 @@ async def update_contract(agent_id: str, body: ContractIn, user=Depends(require_
         before = {k: getattr(agent, k) for k in changes}
         for key, value in changes.items():
             setattr(agent, key, value)
-        db.add(_audit(agent_id, user.get("user_id", "unknown"), "update",
-                      {k: {"before": before[k], "after": v} for k, v in changes.items() if before[k] != v}))
-    return {"status": "updated", "fields": sorted(changes)}
+        changed = {k: {"before": before[k], "after": v} for k, v in changes.items() if before[k] != v}
+        db.add(_audit(agent_id, user.get("user_id", "unknown"), "update", changed))
+        grants = (await db.execute(select(AgentAccessRequest).where(AgentAccessRequest.agent_id == agent_id,
+                                                                     AgentAccessRequest.status == "approved"))).scalars().all()
+        told = [(g.requester_id, g.team) for g in grants]
+        name = agent.name
+    # Teams that use the agent hear about a contract change (what it takes, returns and promises).
+    if changed and told:
+        from services import notify
+        labels = {"capabilities": "capabilities", "inputs": "inputs", "outputs": "outputs", "api_endpoint": "API endpoint",
+                  "sla": "service level", "rate_limit": "rate limit", "owner_contact": "owner contact"}
+        what = ", ".join(labels.get(k, k) for k in changed)
+        stamp = datetime.now(timezone.utc).isoformat()[:16]
+        for uid, team in told:
+            await notify.notify(user_id=uid, kind="contract", subject=f"Agent Registry: the contract of {name} changed",
+                                items=[{"type": "contract", "link": f"/agents/{agent_id}?tab=integrate",
+                                        "text": f"{name} changed its {what}. Your team {team} uses it: check your integration."}],
+                                dedupe_key=f"contract:{agent_id}:{uid}:{stamp}")
+    return {"status": "updated", "fields": sorted(changes), "told": len(told) if changed else 0}
 
 
 # ── Access requests ──────────────────────────────────────────────────────────
@@ -230,6 +246,8 @@ async def decide_access(agent_id: str, request_id: str, body: DecisionIn, user=D
         lowered = [c.lower() for c in consumers]
         if body.decision == "approve":
             row.status = "approved"
+            # The team uses the version current at approval until it is moved to a later one.
+            row.agent_version = agent.version
             if row.team.lower() not in lowered:
                 consumers.append(row.team)
                 row.added_to_consumers = True

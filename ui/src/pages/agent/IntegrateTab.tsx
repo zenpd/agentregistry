@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Pencil } from 'lucide-react'
-import { getMe } from '../../services/api'
+import { loadMe } from '../../lib/me'
 import {
-  decideAccess, getIntegration, requestAccess, updateContract,
+  decideAccess, getAgentCard, getIntegration, requestAccess, updateContract,
   type AccessDecision, type AccessRequest, type AccessStatus, type Integration,
 } from '../../services/ops/integrate'
 import InfoTip from '../../components/InfoTip'
@@ -11,6 +11,8 @@ import type { GlossaryKey } from '../../lib/glossary'
 import TryItPanel from '../../components/TryItPanel'
 import Disclosure from '../../components/Disclosure'
 import ReuseChecklist from '../../components/ReuseChecklist'
+import VersionsSection from './VersionsSection'
+import ConsumersSection from './ConsumersSection'
 import { errorMessage, Loading, type TabProps, useReloadOn } from './shared'
 
 const ACCESS_PILL: Record<AccessStatus, string> = {
@@ -308,7 +310,7 @@ function AccessSection({ agentId, data, deprecated, me, onChanged }: {
   return (
     <Section title="Access" tip="access_request" hint="Teams ask to consume this agent; the owner approves. An approved team is added to the agent's consumers.">
       {deprecated ? (
-        <p className="text-xs text-slate-600">This agent is deprecated and is not taking new consumers.</p>
+        <p className="text-xs text-slate-600">This agent is retired (stage Deprecated) and is not taking new consumers.</p>
       ) : (
         <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-[1fr_2fr_auto] gap-2 items-start" data-testid="request-access-form">
           <input className="input text-sm" value={team} onChange={e => setTeam(e.target.value)} placeholder="Your team" aria-label="Team" />
@@ -346,7 +348,7 @@ export default function IntegrateTab({ agent, agentId, onChanged, dataVersion }:
 
   useEffect(() => { load() }, [load])
   useReloadOn(dataVersion, load)
-  useEffect(() => { getMe().then(r => setMe(r.data.user_id)).catch(() => setMe(null)) }, [])
+  useEffect(() => { loadMe().then(m => setMe(m?.user_id ?? null)) }, [])
 
   if (error) return <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-700">{error}</div>
   if (!data) return <Loading text="Loading integration details…" />
@@ -367,19 +369,11 @@ export default function IntegrateTab({ agent, agentId, onChanged, dataVersion }:
 
       <AccessSection agentId={agentId} data={data} deprecated={agent.stage === 'Deprecated'} me={me} onChanged={changed} />
 
-      <Section title="Consumers" tip="consumers" hint="Everyone consuming this agent. Each one appears in the dependency graph and counts toward its blast radius.">
-        <div className="space-y-2 text-sm">
-          <div>
-            <div className="text-xs font-semibold uppercase text-slate-500 mb-1">Approved teams</div>
-            <Chips items={data.consumers.approvedTeams} empty="None yet" tone="emerald" />
-          </div>
-          <div>
-            <div className="text-xs font-semibold uppercase text-slate-500 mb-1">Declared by the owner</div>
-            <Chips items={data.consumers.declared} empty="None declared" />
-          </div>
-          <Link to="/dependencies" className="inline-block text-xs text-zen-700 hover:underline">Open the dependency graph →</Link>
-        </div>
-      </Section>
+      <ConsumersSection agentId={agentId} dataVersion={dataVersion} />
+
+      <VersionsSection agentId={agentId} onChanged={onChanged} />
+
+      <AgentCardSection agentId={agentId} />
 
       {data.reuseCheck.checked.length > 0 && (
         <Section title="Reuse check at registration" tip="similar_agents" hint="Similar agents shown to the team that registered this one, and why none of them fit.">
@@ -396,5 +390,25 @@ export default function IntegrateTab({ agent, agentId, onChanged, dataVersion }:
         </Section>
       )}
     </div>
+  )
+}
+
+// The A2A agent card other tools read from the catalogue. Built from this record each time.
+function AgentCardSection({ agentId }: { agentId: string }) {
+  const [card, setCard] = useState<(Record<string, unknown> & { 'x-preview'?: boolean }) | null>(null)
+  const [open, setOpen] = useState(false)
+  useEffect(() => { getAgentCard(agentId).then(r => setCard(r.data)).catch(() => setCard(null)) }, [agentId])
+  if (!card) return null
+  const published = !card['x-preview']
+  const url = `${window.location.origin}/api/v1/catalog/agents/${agentId}/agent-card.json`
+  return (
+    <Section title="Agent card (A2A)" hint="How other tools find and call this agent: the agent card in the A2A (Agent2Agent) format, built from this record.">
+      <p className="text-sm text-slate-700" data-testid="agent-card-status">
+        {published ? <>Published in the catalogue at <code className="font-mono text-[12.5px]">{url}</code> (needs a registry key with read scope).</>
+          : 'Not published: it is published once the agent is certified for reuse. Below is what it would contain.'}
+      </p>
+      <button type="button" className="text-[13px] font-semibold text-zen-700 hover:underline" onClick={() => setOpen(v => !v)}>{open ? 'Hide' : 'Show'} the card</button>
+      {open && <pre className="max-h-80 overflow-auto rounded-lg bg-slate-50 p-3 text-[12px] text-slate-800 ring-1 ring-slate-200">{JSON.stringify(card, null, 2)}</pre>}
+    </Section>
   )
 }

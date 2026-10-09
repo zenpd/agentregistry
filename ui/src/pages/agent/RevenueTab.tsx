@@ -21,6 +21,8 @@ import {
   type TrendMonth,
 } from '../../services/ops/economics'
 import { Loading, FieldLabel, SectionLabel, SEVERITY_PILL, SourceBadge, fmtCents, fmtNumber, type TabProps, useReloadOn } from './shared'
+import ValuePanel from './ValuePanel'
+import { MeasuredOutcomes, ModelWhatIf } from './ValueExtras'
 import Disclosure from '../../components/Disclosure'
 
 // Validated categorical slots 1-2 (blue, orange); value is neutral ink, not a series hue.
@@ -182,16 +184,19 @@ export default function RevenueTab({ agentId, dataVersion }: TabProps) {
       {nothingKnown && (
         <Banner tone="gray">
           <span className="font-semibold text-slate-700">Nothing to compare yet.</span> This agent has no declared business
-          value and no usage data. Declare its monthly value (and hours saved) on the agent record and link a Phoenix
-          project to see value against cost. Hosting cost below uses {econ.infraSource === 'estimate' ? 'the stage estimate' : `the ${econ.infraSource} figure`} until then.
+          value and no usage data. Declare the value below, under Value. For token cost, link a Phoenix project on the
+          Diagram tab or enter usage by hand on the Tokenomics tab. Hosting cost below uses {econ.infraSource === 'estimate' ? 'the stage estimate' : `the ${econ.infraSource} figure`} until then.
         </Banner>
       )}
 
       <Headline econ={econ} />
+      <ValuePanel agentId={agentId} onChanged={load} />
       <CostBreakdown econ={econ} />
       <Trend econ={econ} />
       <FlagList econ={econ} />
       <OutcomePanel econ={econ} outcome={outcome} />
+      <MeasuredOutcomes agentId={agentId} />
+      <ModelWhatIf agentId={agentId} />
       <InfraPanel agentId={agentId} econ={econ} onChanged={load} />
     </div>
   )
@@ -203,7 +208,7 @@ function PeriodStrip({ econ }: { econ: AgentEconomicsDetail }) {
     <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
       <span className="font-medium text-slate-700">{fmtMonth(p.month)}</span>
       <span>· day {p.daysElapsed} of {p.daysInPeriod}</span>
-      <span title="Month to date projected to month end, so it compares with the monthly value">· monthly run rate</span>
+      <span title="Month to date projected to month end, so it compares with the monthly value">· costs shown projected to the full month</span>
       <span>· visibility only — nothing here pauses or changes the agent</span>
     </div>
   )
@@ -238,7 +243,7 @@ function TokenTile({ econ }: { econ: AgentEconomicsDetail }) {
     return <Tile label="Token cost" muted value="No usage data yet"
       sub={<span>Phoenix project <span className="font-mono">{t.phoenixProject}</span> not read yet — refresh on the Tokenomics tab</span>} />
   }
-  return <Tile label="Token cost" muted value="No usage data" sub={<span>No Phoenix project linked</span>} />
+  return <Tile label="Token cost" muted value="No usage data" sub={<span>No tracing linked and no usage entered by hand</span>} />
 }
 
 function Headline({ econ }: { econ: AgentEconomicsDetail }) {
@@ -248,20 +253,21 @@ function Headline({ econ }: { econ: AgentEconomicsDetail }) {
       <SectionLabel>Value vs cost of ownership (per month)</SectionLabel>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         {econ.valueDeclared
-          ? <Tile label="Declared value" value={`${fmtCents(econ.valueCents)}/mo`} sub={<span>{econ.valueType || 'Basis not set'}</span>} />
-          : <Tile label="Declared value" muted value="Not declared" sub={<span>No monthly value on the agent record</span>} />}
+          ? <Tile label={econ.valueState === 'attested' || econ.valueState === 'adjusted' ? 'Attested value' : 'Declared value'} value={`${fmtCents(econ.valueCents)}/mo`}
+              sub={<span>{econ.valueStateLabel}{econ.valueMethodLabel ? ` · ${econ.valueMethodLabel}` : ''}</span>} />
+          : <Tile label="Declared value" muted value="Not declared" sub={<span>Declare it below, under Value</span>} />}
         {econ.hoursSavedMonthly > 0
-          ? <Tile label="Realized value" value={`${fmtCents(econ.realizedValueCents)}/mo`}
+          ? <Tile label="Value of hours saved" value={`${fmtCents(econ.realizedValueCents)}/mo`}
               sub={<span>{fmtNumber(econ.hoursSavedMonthly)} h saved × ${econ.hourlyRate}/h</span>} />
-          : <Tile label="Realized value" muted value="Not declared" sub={<span>No hours saved declared</span>} />}
+          : <Tile label="Value of hours saved" muted value="Not declared" sub={<span>No hours saved declared</span>} />}
         <TokenTile econ={econ} />
-        <Tile label="Infra cost" value={`${fmtCents(econ.infraCostCents)}/mo`}
+        <Tile label="Hosting cost" value={`${fmtCents(econ.infraCostCents)}/mo`}
           sub={<><SourceBadge source={econ.infraSource} /><span>{infraNote}</span></>} />
         <Tile label="Total cost" value={fmtCost(econ.totalCostCents)}
-          sub={<span>{econ.costComplete ? 'token + infra' : 'infra only — token cost unknown'}</span>} />
+          sub={<span>{econ.costComplete ? 'tokens + hosting' : 'hosting only, token cost unknown'}</span>} />
         {econ.netAvailable
           ? <Tile label="Net" value={fmtSigned(econ.netCents)} accent={econ.netCents >= 0 ? 'text-emerald-700' : 'text-rose-700'}
-              sub={<span>declared value − total cost{econ.costComplete ? '' : ' (incomplete)'}</span>} />
+              sub={<span>value − total cost{econ.costComplete ? '' : ' (incomplete)'}</span>} />
           : <Tile label="Net" muted value="—" sub={<span>Value not declared</span>} />}
         {econ.roiPct != null
           ? <Tile label="ROI" value={fmtRoi(econ.roiPct)}
@@ -269,7 +275,7 @@ function Headline({ econ }: { econ: AgentEconomicsDetail }) {
                 : Math.abs(econ.roiPct) >= 1000 ? `value vs cost · ROI ${econ.roiPct.toLocaleString()}%` : '(value − cost) ÷ cost'}</span>} />
           : <Tile label="ROI" muted value="—" sub={<span>{econ.valueDeclared ? 'No cost to compare' : 'Value not declared'}</span>} />}
         {econ.costToValuePct != null
-          ? <Tile label="Cost to value" value={fmtSmallPct(econ.costToValuePct, econ.totalCostCents > 0)} sub={<span>of declared value spent running it</span>} />
+          ? <Tile label="Cost to value" value={fmtSmallPct(econ.costToValuePct, econ.totalCostCents > 0)} sub={<span>of the value spent running it</span>} />
           : <Tile label="Cost to value" muted value="—" sub={<span>Value not declared</span>} />}
       </div>
     </section>
@@ -285,7 +291,7 @@ function CostBreakdown({ econ }: { econ: AgentEconomicsDetail }) {
   const scale = Math.max(cost, econ.valueDeclared ? econ.valueCents : 0, 1)
   const parts = [
     { key: 'token', label: 'Token cost', cents: token, color: SERIES.token, known: econ.tokenCostCents != null, source: econ.tokenSource },
-    { key: 'infra', label: 'Infra cost', cents: infra, color: SERIES.infra, known: true, source: econ.infraSource },
+    { key: 'infra', label: 'Hosting cost', cents: infra, color: SERIES.infra, known: true, source: econ.infraSource },
   ]
   return (
     <section className="space-y-2">
@@ -303,7 +309,7 @@ function CostBreakdown({ econ }: { econ: AgentEconomicsDetail }) {
           {econ.valueDeclared && (
             <BarRow label="Value">
               <div className="h-full rounded" style={{ width: `${(econ.valueCents / scale) * 100}%`, background: SERIES.value }}
-                title={`Declared value: ${fmtCents(econ.valueCents)}`} />
+                title={`Value used: ${fmtCents(econ.valueCents)}`} />
             </BarRow>
           )}
         </div>
@@ -319,7 +325,7 @@ function CostBreakdown({ econ }: { econ: AgentEconomicsDetail }) {
         ))}
         {econ.valueDeclared && (
           <span className="inline-flex items-center gap-1.5">
-            <Swatch color={SERIES.value} /> Declared value <span className="font-medium text-slate-900">{fmtCents(econ.valueCents)}</span>
+            <Swatch color={SERIES.value} /> Value used <span className="font-medium text-slate-900">{fmtCents(econ.valueCents)}</span>
           </span>
         )}
       </div>
@@ -352,9 +358,9 @@ function Trend({ econ }: { econ: AgentEconomicsDetail }) {
         <SectionLabel>Last 6 months</SectionLabel>
         <div className="flex flex-wrap gap-3 text-[12px] text-slate-600">
           <span className="inline-flex items-center gap-1"><Swatch color={SERIES.token} />Token</span>
-          <span className="inline-flex items-center gap-1"><Swatch color={SERIES.infra} />Infra</span>
+          <span className="inline-flex items-center gap-1"><Swatch color={SERIES.infra} />Hosting</span>
           <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-3 border-t-2" style={{ borderColor: SERIES.value }} aria-hidden />Declared value
+            <span className="inline-block w-3 border-t-2" style={{ borderColor: SERIES.value }} aria-hidden />Value used
           </span>
           <span>* month to date, as run rate</span>
         </div>
@@ -416,7 +422,7 @@ function TrendTable({ months }: { months: TrendMonth[] }) {
         <table className="w-full text-left">
           <thead className="text-[12px] uppercase text-slate-500">
             <tr>
-              {['Month', 'Token', 'Infra', 'Total', 'Value', 'Net', 'ROI'].map(h => <th key={h} className="py-1 pr-3 font-medium">{h}{h === 'ROI' && <> <InfoTip term="return_on_cost" /></>}</th>)}
+              {['Month', 'Token', 'Hosting', 'Total', 'Value', 'Net', 'ROI'].map(h => <th key={h} className="py-1 pr-3 font-medium">{h}{h === 'ROI' && <> <InfoTip term="return_on_cost" /></>}</th>)}
             </tr>
           </thead>
           <tbody className="text-slate-700">
@@ -471,14 +477,14 @@ function OutcomePanel({ econ, outcome }: { econ: AgentEconomicsDetail; outcome: 
   const rating = outcome ? RATING[outcome.efficiency_rating] : undefined
   return (
     <section className="space-y-2">
-      <SectionLabel tip="declared_value">Cost per $1 of declared value</SectionLabel>
+      <SectionLabel tip="declared_value">Cost per $1 of value</SectionLabel>
       {!outcome ? (
-        <p className="text-xs text-slate-500">Unavailable.</p>
+        <p className="text-xs text-slate-500">Could not load the cost per $1 of value.</p>
       ) : outcome.cost_per_outcome == null ? (
         <p className="text-xs text-slate-500">
           {outcome.efficiency_rating === 'not_declared'
             ? 'Declare a monthly business value to compute this.'
-            : 'Token cost is unknown, so the cost per outcome would be understated.'}
+            : 'Token cost is unknown, so this figure would be understated.'}
         </p>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
@@ -519,10 +525,10 @@ function InfraPanel({ agentId, econ, onChanged }: { agentId: string; econ: Agent
     <section className="rounded-lg border border-gray-100 p-4 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-slate-900">Hosting &amp; infrastructure</h3>
-        <span className="text-[12px] text-slate-500">Used: metered (Azure) › declared by owner › stage estimate</span>
+        <span className="text-[12px] text-slate-500">The registry uses the first that exists: metered (Azure), then declared by the owner, then the stage estimate</span>
       </div>
       <p className="text-xs text-slate-700 flex flex-wrap items-center gap-1.5">
-        This month: <span className="font-semibold text-slate-900">{fmtCents(econ.infraCostCents)}/mo</span>
+        This month: <span className="font-semibold text-slate-900">{fmtCents(econ.infraCostCents)}</span>
         <SourceBadge source={econ.infraSource} />
         {econ.infraSource === 'metered' && econ.infra.meteredThrough && (
           <span className="text-slate-500">({fmtCents(econ.infra.meteredMonthToDateCents)} through {econ.infra.meteredThrough})</span>
@@ -554,7 +560,7 @@ function CollectorStatus({ agentId, status, error, onCollected }: {
     return (
       <Banner tone="gray">
         <p><span className="font-semibold text-slate-700">Metered cost (Azure Cost Management): not configured.</span> Until it is,
-          infra cost is the owner's declared figure, else the stage estimate.</p>
+          hosting cost is the owner's declared figure, else the stage estimate.</p>
         <ol className="list-decimal ml-4 mt-1.5 space-y-0.5 break-words">
           {status.setup.map(s => <li key={s}>{s}</li>)}
         </ol>
@@ -589,7 +595,7 @@ function CollectorStatus({ agentId, status, error, onCollected }: {
         </span>
         <button onClick={collect} disabled={running} className="btn-secondary btn-sm"
           title="Read the last 7 days of actual cost for this agent (admin)">
-          {running ? 'Collecting…' : 'Collect now'}
+          {running ? 'Reading Azure cost…' : 'Read Azure cost now'}
         </button>
       </div>
       {runError && <Banner tone="rose">{runError}</Banner>}

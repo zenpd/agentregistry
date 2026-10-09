@@ -77,6 +77,9 @@ def rate_limit_key(request: Request) -> str:
     from api.auth import decode_token
 
     header = request.headers.get("authorization") or ""
+    if header.startswith("Bearer ark_"):
+        from api.auth import hash_api_key
+        return f"key:{hash_api_key(header[7:])[:16]}"
     if header.startswith("Bearer "):
         payload = decode_token(header[7:])
         if payload and payload.get("sub"):

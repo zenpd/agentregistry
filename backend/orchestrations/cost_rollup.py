@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.base import get_db_session
 from db.models import Agent, AgentBudget, AgentMetric, AuditLog, CostAnomaly
 from governance.cost_anomalies import ANOMALY_TYPES, detect, reconcile
+from governance import costing
 from governance.costing import daily_series, normalize_model
 from services.usage_repo import load_aliases, priced_usage
 from shared.logger import get_logger
@@ -108,7 +109,7 @@ async def _rollup_agent(agent_id: str, today: date, now: datetime) -> dict:
     async with get_db_session() as db:
         agent = await db.get(Agent, agent_id)
         usage = await priced_usage(db, agent_id)
-        if usage["source"] != "phoenix":
+        if usage["source"] not in costing.REAL_SOURCES:
             reason = "Only demo (seed) usage rows." if usage["source"] == "seed" else "No usage rows."
             return {"agent_id": agent_id, "status": "skipped", "reason": reason}
         rows = usage["rows"]

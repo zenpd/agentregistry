@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { BadgeCheck, Link2, Loader2 } from 'lucide-react'
-import { createAgent, findSimilarAgents, type SimilarAgent } from '../services/api'
+import { createAgent, findSimilarAgents, getAgents, type SimilarAgent } from '../services/api'
+import { getAgentTemplate } from '../services/ops/reuse'
 import { findApp, prefillFromUrl, type Prefill, type UrlPrefill } from '../services/ops/discovery'
 import PhoenixProjectPicker from './PhoenixProjectPicker'
+import { projectLinks } from '../services/ops/discovery'
 import InfoTip from './InfoTip'
 import DraftCoach from './DraftCoach'
 import ErrorNote from './ErrorNote'
@@ -20,6 +22,8 @@ interface FormState {
   dept: string
   owner: string
   stage: string
+  stage_reason: string
+  version: string
   ai_type: string
   description: string
   business_outcome: string
@@ -50,7 +54,7 @@ interface FormState {
 const MIN_JUSTIFICATION = 20
 
 const INITIAL_FORM: FormState = {
-  name: '', dept: 'dept-finance', owner: '', stage: 'Ideation',
+  name: '', dept: 'dept-finance', owner: '', stage: 'Ideation', stage_reason: '', version: '',
   ai_type: 'Autonomous Agent', description: '', business_outcome: '',
   value_amount: 0, hours_saved_monthly: 0, model_name: '', api_endpoint: '',
   phoenix_project: '', phoenix_endpoint_mode: 'common', phoenix_endpoint: '',
@@ -95,6 +99,8 @@ export default function OnboardingModal({ onClose, onSaved, prefill, title, find
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [similar, setSimilar] = useState<SimilarAgent[]>([])
+  // The certified agent whose contract this registration starts from.
+  const [startedFrom, setStartedFrom] = useState<{ id: string; name: string } | null>(null)
 
   // What the person has typed or has chosen: a lookup that finishes later must not replace it.
   const touched = useRef(new Set<string>())
@@ -205,12 +211,27 @@ export default function OnboardingModal({ onClose, onSaved, prefill, title, find
     return () => { cancelled = true; clearTimeout(timer) }
   }, [form.name, form.description, form.business_outcome, form.capabilities, form.api_endpoint])
 
+  // Records already linked to the chosen Phoenix project: usually the same app registered twice.
+  const [linkedTo, setLinkedTo] = useState<{ id: string; name: string; stage: string }[]>([])
+  useEffect(() => {
+    const name = form.phoenix_project.trim()
+    if (!name) { setLinkedTo([]); return }
+    const t = setTimeout(() => { projectLinks(name).then(r => setLinkedTo(r.data.agents)).catch(() => setLinkedTo([])) }, 350)
+    return () => clearTimeout(t)
+  }, [form.phoenix_project])
+
   const needsReason = similar.length > 0
   const reasonShort = needsReason && form.reuse_justification.trim().length < MIN_JUSTIFICATION
+  const laterStage = form.stage !== 'Ideation'
+  const stageReasonShort = laterStage && form.stage_reason.trim().length < MIN_JUSTIFICATION
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.name.trim()) { setError('Name is required'); return }
+    if (stageReasonShort) {
+      setError(`A new agent starts at Ideation. Say why it starts at ${form.stage} (at least ${MIN_JUSTIFICATION} characters).`)
+      return
+    }
     if (reasonShort) {
       setError(`Similar agents already exist. Say why none of them fit (at least ${MIN_JUSTIFICATION} characters).`)
       return
@@ -223,7 +244,9 @@ export default function OnboardingModal({ onClose, onSaved, prefill, title, find
         dept: form.dept,
         owner: form.owner,
         owner_contact: form.owner_contact.trim(),
+        version: form.version.trim(),
         stage: form.stage,
+        stage_reason: laterStage ? form.stage_reason.trim() : '',
         ai_type: form.ai_type,
         description: form.description,
         business_outcome: form.business_outcome,
@@ -246,6 +269,7 @@ export default function OnboardingModal({ onClose, onSaved, prefill, title, find
         mcp_servers: splitTags(form.mcp_servers),
         calls: splitTags(form.calls),
         consumers: splitTags(form.consumers),
+        started_from_agent_id: startedFrom?.id ?? '',
       })
       onSaved?.(created.data.id)
       onClose()
@@ -275,8 +299,8 @@ export default function OnboardingModal({ onClose, onSaved, prefill, title, find
         <form onSubmit={submit} className="p-6 space-y-4">
           <div className="flex justify-between items-start mb-2">
             <div>
-              <h2 className="text-xl font-bold text-slate-900">{title ?? 'Register a new AI application'}</h2>
-              <p className="text-sm text-slate-600 mt-0.5">It enters the registry at the Ideation stage with all governance gates pending.</p>
+              <h2 className="text-xl font-bold text-slate-900">{title ?? 'Register a new agent'}</h2>
+              <p className="text-sm text-slate-600 mt-0.5">It enters the registry at Ideation with every review not submitted, unless you choose a later stage and say why.</p>
             </div>
             <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-700 text-2xl leading-none">&times;</button>
           </div>
@@ -308,6 +332,17 @@ export default function OnboardingModal({ onClose, onSaved, prefill, title, find
             {lookupError && <ErrorNote message={lookupError.message} hint={lookupError.hint} onDismiss={() => setLookupError(null)} />}
           </div>
 
+          <StartFromCertified onPick={(id, name, fields) => {
+            setStartedFrom(id ? { id, name } : null)
+            if (!id) return
+            const picked: Record<string, string | string[]> = {}
+            for (const [key, value] of Object.entries(fields)) {
+              if (key in INITIAL_FORM && !touched.current.has(key) && value != null) picked[key] = value as string | string[]
+            }
+            setForm(prev => applyFields(prev, picked))
+            setSources(src => ({ ...src, ...Object.fromEntries(Object.keys(picked).map(k => [k, `${name} (certified)`])) }))
+          }} />
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={label}>Name *{from('name')}</label>
@@ -318,6 +353,10 @@ export default function OnboardingModal({ onClose, onSaved, prefill, title, find
               <input className="input" value={form.owner} onChange={e => set('owner', e.target.value)} placeholder="e.g. Finance Ops" />
             </div>
             <div>
+              <label className={label}>Version{from('version')}</label>
+              <input className="input" value={form.version} onChange={e => set('version', e.target.value)} placeholder="e.g. 1.4.0" />
+            </div>
+            <div>
               <label className={label}>Department</label>
               <select className="input" value={form.dept} onChange={e => set('dept', e.target.value)}>
                 {DEPTS.map(d => <option key={d} value={d}>{d.replace('dept-', '')}</option>)}
@@ -326,8 +365,16 @@ export default function OnboardingModal({ onClose, onSaved, prefill, title, find
             <div>
               <div className="flex items-center mb-1"><label className={`${label} !mb-0`}>Lifecycle stage</label>{tip('stage')}</div>
               <select className="input" value={form.stage} onChange={e => set('stage', e.target.value)}>
-                {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                {STAGES.filter(s => s !== 'Deprecated').map(s => <option key={s} value={s}>{s}</option>)}
               </select>
+              {laterStage && (
+                <div className="mt-2" data-testid="stage-reason">
+                  <label className={label}>Why does it start at {form.stage}?</label>
+                  <textarea className="input min-h-[60px]" value={form.stage_reason} onChange={e => set('stage_reason', e.target.value)}
+                    placeholder="For example: already live before the registry existed" />
+                  <p className="mt-1 text-xs text-slate-600">Recorded as the first stage change. Its reviews still start as not submitted.</p>
+                </div>
+              )}
             </div>
             <div>
               <div className="flex items-center mb-1"><label className={`${label} !mb-0`}>AI type{from('ai_type')}</label>{tip('ai_type')}</div>
@@ -399,7 +446,7 @@ export default function OnboardingModal({ onClose, onSaved, prefill, title, find
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <div className="flex items-center mb-1"><label className={`${label} !mb-0`}>Value ($/mo)</label>{tip('declared_value')}</div>
+              <div className="flex items-center mb-1"><label className={`${label} !mb-0`}>Declared value ($ a month)</label>{tip('declared_value')}</div>
               <input type="number" className="input" value={form.value_amount} onChange={e => set('value_amount', Number(e.target.value))} />
             </div>
             <div>
@@ -426,12 +473,12 @@ export default function OnboardingModal({ onClose, onSaved, prefill, title, find
               <input className="input" value={form.mcp_servers} onChange={e => set('mcp_servers', e.target.value)} placeholder="SAP MCP Server" />
             </div>
             <div>
-              <label className={label}>Calls agents (comma-separated){from('calls')}</label>
-              <input className="input" value={form.calls} onChange={e => set('calls', e.target.value)} placeholder="other agent ids" />
+              <label className={label}>Agents it calls (comma-separated){from('calls')}</label>
+              <input className="input" value={form.calls} onChange={e => set('calls', e.target.value)} placeholder="ids of other registered agents, from their page address" />
             </div>
             <div>
               <div className="flex items-center mb-1"><label className={`${label} !mb-0`}>Consumers (comma-separated)</label>{tip('consumers')}</div>
-              <input className="input" value={form.consumers} onChange={e => set('consumers', e.target.value)} placeholder="Dashboards, queues" />
+              <input className="input" value={form.consumers} onChange={e => set('consumers', e.target.value)} placeholder="e.g. Finance Ops team, invoice-agent" />
             </div>
           </div>
 
@@ -481,8 +528,13 @@ export default function OnboardingModal({ onClose, onSaved, prefill, title, find
             <div>
               <div className="flex items-center mb-1"><label className={`${label} !mb-0`}>Phoenix project name{from('phoenix_project')}</label>{tip('phoenix_project')}</div>
               <PhoenixProjectPicker id="onboard-phoenix-projects" value={form.phoenix_project} onChange={v => set('phoenix_project', v)} />
+              {linkedTo.length > 0 && (
+                <p className="mt-1 text-[12.5px] text-amber-800" data-testid="project-already-linked">
+                  Already linked to this project: {linkedTo.map(a => `${a.name} (${a.stage})`).join(', ')}. The same app may be registered twice: consider using that record instead.
+                </p>
+              )}
               {form.phoenix_endpoint_mode === 'custom' && (
-                <p className="text-xs text-slate-500 mt-1">Discovery above always checks the common endpoint — for a custom endpoint, type the project name directly.</p>
+                <p className="text-xs text-slate-500 mt-1">The Discover button always reads the common endpoint. For a custom endpoint, type the project name.</p>
               )}
             </div>
           </div>
@@ -514,11 +566,45 @@ export default function OnboardingModal({ onClose, onSaved, prefill, title, find
             </button>
             <button type="submit" disabled={saving || reasonShort} className="btn-primary btn-sm"
               title={reasonShort ? 'Say why none of the similar agents fit first' : undefined}>
-              {saving ? 'Registering…' : 'Register application'}
+              {saving ? 'Registering…' : 'Register agent'}
             </button>
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+// Start from a certified agent: copies its contract (capabilities, inputs, outputs,
+// service level, tools and systems) into empty fields. Names, owner, endpoint and
+// reviews are never copied.
+function StartFromCertified({ onPick }: { onPick: (id: string, name: string, fields: Record<string, unknown>) => void }) {
+  const [options, setOptions] = useState<{ id: string; name: string }[] | null>(null)
+  const [chosen, setChosen] = useState('')
+  const [note, setNote] = useState<string | null>(null)
+  useEffect(() => {
+    getAgents(1, 100, { certified: true }).then(r => setOptions(r.data.data.map(a => ({ id: a.id, name: a.name })))).catch(() => setOptions([]))
+  }, [])
+  if (!options || options.length === 0) return null
+  async function pick(id: string) {
+    setChosen(id); setNote(null)
+    if (!id) { onPick('', '', {}); return }
+    try {
+      const t = (await getAgentTemplate(id)).data
+      onPick(t.agentId, t.name, t.fields)
+      setNote(`Empty fields were filled from ${t.name}. Change anything that differs.`)
+    } catch (e: any) { setNote(e?.response?.data?.detail || 'Could not read that agent') }
+  }
+  return (
+    <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-3 space-y-1" data-testid="start-from-certified">
+      <label className="flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-wide text-emerald-800">
+        Start from a certified agent <span className="font-medium normal-case tracking-normal text-slate-500">(optional)</span>
+        <select className="input !w-72 !py-1 text-sm normal-case font-normal tracking-normal" value={chosen} onChange={e => pick(e.target.value)} data-testid="certified-select">
+          <option value="">Start empty</option>
+          {options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+      </label>
+      {note && <p className="text-xs text-slate-700">{note}</p>}
     </div>
   )
 }

@@ -49,7 +49,8 @@ export interface AutoUpdates {
   checkedAt: string | null
   evidence: { realCalls?: number; tracesRead?: number; appRead?: boolean; draftUsed?: boolean; unread?: string[] } | null
   // What only a person can give and this record still lacks, worked out from the record (not written by AI).
-  needsPerson: { key: string; label: string; why: string }[]
+  // suggested: a value the agent's own spans carry (agent.owner, agent.department); a person confirms it.
+  needsPerson: { key: string; label: string; why: string; suggested?: { value: string; label: string; source: string } }[]
 }
 
 export interface TabInsights {

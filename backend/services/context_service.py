@@ -135,13 +135,18 @@ def _llm_client():
 
 async def _llm_summary(content: str) -> tuple[str | None, str]:
     """(summary, llm_status). Status: ok | disabled | not_configured | unavailable."""
+    from services import ai_meter
+
     if not get_settings().context_llm_enabled:
+        return None, "disabled"
+    if await ai_meter.refusal("context_summary", interactive=True):
         return None, "disabled"
     configured = _llm_client()
     if configured is None:
         return None, "not_configured"
     client, deployment = configured
     system, user = cr.llm_messages(content)
+    usage: dict = {}
 
     def complete() -> str:
         resp = client.chat.completions.create(
@@ -150,13 +155,18 @@ async def _llm_summary(content: str) -> tuple[str | None, str]:
             temperature=0,
             max_tokens=400,
         )
+        u = getattr(resp, "usage", None)
+        usage.update(input=getattr(u, "prompt_tokens", 0) or 0, output=getattr(u, "completion_tokens", 0) or 0)
         return resp.choices[0].message.content or ""
 
     try:
         raw = await asyncio.to_thread(complete)
     except Exception as exc:
         log.warning("context.llm_unavailable", error=type(exc).__name__)
+        await ai_meter.record("context_summary", model=deployment, status="unavailable", reason=type(exc).__name__)
         return None, "unavailable"
+    await ai_meter.record("context_summary", model=deployment, input_tokens=usage.get("input", 0),
+                          output_tokens=usage.get("output", 0))
     summary = cr.clean_summary(raw)
     return (summary, "ok") if summary else (None, "unavailable")
 

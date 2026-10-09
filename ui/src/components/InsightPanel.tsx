@@ -43,7 +43,7 @@ export function FindingItem({ finding: f, insight, basis, brief }: { finding: In
       <p className="mt-1 text-[13.5px] leading-snug text-slate-700">{f.detail}</p>
       {f.whyItMatters && !brief && <p className="mt-0.5 text-[13px] text-slate-700">{f.whyItMatters}</p>}
       {f.unverifiedFigures.length > 0 && (
-        <p className="mt-1 text-[12.5px] font-medium text-amber-800">Check this figure against the record: {f.unverifiedFigures.join(', ')} was not found in the data the agent read.</p>
+        <p className="mt-1 text-[12.5px] font-medium text-amber-800">Check against the record: {f.unverifiedFigures.join(', ')} (not found in the data the AI read).</p>
       )}
       {basis === 'text' && labels.length > 0 && (
         <p className="mt-1.5 text-[12.5px] text-slate-600" data-testid="insight-basis">Based on: {labels.map(l => l.text).join(' · ')}</p>

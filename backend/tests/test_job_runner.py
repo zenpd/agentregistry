@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 import os
 import tempfile
@@ -12,6 +13,7 @@ from decimal import Decimal
 import anyio
 import httpx
 import pytest
+from sqlalchemy.exc import OperationalError
 import pytest_asyncio
 from fastapi import FastAPI
 from sqlalchemy import select
@@ -36,9 +38,19 @@ async def db():
     import db.models  # noqa: F401
 
     try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
-            await conn.run_sync(Base.metadata.create_all)
+        # A scheduler test cancels its loop mid-tick; the cancelled read's connection is
+        # released a moment later. Wait for that instead of failing on "database is locked".
+        for attempt in range(20):
+            try:
+                async with engine.begin() as conn:
+                    await conn.run_sync(Base.metadata.drop_all)
+                    await conn.run_sync(Base.metadata.create_all)
+                break
+            except OperationalError as exc:
+                if "locked" not in str(exc) or attempt == 19:
+                    raise
+                gc.collect()
+                await asyncio.sleep(0.1)
         async with get_db_session() as s:
             s.add(Organization(id="org-default", name="Default", slug="default"))
             s.add(Agent(id="agent-a", org_id="org-default", name="Agent A", slug="agent-a", owner="Ops"))
@@ -448,12 +460,15 @@ def _utc(h, m=0):
 def test_due_jobs_and_next_wake():
     assert scheduler.due_jobs(_utc(0, 15)) == []
     assert scheduler.due_jobs(_utc(0, 30)) == ["phoenix_discovery"]
-    assert scheduler.due_jobs(_utc(2, 0)) == ["phoenix_discovery", "usage_ingestion", "record_autofill", "infra_costs", "cost_rollup"]
-    assert scheduler.next_wake(_utc(0, 30)) == _utc(1, 0)
-    assert scheduler.next_wake(_utc(1, 0)) == _utc(1, 15)
+    assert scheduler.due_jobs(_utc(2, 0)) == ["phoenix_discovery", "connector_sync", "usage_ingestion", "consumer_observation", "record_autofill", "infra_costs", "cost_rollup"]
+    assert scheduler.next_wake(_utc(0, 30)) == _utc(0, 45)
+    assert scheduler.next_wake(_utc(0, 45)) == _utc(1, 0)
+    assert scheduler.next_wake(_utc(1, 0)) == _utc(1, 10)
+    assert scheduler.next_wake(_utc(1, 10)) == _utc(1, 15)
     assert scheduler.next_wake(_utc(1, 15)) == _utc(1, 30)
     assert scheduler.next_wake(_utc(3, 0)) == _utc(3, 30)
-    assert scheduler.next_wake(_utc(3, 30)) == _utc(0, 30) + timedelta(days=1)
+    assert scheduler.next_wake(_utc(3, 30)) == _utc(6, 0)  # the daily notifications
+    assert scheduler.next_wake(_utc(6, 0)) == _utc(0, 30) + timedelta(days=1)
 
 
 @pytest.mark.asyncio
@@ -461,11 +476,11 @@ async def test_run_due_jobs_runs_each_job_once_per_day(db, calls):
     now = datetime.now(timezone.utc).replace(hour=2, minute=15)
 
     first = await scheduler.run_due_jobs(now)
-    assert [r["job"] for r in first] == ["phoenix_discovery", "usage_ingestion", "record_autofill", "infra_costs", "cost_rollup"]
+    assert [r["job"] for r in first] == ["phoenix_discovery", "connector_sync", "usage_ingestion", "consumer_observation", "record_autofill", "infra_costs", "cost_rollup", "spend_review"]
     assert all(r["trigger"] == "scheduled" and r["agentId"] is None for r in first)
 
     assert await scheduler.run_due_jobs(now) == []
-    assert len(calls) == 5
+    assert len(calls) == 8
 
 
 @pytest.mark.asyncio

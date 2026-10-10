@@ -149,7 +149,12 @@ async def _load_targets(agent_id: str | None, days: int | None) -> tuple[list[di
         if agent_id and not agents:
             raise _NothingToIngest("error", f"Agent '{agent_id}' not found.")
         agents = [a for a in agents if (a.phoenix_project or "").strip()]
+        # A demo agent has no real project in Phoenix: its usage is part of the demo data, so it is not read from there.
+        demo = [a for a in agents if getattr(a, "is_demo", False)]
+        agents = [a for a in agents if a not in demo]
         if not agents:
+            if demo and agent_id:
+                raise _NothingToIngest("skipped", "Demo agent: its usage is part of the demo data and is not read from Phoenix.")
             raise _NothingToIngest("skipped", "No Phoenix project linked." if agent_id else "No agent has a Phoenix project linked.")
         with_rows = set((await db.execute(
             select(AgentTokenUsage.agent_id).where(

@@ -32,17 +32,23 @@ ok('top bar shows the signed-in person and role', /Registry Admin/.test(await pa
 ok('notification bell is in the top bar', await page.locator('[data-testid=notification-bell]').count() === 1)
 await page.screenshot({ path: `${SP}/shots/p0-exec-default.png`, fullPage: false })
 
-// 3. Agents page: only the 6 real agents by default, then 18 (12 labelled Demo) after the box is ticked in Settings.
+// 3. Agents page: only the real agents by default, then every agent (the demo ones labelled Demo) after the box is ticked in Settings.
 await page.goto(`${B}/agents`); await page.waitForSelector('h3', { timeout: 30000 }); await page.waitForTimeout(800)
+// The counts follow the data: people add real agents, and the demo set can grow.
+const everyone = (await (await fetch(`${API}/agents/?limit=100`, { headers: { ...H, 'X-Include-Demo': '1' } })).json()).data
+const shownByDefault = (await (await fetch(`${API}/agents/?limit=100`, { headers: H })).json()).data
+const realCount = everyone.filter(a => !a.isDemo).length, demoCount = everyone.length - realCount
 const realCards = await page.locator('h3').count()
-ok('by default the list shows only the 6 real agents', realCards === 6, `cards: ${realCards}`)
-await page.goto(`${B}/settings`); await page.waitForSelector('[data-testid=demo-toggle]', { timeout: 30000 })
-ok('Settings says the demo agents are hidden and the box is not ticked', !(await page.isChecked('[data-testid=demo-toggle]')) && /hidden on every page/.test(await page.textContent('[data-testid=demo-agents]')))
-await page.click('[data-testid=demo-toggle]'); await page.waitForSelector('[data-testid=demo-toggle]', { timeout: 30000 }); await page.waitForTimeout(1000)
+ok(`by default the list shows the ${realCount} real agents and the showcase agent, not the other demo agents`,
+  realCards === shownByDefault.length && shownByDefault.length < everyone.length && shownByDefault.filter(a => a.isDemo).length <= 1, `cards: ${realCards}`)
+await page.goto(`${B}/settings`); await page.waitForSelector('[data-testid=registry-ai]', { timeout: 30000 })
+ok('Settings has no Demo agents card for now', await page.locator('[data-testid=demo-agents]').count() === 0)
+// Without the card, the choice to show every demo agent is set the way the card stored it.
+await page.evaluate(() => localStorage.setItem('airegistry_include_demo', '1'))
 await page.goto(`${B}/agents`); await page.waitForSelector('h3', { timeout: 30000 }); await page.waitForTimeout(800)
 const allCards = await page.locator('h3').count()
 const demoBadges = await page.locator('h3 >> text=Demo').count()
-ok('after ticking the box the list shows 18 agents, 12 labelled Demo', allCards === 18 && demoBadges === 12, `cards ${allCards}, badges ${demoBadges}`)
+ok(`with every demo agent switched on the list shows all ${everyone.length} agents, ${demoCount} labelled Demo`, allCards === everyone.length && demoBadges === demoCount, `cards ${allCards}, badges ${demoBadges}`)
 
 // 4. A demo agent's own page opens while demo is hidden, labelled.
 await page.goto(`${B}/agents/inv-recon`); await page.waitForSelector('[data-testid=demo-badge]', { timeout: 30000 }).catch(() => {})

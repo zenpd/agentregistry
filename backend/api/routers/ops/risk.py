@@ -300,11 +300,16 @@ async def create_agent_risk(agent_id: str, body: RiskCreateIn, user=Depends(requ
 
 
 @router.get("/governance/risks/summary")
-async def risks_summary(_=Depends(require_read)):
+async def risks_summary(dept: Optional[str] = Query(None, description="A department id, or __none__ for agents with no department"),
+                        _=Depends(require_read)):
     """Portfolio counts over active findings (open, acknowledged, mitigating,
     accepted) plus live FINANCIAL ones: byCategory for the pie,
-    heatmap for the category x severity grid."""
+    heatmap for the category x severity grid. With dept, only the agents of that business unit."""
     async with get_db_session() as db:
+        in_unit: set[str] | None = None
+        if dept:
+            unit = select(Agent.id).where(Agent.dept_id.is_(None) if dept == "__none__" else Agent.dept_id == dept)
+            in_unit = set((await db.execute(unit)).scalars().all())
         # Both halves of this summary skip findings whose agent no longer
         # exists, for the same reason portfolio_financial does: no Risk tab
         # can show them, so counting them here would make the portfolio
@@ -315,7 +320,9 @@ async def risks_summary(_=Depends(require_read)):
                 AgentRisk.status.in_(lifecycle.ACTIVE_STATUSES), AgentRisk.agent_id.in_(live_agents),
             )
         )).all()
-        financial = await portfolio_financial(db)
+        if in_unit is not None:
+            stored = [row for row in stored if row[2] in in_unit]
+        financial = await portfolio_financial(db, in_unit)
         names = dict((await db.execute(select(Agent.id, Agent.name))).all())
     # Which agents the stored findings are on, most findings first, with the worst severity of each.
     order = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]

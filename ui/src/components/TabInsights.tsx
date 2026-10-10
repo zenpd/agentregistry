@@ -300,16 +300,17 @@ export default function TabInsights({ agentId, tab, onRecordChanged }: { agentId
         )}
         {note && <p className="rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-900 ring-1 ring-amber-200" role="alert">{note}</p>}
 
+        {written.map(item => <InsightBlock key={item.insight.id} item={item} heading={written.length > 1} showBasis={showBasis} />)}
+        {!busy && data && written.length === 0 && !note && (
+          <p className="text-[13.5px] text-slate-700">No summary has been written for this page yet.</p>
+        )}
+
+        {/* After the summary: what the registry filled in by itself, then what only a person can provide. */}
         {updates.length > 0 && <AutoUpdatesBlock updates={updates} undoing={undoing} onUndo={undo} />}
         {unread.length > 0 && !busy && (
           <p className="text-[12.5px] text-amber-800" data-testid="auto-unread">
             At the last check the registry could not read {unread.join(' or ')}, so some fields may still be empty. It will try again by itself.
           </p>
-        )}
-
-        {written.map(item => <InsightBlock key={item.insight.id} item={item} heading={written.length > 1} showBasis={showBasis} />)}
-        {!busy && data && written.length === 0 && !note && (
-          <p className="text-[13.5px] text-slate-700">No summary has been written for this page yet.</p>
         )}
 
         {needsPerson.length > 0 && (

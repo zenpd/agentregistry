@@ -26,6 +26,48 @@ class CapBody(BaseModel):
     monthlyCapCents: Optional[int] = Field(None, ge=0)
 
 
+def _model_status() -> dict:
+    """Whether an AI model is set up, from where its key comes, and where it is. Never returns a secret."""
+    from urllib.parse import urlparse
+    from agents.insights.runtime import model_setup_hint
+    from shared.config import get_settings
+    s = get_settings()
+    if not s.azure_openai_api_key and s.azure_openai_api_key_kv_uri:
+        s.resolve_missing_secrets()
+    key = bool(s.azure_openai_api_key)
+    return {
+        "configured": bool(s.azure_openai_endpoint) and key,
+        "endpointHost": urlparse(s.azure_openai_endpoint).netloc if s.azure_openai_endpoint else None,
+        "deployment": s.azure_openai_deployment,
+        "keySet": key,
+        "keyFrom": ("Key Vault" if s.azure_openai_api_key_kv_uri else "the environment") if key else None,
+        "keyVaultAddressSet": bool(s.azure_openai_api_key_kv_uri),
+        "problem": None if (s.azure_openai_endpoint and key) else model_setup_hint(s),
+    }
+
+
+@router.post("/ai-usage/model-check")
+async def model_check(_=Depends(require_admin)):
+    """Sends one tiny request to the AI model and says whether it answered."""
+    import time
+    from agents.insights.runtime import ModelUnavailable, get_model
+    status = _model_status()
+    if not status["configured"]:
+        return {**status, "ok": False, "message": status["problem"]}
+    started = time.monotonic()
+    try:
+        reply = await get_model(max_tokens=5).ainvoke("Reply with the word ok.")
+    except ModelUnavailable as exc:
+        return {**status, "ok": False, "message": str(exc)}
+    except Exception as exc:  # the network, a refused key or a wrong deployment name: say which kind, never the key
+        text = str(exc)
+        kind = ("The network could not reach the model (is the VPN or the private network connected?)" if any(w in text.lower() for w in ("connect", "timeout", "resolve", "unreachable"))
+                else "The model refused the request (check the key and the deployment name)" if any(w in text for w in ("401", "403", "404", "Unauthorized", "Forbidden", "NotFound", "DeploymentNotFound"))
+                else "The model request failed")
+        return {**status, "ok": False, "message": f"{kind}: {type(exc).__name__}."}
+    return {**status, "ok": True, "message": f"The model answered in {int((time.monotonic() - started) * 1000)} ms.", "reply": str(getattr(reply, "content", ""))[:40]}
+
+
 @router.get("/ai-usage")
 async def ai_usage(_=Depends(require_read)):
     now = ai_meter.utcnow()
@@ -47,6 +89,7 @@ async def ai_usage(_=Depends(require_read)):
     cap = await ai_meter.get_setting("ai.monthly_cap_cents")
     spent = await ai_meter.month_spend_cents()
     return {
+        "model": _model_status(),
         "monthStart": month.date().isoformat(),
         "spentThisMonthCents": round(spent, 2),
         "monthlyCapCents": cap,

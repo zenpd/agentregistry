@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getDirectory, setOwnership, type Agent, type GraphV2Response } from '../../services/api'
@@ -143,14 +143,23 @@ function Markdown({ text }: { text: string }) {
 
 // ── Header KPI strip ────────────────────────────────────────────────────────
 
+// A summary card. With `to`, the whole card is clickable and opens the tab that holds the detail.
 function Tile({ label, to, children, tip }: { label: string; to?: string; children: ReactNode; tip?: GlossaryKey }) {
-  return (
-    <div className="rounded-xl bg-white p-3.5 space-y-1.5 min-w-0 ring-1 ring-slate-200/80 shadow-sm">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11.5px] font-semibold uppercase tracking-[.04em] text-slate-600">{label}{tip && <> <InfoTip term={tip} /></>}</span>
-        {to && <Link to={to} className="text-[12px] font-semibold text-zen-600 hover:text-zen-700 hover:underline">Open →</Link>}
-      </div>
+  const navigate = useNavigate()
+  const body = (
+    <>
+      <span className="block text-[11.5px] font-semibold uppercase tracking-[.04em] text-slate-600">{label}{tip && <> <InfoTip term={tip} /></>}</span>
       {children}
+    </>
+  )
+  const base = 'rounded-xl bg-white p-3.5 space-y-1.5 min-w-0 ring-1 ring-slate-200/80 shadow-sm'
+  if (!to) return <div className={base}>{body}</div>
+  // A link or button inside the card keeps its own action.
+  const open = (e: { target: EventTarget | null }) => { if (!(e.target as HTMLElement | null)?.closest('a, button, input, select, textarea')) navigate(to) }
+  return (
+    <div className={`${base} cursor-pointer transition hover:ring-zen-300 hover:shadow-card-hover`} role="link" tabIndex={0} data-testid="overview-tile"
+      title={`Open ${label.toLowerCase()}`} onClick={open} onKeyDown={e => { if (e.key === 'Enter') open(e) }}>
+      {body}
     </div>
   )
 }

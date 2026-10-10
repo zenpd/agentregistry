@@ -105,3 +105,37 @@ async def test_scope_summary_tells_the_shell_how_many_are_hidden(client):
     assert hidden == {"demoAgents": 1, "includingDemo": False, "demoEnabled": True}
     shown = await _get(client, "/api/v1/admin/scope", include=True)
     assert shown == {"demoAgents": 1, "includingDemo": True, "demoEnabled": True}
+
+
+@pytest.mark.asyncio
+async def test_a_showcase_agent_is_shown_while_the_other_demo_agents_are_hidden(monkeypatch):
+    """The complete example agent stays visible by default. Turning demo agents off for the installation hides it too."""
+    import httpx
+    from db.base import Base, engine, get_db_session
+    from db.models import Agent, Organization
+    from shared.config import get_settings
+
+    assert "data/airegistry.db" not in get_settings().database_url, "tests must use a throwaway DB"
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    async with get_db_session() as s:
+        s.add(Organization(id="org-default", name="Default", slug="default"))
+        s.add(Agent(id="real", org_id="org-default", slug="real", name="Real One", owner="Ops", description="x"))
+        s.add(Agent(id="demo", org_id="org-default", slug="demo", name="Demo One", owner="Ops", description="x", is_demo=True))
+        s.add(Agent(id="show", org_id="org-default", slug="show", name="Showcase", owner="Ops", description="x", is_demo=True, source="showcase"))
+    from api.auth import get_current_user
+    from api.main import app
+
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": "adm", "role": "Registry Admin"}
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+            names = lambda r: sorted(a["name"] for a in r.json()["data"])  # noqa: E731
+            assert names(await c.get("/api/v1/agents/?limit=100")) == ["Real One", "Showcase"]
+            assert names(await c.get("/api/v1/agents/?limit=100", headers={"X-Include-Demo": "1"})) == ["Demo One", "Real One", "Showcase"]
+            assert (await c.get("/api/v1/governance/summary")).json()["agents"] == 2
+            monkeypatch.setattr(get_settings(), "demo_agents_enabled", False)
+            assert names(await c.get("/api/v1/agents/?limit=100")) == ["Real One"]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

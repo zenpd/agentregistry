@@ -187,20 +187,30 @@ async def _last_refresh(agent_id: str) -> dict | None:
 # ── Tokenomics tab ───────────────────────────────────────────────────────────
 
 @router.get("/agents/{agent_id}/tokenomics")
-async def agent_tokenomics(agent_id: str, days: int = Query(30, ge=7, le=90), _=Depends(require_read)):
+async def agent_tokenomics(agent_id: str, days: int = Query(30, ge=7, le=90),
+                           month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"), _=Depends(require_read)):
+    """Usage and cost of one agent. By default the last `days` days. With month=YYYY-MM, that calendar month
+    (up to today for the current month): the daily chart, the models and the totals are those of the month."""
     agent, usage, budget = await _load(agent_id)
     today = _today()
     rows = usage["rows"]
-    window = _window(rows, today, days)
-    window_start = today - timedelta(days=days - 1)
+    window_end = today
+    if month:
+        from api.routers.ops.economics import month_end_or_today
+        window_end = month_end_or_today(month) or today
+        window_start = date(int(month[:4]), int(month[5:7]), 1)
+        days = (window_end - window_start).days + 1
+    else:
+        window_start = today - timedelta(days=days - 1)
+    window = [r for r in rows if window_start <= r["day"] <= window_end]
     has_data = usage["source"] != "none"
     budget_view = _budget_view(budget, rows, today, has_data)
 
-    daily = daily_series(rows, window_start, today)
+    daily = daily_series(rows, window_start, window_end)
     spikes: set[str] = set()
     anomaly_share = None
     if usage["source"] in costing.REAL_SOURCES:
-        history = daily_series(rows, window_start - timedelta(days=SPIKE_BASELINE_DAYS), today)
+        history = daily_series(rows, window_start - timedelta(days=SPIKE_BASELINE_DAYS), window_end)
         spikes = {s["date"] for s in spike_days(history, window_start)}
         share = anomaly_cost_share(history, window_start)
         if share:
@@ -218,8 +228,9 @@ async def agent_tokenomics(agent_id: str, days: int = Query(30, ge=7, le=90), _=
         "unpricedModels": sorted({r["model"] for r in window if not r["priced"]}),
         "currency": "USD",
         "days": days,
+        "month": month,
         "windowStart": window_start.isoformat(),
-        "windowEnd": today.isoformat(),
+        "windowEnd": window_end.isoformat(),
         "totals": _totals(window, has_data),
         "monthToDateCents": budget_view["monthToDateCents"],
         "projectedPeriodEndCents": budget_view["projectedPeriodEndCents"],

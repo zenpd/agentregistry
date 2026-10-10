@@ -28,7 +28,7 @@ export default function CostSettingsCard({ canEdit }: { canEdit: boolean }) {
         <div>
           <h3 className="text-[16px] font-extrabold text-slate-900">Cost settings</h3>
           <p className="text-[13px] text-slate-600">
-            Azure Cost Management gives the metered hosting cost of each agent: a resource tagged {st.tagKey}=&lt;agent id&gt;, or linked on the agent's Revenue & Expenditure tab,
+            Azure Cost Management gives the metered hosting cost of each agent: a resource tagged {st.tagKey}=&lt;agent id&gt;, or linked on the agent's Business Value tab,
             counts for that agent. The service principal needs the {st.requiredRole} role on the scope.
             {' '}Now: <b data-testid="azure-state">{st.configured ? `set up (${st.configSource === 'settings' ? 'saved here' : 'from the backend environment'}), scope ${st.scope}` : `not set up, missing ${st.missing.join(', ')}`}</b>.
             {st.lastRun && ` Last pull: ${st.lastRun.status} on ${new Date(st.lastRun.startedAt || '').toLocaleString()}.`}

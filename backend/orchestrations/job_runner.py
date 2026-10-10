@@ -56,6 +56,9 @@ _OK = {"ok", "skipped"}
 _FAILED = {"error", "unreachable", "not_configured", "unavailable", "stale", "cancelled"}
 # A scheduled run that ended like this did no work, so the scheduler retries it the same day.
 _RETRY_SAME_DAY = {"stale", "cancelled"}
+# A scheduled run that could not reach its source (Phoenix with the VPN off, for example) is tried again
+# once this long has passed, so connecting the VPN later in the day is enough: nobody has to wait for tomorrow.
+RETRY_UNREACHABLE_AFTER = timedelta(minutes=30)
 
 
 @dataclass(frozen=True)
@@ -337,17 +340,21 @@ async def list_runs(db: AsyncSession, job: str | None = None, agent_id: str | No
 async def scheduled_jobs_done_on(day_start: datetime, now: datetime) -> set[str]:
     """Jobs that already have a scheduled all-agents run today (a live
     'running' row counts: another replica holds it). Errors count as done so a
-    failing source is not hammered all day."""
+    failing source is not hammered all day. A run that could not reach its source counts
+    as done only for RETRY_UNREACHABLE_AFTER, then the job is tried again."""
     async with get_db_session() as db:
         rows = (await db.execute(
             select(JobRun).where(
                 JobRun.trigger == "scheduled", JobRun.agent_id.is_(None), JobRun.started_at >= day_start,
             )
         )).scalars().all()
-    return {
-        r.job for r in rows
-        if r.status not in _RETRY_SAME_DAY and (r.status != "running" or is_live(r, now))
-    }
+    def counted(r: JobRun) -> bool:
+        if r.status in _RETRY_SAME_DAY:
+            return False
+        if r.status == "unreachable":
+            return now - as_utc(r.started_at) < RETRY_UNREACHABLE_AFTER
+        return r.status != "running" or is_live(r, now)
+    return {r.job for r in rows if counted(r)}
 
 
 # ── Run lock ─────────────────────────────────────────────────────────────────

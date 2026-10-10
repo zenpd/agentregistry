@@ -18,13 +18,30 @@ variables:
   workerApp: 'agentregistry-worker'
   backendRepo: 'agentregistry-be'
   backendPort: '8001'
-  tag: 'latest'
+  # Each image is tagged with the commit it was built from; latest also moves to it.
+  tag: '$(Build.SourceVersion)'
 
 pool:
   vmImage: 'ubuntu-latest'
 
 stages:
+  - stage: Test
+    displayName: Backend tests and migration check
+    jobs:
+      - job: Test
+        steps:
+          - task: UsePythonVersion@0
+            inputs: { versionSpec: '3.12' }
+          - script: |
+              set -euo pipefail
+              cd backend
+              python -m pip install -r requirements.txt
+              # Throwaway database only: one test drops every table it is pointed at.
+              PYTHONPATH=. DATABASE_URL=sqlite+aiosqlite:////tmp/ci-tests.db python -m pytest -q tests
+            displayName: Run backend tests (includes alembic upgrade head against the models)
+
   - stage: BuildDeploy
+    dependsOn: Test
     displayName: Build & Deploy Backend
     jobs:
       - job: BuildDeploy
@@ -40,19 +57,26 @@ stages:
                 IMAGE="$(acrLoginServer)/$(backendRepo):$(tag)"
 
                 echo "== Build & push =="
-                az acr build --registry $(acrName) --image "$(backendRepo):$(tag)" \
+                az acr build --registry $(acrName) --image "$(backendRepo):$(tag)" --image "$(backendRepo):latest" \
                   --file backend/Dockerfile backend
 
                 echo "== Deploy backend =="
                 if az containerapp show -n $(backendApp) -g $(resourceGroup) >/dev/null 2>&1; then
-                  az containerapp update -n $(backendApp) -g $(resourceGroup) --image "$IMAGE"
+                  # One replica always runs: the daily jobs (usage, discovery, risk scan, AI insights) run inside the
+                  # backend process, so a backend scaled to zero never syncs.
+                  az containerapp update -n $(backendApp) -g $(resourceGroup) --image "$IMAGE" --min-replicas 1
                 else
                   az containerapp create -n $(backendApp) -g $(resourceGroup) \
                     --environment $(environmentName) --image "$IMAGE" \
                     --target-port $(backendPort) --ingress internal --allow-insecure \
-                    --min-replicas 0 --max-replicas 3 --cpu 1 --memory 2Gi \
+                    --min-replicas 1 --max-replicas 3 --cpu 1 --memory 2Gi \
                     --registry-server $(acrLoginServer) \
                     --env-vars APP_ENV=production LOG_LEVEL=INFO
+                  # A new app also needs these set on it (portal or `az containerapp update --set-env-vars`), because the
+                  # image carries none of them: DATABASE_URL (or DATABASE_URL_KV_URI), AIREGISTRY_SECRET_KEY,
+                  # CORS_ALLOWED_ORIGINS, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT and AZURE_OPENAI_API_KEY (or
+                  # AZURE_OPENAI_API_KEY_KV_URI with a managed identity that may read the secret),
+                  # PHOENIX_COLLECTOR_ENDPOINT and ARIZE_PHOENIX_API_KEY. Settings -> The registry's own AI shows what is missing.
                 fi
 
                 echo "== Deploy worker (same image) =="

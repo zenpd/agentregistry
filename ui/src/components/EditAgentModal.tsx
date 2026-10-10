@@ -132,7 +132,7 @@ export default function EditAgentModal({ agent, onClose, onSaved }: {
               {/* The value is declared in one place, with its method and basis, and finance checks it there. */}
               <div className="input bg-slate-50 flex items-center justify-between gap-2" data-testid="edit-value">
                 <span className="text-slate-800">{agent.valueAmount ? `$${agent.valueAmount.toLocaleString()}` : 'Not declared'}</span>
-                <Link to={`/agents/${agent.id}?tab=revenue`} className="shrink-0 text-xs font-semibold text-zen-700 hover:underline">Declare on Revenue &amp; Expenditure</Link>
+                <Link to={`/agents/${agent.id}?tab=revenue`} className="shrink-0 text-xs font-semibold text-zen-700 hover:underline">Declare on Business Value</Link>
               </div>
             </div>
             <div>

@@ -11,7 +11,7 @@ from governance import classification as _cls
 
 _EVERYTHING = ["get_record", "get_automatic_updates", "get_reviews", "get_risks", "get_usage_and_cost", "get_economics",
                "get_dependencies", "get_trace_graph", "get_context_notes", "get_change_log", "get_contract", "get_data_freshness"]
-V = "v12"
+V = "v13"
 
 # One rule set for the EU AI Act category: the coach reads the lists the classification form uses.
 _TIER_BANNED = "; ".join(v[0].lower() + v[1:] for v in _cls.PROHIBITED.values())
@@ -22,8 +22,8 @@ SPECS: dict[str, InsightSpec] = {s.kind: s for s in (
         kind="review_pack", title="Review pack", where="governance", version=V,
         question="What should a reviewer know before deciding this agent's reviews?",
         task=("Prepare a pack for the person who will decide this agent's governance reviews. Read the record, the automatic "
-              "updates, the reviews and checklist, the risks, usage and cost, dependencies and the trace graph, the context notes "
-              "and the change log. Report: what changed recently, and first of all anything listed in changedSinceApproval "
+              "updates, the reviews and checklist, the risks, the contract, the context notes and the change log. The subject is "
+              "the reviews: leave out usage, cost, how the agent is used and its dependencies, which have their own tabs. Report: what changed recently, and first of all anything listed in changedSinceApproval "
               "(the model, tools or endpoint changed after that review was approved); what needs the reviewer's attention "
               "(failed or weak checklist items, open risks and open incidents, a classification that nobody has confirmed, "
               "waivers that are active or wait for a second signer, and any checklist item that passes on a field the registry "
@@ -32,7 +32,7 @@ SPECS: dict[str, InsightSpec] = {s.kind: s for s in (
               "only because information a person has to give is missing (owner, business outcome, value, budget, service "
               "level, classification answers) go together in one finding that names them; give a finding of its own only to something that needs the "
               "reviewer's judgement. If a subject names one review, concentrate on it. Never say whether the review should pass."),
-        tools=_EVERYTHING,
+        tools=["get_record", "get_automatic_updates", "get_reviews", "get_risks", "get_context_notes", "get_change_log", "get_contract"],
         tags={"changed": "something changed recently", "attention": "needs the reviewer's attention",
               "in_order": "looks in order", "gap": "information is missing from the record"},
     ),
@@ -58,7 +58,8 @@ SPECS: dict[str, InsightSpec] = {s.kind: s for s in (
               "from the declared model, or the change log shows a model change near that date), retries or loops (errors, or a step "
               "in the trace graph with many more runs than its caller), or unknown. Check the change log for changes near the date. "
               "State the evidence gaps: prompt text is never read, so prompt growth can only be inferred from tokens per call. "
-              "If there is too little usage to see a pattern, say so."),
+              "If there is too little usage to see a pattern, say so. The subject is the cost: leave out reviews, "
+              "governance, budgets and value, which have their own tabs."),
         tools=["get_usage_and_cost", "get_change_log", "get_trace_graph", "get_record", "get_economics", "get_automatic_updates"],
         tags={"more_calls": "more calls were made", "longer_calls": "each call used more tokens",
               "model_change": "a different or dearer model was used", "retries_or_loops": "errors, retries or a loop",
@@ -90,7 +91,8 @@ SPECS: dict[str, InsightSpec] = {s.kind: s for s in (
               "hosting cost estimated, too few days of usage, no budget). The economics figures are for the calendar month named in "
               "`month`, and the usage figures for the last 30 days: say which period a figure is for, and do not set one "
               "against the other as if they covered the same days. When no value is declared, say so once; a zero is a "
-              "missing figure, so do not compare it with peers. Do not say whether the agent is worth funding."),
+              "missing figure, so do not compare it with peers. Do not say whether the agent is worth funding. The subject is value and cost: "
+              "leave out reviews, governance and dependencies, which have their own tabs."),
         tools=["get_economics", "get_usage_and_cost", "get_record", "get_peer_figures"],
         tags={"value": "the value and who stands behind it", "cost": "what the cost is made of", "return": "return on cost",
               "estimate": "a figure that is estimated, not measured", "peers": "compared with similar agents",
@@ -99,14 +101,14 @@ SPECS: dict[str, InsightSpec] = {s.kind: s for s in (
     InsightSpec(
         kind="risk_explainer", title="Risks explained", where="risk", version=V,
         question="What is behind the open risks, and what should be looked at first?",
-        task=("Explain this agent's open risk findings and open incidents. Read the risks (the incidents are in the same result), the reviews and checklist, usage, dependencies and the "
-              "trace graph. Group findings that share one cause (for example several 'review not approved' findings caused by "
+        task=("Explain this agent's open risk findings and open incidents. Read the risks (the incidents are in the same result), the reviews and checklist and the record. The subject is "
+              "the risk findings and incidents: a missing owner, service level or value is a risk only when a finding names it. Group findings that share one cause (for example several 'review not approved' findings caused by "
               "reviews never being submitted) and name the record behind each group, citing it. Order the groups by what a person "
               "should look at first: an open incident where the owner was asked to stop the agent and has not acknowledged it, "
               "then severity, then how many findings one action would clear. Name the one action that would clear "
               "the most findings and tag it first. Say what the rules cannot see (for example, the registry does not read what "
               "the agent says unless its trace content audit is switched on). Never say a risk or an incident can be accepted, closed or ignored."),
-        tools=["get_risks", "get_reviews", "get_usage_and_cost", "get_dependencies", "get_trace_graph", "get_record", "get_automatic_updates"],
+        tools=["get_risks", "get_reviews", "get_record", "get_automatic_updates"],
         tags={"first": "look at this first", "root_cause": "the cause behind several findings", "group": "findings that belong together",
               "blind_spot": "something the rules cannot see"},
     ),

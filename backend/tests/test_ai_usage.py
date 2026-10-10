@@ -66,3 +66,15 @@ async def test_a_switched_off_function_refuses_and_says_why(client):
 async def test_ai_off_check_passes_without_calling_a_model(client):
     r = (await client.post("/api/v1/ai-usage/off-check")).json()
     assert r["passed"] is True and len(r["checks"]) == 8
+
+
+@pytest.mark.asyncio
+async def test_ai_usage_reports_the_model_setup_and_the_check_says_when_none_is_set(client, monkeypatch):
+    from shared.config import get_settings
+    monkeypatch.setattr(get_settings(), "azure_openai_endpoint", "")
+    monkeypatch.setattr(get_settings(), "azure_openai_api_key", "")
+    monkeypatch.setattr(get_settings(), "azure_openai_api_key_kv_uri", "")
+    usage = (await client.get("/api/v1/ai-usage")).json()
+    assert usage["model"]["configured"] is False and "AZURE_OPENAI_ENDPOINT" in usage["model"]["problem"]
+    checked = (await client.post("/api/v1/ai-usage/model-check")).json()
+    assert checked["ok"] is False and "No AI model is set up" in checked["message"]

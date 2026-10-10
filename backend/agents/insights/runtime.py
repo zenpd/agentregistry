@@ -51,7 +51,8 @@ Rules you must follow:
 9. The registry fills in what it can by itself: the model actually used, tools and knowledge sources seen in traces, the API address, and a description, capabilities, inputs and outputs taken from the app's own API or drafted from its traces. Never tell the person to fill in or correct those fields. If one of them is still empty or looks wrong, say that the registry could not determine it and why. Ask a person only for what only a person can give: an accountable owner and a backup owner, the business outcome, the declared value and how it was worked out, a budget, a service level, the answers to the classification questions, review decisions and stage changes.
 10. The page itself lists, next to your text, what the registry filled in and what only a person still has to provide (get_automatic_updates returns both). Do not write findings that only repeat either list; mention one of those points only where it explains something else you found.
 11. Do not repeat what the record already says about the agent (its description, capabilities, model, tools): the page shows those. Steps inside the app's own graph are how it works, not dependencies, and are never undeclared. A second model or an embedding model has no field on the record, so it is not undeclared either.
-12. Write for a reader who never sees the data. Call an agent by its name, never by its id. Never write ref values, ids or field names from the data (such as ownerRecorded) in the summary or in a finding's text: refs go only in the refs list."""
+12. Write for a reader who never sees the data. Call an agent by its name, never by its id. Never write ref values, ids or field names from the data (such as ownerRecorded) in the summary or in a finding's text: refs go only in the refs list.
+13. Your reader is looking at one page, and your question names its subject. Report only what belongs to that subject. Mention a fact from another subject (for example usage on a page about reviews) only when it directly explains a finding on this subject, and then in one clause. Do not open the summary by naming and describing the agent, because the page already shows that. Open with the answer to your question."""
 
 
 class Finding(BaseModel):
@@ -99,13 +100,26 @@ class State(TypedDict):
     out: Optional[InsightOut]
 
 
+def model_setup_hint(settings) -> str:
+    """What is missing for the AI model, in words, without showing any secret."""
+    missing = []
+    if not settings.azure_openai_endpoint:
+        missing.append("the endpoint (AZURE_OPENAI_ENDPOINT)")
+    if not settings.azure_openai_api_key:
+        missing.append("the key (AZURE_OPENAI_API_KEY"
+                       + (", read from Key Vault through AZURE_OPENAI_API_KEY_KV_URI, which did not return a value: check that the container's identity may read secrets" if settings.azure_openai_api_key_kv_uri else ", or AZURE_OPENAI_API_KEY_KV_URI") + ")")
+    return "No AI model is set up: " + " and ".join(missing) + " is missing."
+
+
 def get_model(max_tokens: int = 3000):
     """The chat model for insight agents: tool calling, a real request timeout,
     one retry, temperature 0. Raises ModelUnavailable when none is configured."""
     from langchain_openai import AzureChatOpenAI
     settings = get_settings()
     if not settings.azure_openai_endpoint or not settings.azure_openai_api_key:
-        raise ModelUnavailable("No model is configured (Azure OpenAI endpoint and key).")
+        settings.resolve_missing_secrets()          # the key may live in Key Vault and have failed to load at start
+    if not settings.azure_openai_endpoint or not settings.azure_openai_api_key:
+        raise ModelUnavailable(model_setup_hint(settings))
     endpoint = settings.azure_openai_endpoint
     if "/openai" in endpoint:
         endpoint = endpoint.split("/openai")[0]

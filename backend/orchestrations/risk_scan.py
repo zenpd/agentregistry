@@ -115,23 +115,29 @@ async def live_financial(db: AsyncSession, agent: Agent, agent_dict: dict) -> li
     )
 
 
-async def portfolio_financial(db: AsyncSession) -> list[dict[str, Any]]:
+async def portfolio_financial(db: AsyncSession, agent_ids: set[str] | None = None) -> list[dict[str, Any]]:
     """Every agent's live FINANCIAL findings, so portfolio counts match the
     sum of the per-agent Risk tabs.
 
     Rows whose agent no longer exists are skipped: no Risk tab can show them,
     so counting them here would make the portfolio disagree with the sum of
     its parts (a deleted agent left one behind before deletes cleaned up)."""
+    # agent_ids narrows the count to those agents (one business unit, for example).
     live_agents = select(Agent.id).scalar_subquery()
     anomalies = (await db.execute(select(CostAnomaly).where(
         CostAnomaly.resolved_at.is_(None), CostAnomaly.agent_id.in_(live_agents)))).scalars().all()
     waste = (await db.execute(select(WasteFinding).where(
         WasteFinding.status == "open", WasteFinding.agent_id.in_(live_agents)))).scalars().all()
+    if agent_ids is not None:
+        anomalies = [a for a in anomalies if a.agent_id in agent_ids]
+        waste = [w for w in waste if w.agent_id in agent_ids]
     flags: list[dict] = []
     load_economics = _optional("governance.economics", "load_economics")
     if load_economics is not None:
         try:
             agents = (await db.execute(select(Agent))).scalars().all()
+            if agent_ids is not None:
+                agents = [a for a in agents if a.id in agent_ids]
             economics = await load_economics(db, agents)
             flags = [f for e in economics.values() for f in e.get("financialFlags") or [] if isinstance(f, dict)]
         except Exception as exc:

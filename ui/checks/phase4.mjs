@@ -51,6 +51,8 @@ try {
   await page.fill('[data-testid=outcome-name]', 'probe item matched'); await page.fill('[data-testid=outcome-count]', '40')
   await page.click('[data-testid=add-outcome]'); await page.waitForSelector('[data-testid=outcome-row]', { timeout: 15000 })
   ok('the outcome appears with a cost per outcome', /probe item matched/.test(await text('[data-testid=outcome-row]')) && /\$/.test(await text('[data-testid=outcome-row]')), await text('[data-testid=outcome-row]'))
+  // The what-if sits on the Tokenomics tab, with the cost panels.
+  await page.goto(`${B}/agents/${id}?tab=tokenomics`); await page.waitForSelector('[data-testid=model-whatif]', { timeout: 30000 })
   ok('the what-if prices the same tokens at other models and says quality was not compared', /quality was not compared/.test(await text('[data-testid=model-whatif]')))
   await page.screenshot({ path: `${SP}/shots/p4-revenue.png`, fullPage: true })
 

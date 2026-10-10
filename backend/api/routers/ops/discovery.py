@@ -108,7 +108,9 @@ async def phoenix_inbox(_=Depends(require_read)):
             linked = by_project[r.name]
             for a in linked:
                 registered.append({**row, "agentId": a.id, "agentName": a.name, "stage": a.lifecycle_stage,
-                                   "sharedWith": [{"id": o.id, "name": o.name} for o in linked if o.id != a.id]})
+                                   # A demo agent shows a real project's traces on purpose, so it is left out on both sides.
+                                   "sharedWith": [] if a.is_demo else [{"id": o.id, "name": o.name} for o in linked
+                                                                       if o.id != a.id and not o.is_demo]})
         elif identity.is_evaluation_project(r.name):
             evaluation.append(row)
         elif r.state == "dismissed":

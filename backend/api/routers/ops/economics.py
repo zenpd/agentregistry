@@ -49,11 +49,31 @@ def _audit(db, user: dict, action: str, entity_type: str, entity_id: str, change
 
 # ── Economics ────────────────────────────────────────────────────────────────
 
+def month_end_or_today(month: Optional[str]) -> Optional[date]:
+    """The day a chosen month (YYYY-MM) is read up to: its last day, or None for the current month
+    (read up to today). A month that has not started yet is refused."""
+    if not month:
+        return None
+    import calendar
+    try:
+        y, m = int(month[:4]), int(month[5:7])
+        first = date(y, m, 1)
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=422, detail="Month must look like 2026-09.")
+    today = date.today()
+    if first > today.replace(day=1):
+        raise HTTPException(status_code=422, detail="That month has not started yet.")
+    if (y, m) == (today.year, today.month):
+        return None
+    return date(y, m, calendar.monthrange(y, m)[1])
+
+
 @router.get("/agents/{agent_id}/economics")
-async def agent_economics_endpoint(agent_id: str, _=Depends(require_read)):
+async def agent_economics_endpoint(agent_id: str, month: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"), _=Depends(require_read)):
+    """One agent's value against cost. With month=YYYY-MM the figures are those of that month."""
     async with get_db_session() as db:
         agent = await _agent_or_404(db, agent_id)
-        return (await load_economics(db, [agent]))[agent_id]
+        return (await load_economics(db, [agent], month_end_or_today(month)))[agent_id]
 
 
 @router.get("/value/economics")

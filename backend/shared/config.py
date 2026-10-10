@@ -175,10 +175,16 @@ class Settings(BaseSettings):
         """Replace any field whose corresponding ``*_kv_uri`` is set with the
         secret value fetched from Azure Key Vault. Silent no-op when the Azure
         SDK is not installed (local dev)."""
+        self.resolve_missing_secrets(only_empty=False)
+        return self
+
+    def resolve_missing_secrets(self, only_empty: bool = True) -> list[str]:
+        """Fetch the secrets that have a Key Vault address but no value yet. A read that failed at start
+        (the identity of a cold container is not ready) is tried again here. Returns the fields filled in."""
         try:
             from security.vault import get_secret_by_uri
         except ImportError:
-            return self
+            return []
 
         kv_map: list[tuple[str, str]] = [
             ("azure_openai_endpoint_kv_uri", "azure_openai_endpoint"),
@@ -188,13 +194,15 @@ class Settings(BaseSettings):
             ("redis_url_kv_uri", "redis_url"),
             ("arize_phoenix_api_key_kv_uri", "arize_phoenix_api_key"),
         ]
+        filled: list[str] = []
         for uri_field, target_field in kv_map:
             uri: str = getattr(self, uri_field, "")
-            if uri:
+            if uri and not (only_empty and getattr(self, target_field, "")):
                 value = get_secret_by_uri(uri)
                 if value:
                     object.__setattr__(self, target_field, value)
-        return self
+                    filled.append(target_field)
+        return filled
 
 
 @lru_cache

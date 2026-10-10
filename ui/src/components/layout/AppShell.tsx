@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { Settings, Bot, ShieldCheck, LayoutGrid, Cpu, GitBranch, Briefcase, Inbox, BookOpen, Workflow, Radar, MessageCircleQuestion, LogOut, ScrollText, HeartPulse, ClipboardCheck } from 'lucide-react'
+import { Settings, Bot, ShieldCheck, LayoutGrid, Cpu, GitBranch, Inbox, BookOpen, Workflow, Radar, MessageCircleQuestion, LogOut, ScrollText, ClipboardCheck } from 'lucide-react'
 import { can, useMe } from '../../lib/me'
 import NotificationBell from '../NotificationBell'
 import { getMe, logout } from '../../services/api'
@@ -15,13 +15,11 @@ import { DISCOVERY_CHANGED, getPhoenixInbox } from '../../services/ops/discovery
 // outcomes), not the portfolio-wide one Executive answers.
 const NAV = [
   { to: '/', label: 'Executive', icon: LayoutGrid },
-  { to: '/agents', label: 'AI Registry', icon: Bot },
   { to: '/discovered', label: 'Discovered Agents', icon: Radar },
+  { to: '/agents', label: 'Agent Registry', icon: Bot },
   { to: '/approvals', label: 'Integration Approval', icon: Inbox },
   { to: '/governance', label: 'Governance', icon: ShieldCheck },
   { to: '/compliance', label: 'Compliance', icon: ClipboardCheck },
-  { to: '/business', label: 'Business Impact', icon: Briefcase },
-  { to: '/programme', label: 'Programme Health', icon: HeartPulse },
   { to: '/platform', label: 'Platform', icon: Cpu },
   { to: '/dependencies', label: 'All Agents Graph', icon: GitBranch },
   { to: '/ask', label: 'Ask the Registry', icon: MessageCircleQuestion },

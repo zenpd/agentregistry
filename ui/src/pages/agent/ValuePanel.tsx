@@ -9,7 +9,7 @@ function errorMessage(e: any, fallback: string): string {
 }
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 
-// Revenue tab → Value: the owner declares a monthly value with its method and how it
+// Business Value tab → Value: the owner declares a monthly value with its method and how it
 // is worked out, and a finance reviewer attests it or adjusts it.
 export default function ValuePanel({ agentId, onChanged }: { agentId: string; onChanged: () => void }) {
   const me = useMe()

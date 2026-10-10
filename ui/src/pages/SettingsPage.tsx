@@ -10,6 +10,7 @@ import ApprovedToolsCard from '../components/ApprovedToolsCard'
 import ControlsCard from '../components/ControlsCard'
 import CostSettingsCard from '../components/CostSettingsCard'
 import DemoAgentsCard from '../components/DemoAgentsCard'
+void DemoAgentsCard   // kept: the card is hidden for now
 import UsersSection from '../components/UsersSection'
 import InfoTip from '../components/InfoTip'
 import { can, useMe } from '../lib/me'
@@ -159,7 +160,7 @@ export default function SettingsPage() {
         )}
       </div>
 
-      <DemoAgentsCard />
+      {/* The Demo agents card is hidden for now. The other demo agents stay hidden, and the showcase agent is always shown. */}
       <GovernanceRulesCard canEdit={can(me, 'admin')} />
       <ApprovedToolsCard canEdit={can(me, 'admin')} />
       <ControlsCard />

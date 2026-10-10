@@ -10,13 +10,19 @@ export interface AiRunRow {
   promptVersion: string | null; inputTokens: number; outputTokens: number; costCents: number | null
   durationMs: number; status: string; reason: string | null; scheduled: boolean
 }
+export interface AiModelStatus {
+  configured: boolean; endpointHost: string | null; deployment: string; keySet: boolean
+  keyFrom: string | null; keyVaultAddressSet: boolean; problem: string | null
+}
 export interface AiUsage {
+  model: AiModelStatus
   monthStart: string; spentThisMonthCents: number; monthlyCapCents: number | null
   capState: 'no_cap' | 'within' | 'reached'; interactiveCeiling: number
   functions: AiFunctionUsage[]; recent: AiRunRow[]
 }
 
 export const getAiUsage = () => api.get<AiUsage>('/ai-usage')
+export const checkAiModel = () => api.post<AiModelStatus & { ok: boolean; message: string }>('/ai-usage/model-check', null, { timeout: 60_000 })
 export const setAiSwitch = (fn: string, enabled: boolean) => api.put(`/ai-usage/switches/${encodeURIComponent(fn)}`, { enabled })
 export const setAiCap = (monthlyCapCents: number | null) => api.put('/ai-usage/cap', { monthlyCapCents })
 export const runAiOffCheck = () =>

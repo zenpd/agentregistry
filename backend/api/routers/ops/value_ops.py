@@ -383,7 +383,9 @@ async def spend_review_data(db) -> dict:
              "infraCents": econ[a.id]["infraCostCents"], "infraSource": econ[a.id]["infraSource"],
              "tokenCents": econ[a.id]["tokenCostCents"]} for a in agents]
     cost = {a.id: econ[a.id]["totalCostCents"] for a in agents}
-    return {"idle": gv.idle_spend(rows), "duplicates": gv.duplicate_spend(duplicate_pairs(agents), cost)}
+    # A demo agent is a copy of a real one on purpose, so it is not reported as a duplicate of it.
+    real = [a for a in agents if not getattr(a, "is_demo", False)]
+    return {"idle": gv.idle_spend(rows), "duplicates": gv.duplicate_spend(duplicate_pairs(real), cost)}
 
 
 @router.get("/portfolio/spend-review")

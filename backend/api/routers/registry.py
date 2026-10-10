@@ -452,10 +452,12 @@ async def get_agent(agent_id: str, _=Depends(require_read)):
         # certification checklist above every tab, not only on Integrate.
         reuse_status = (await reuse_repo.certifications(db, [agent]))[agent.id]
         # Other records linked to the same Phoenix project: usually the same app registered twice.
+        # A demo agent may show a real project's traces on purpose, so it is left out on both sides.
         shared = []
-        if agent.phoenix_project:
+        if agent.phoenix_project and not agent.is_demo:
             shared = [{"id": i, "name": n} for i, n in (await db.execute(
-                select(Agent.id, Agent.name).where(Agent.phoenix_project == agent.phoenix_project, Agent.id != agent.id))).all()]
+                select(Agent.id, Agent.name).where(Agent.phoenix_project == agent.phoenix_project, Agent.id != agent.id,
+                                                   Agent.is_demo == False))).all()]  # noqa: E712
         return {**_agent_to_dict(agent, dept_name=dept_name), "reuse": reuse_status, "sharedProject": shared}
 
 
@@ -1103,7 +1105,11 @@ async def view_scope(_=Depends(require_read)):
 
 @admin_router.get("/taxonomy")
 async def taxonomy(_=Depends(require_read)):
+    async with get_db_session() as db:
+        departments = [{"id": d.id, "name": d.name} for d in (await db.execute(select(Department).order_by(Department.name))).scalars().all()]
     return {
+        # Every business unit, also the ones with no agent yet, so a page can offer them all as a filter.
+        "departments": departments,
         "stages": ["Ideation", "Development", "Testing", "Production", "Deprecated"],
         "gates": ["arb", "security", "dp"],
         "reviewStatuses": ["Not Submitted", "In Review", "Changes Requested", "Approved with Conditions", "Approved"],

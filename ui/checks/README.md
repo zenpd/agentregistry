@@ -22,4 +22,4 @@ Phases 0 and 1 expect the development data: 6 real agents, with the 12 demo agen
 archived), and the agents Iso Mapper and Digital Onboarding Test. `demo_agents.mjs` opens every tab of every demo
 agent and checks the archived ones stay out of the pages.
 
-`consistency.mjs` checks that each action has one place and each figure one rule (Governance, Edit window, Executive against Business Impact, Platform, Playground redirect, archive). `demo_agents.mjs` checks the demo and archived agents.
+`executive_merge.mjs` checks the menu, the Executive page with the business impact section, clickable cards, the Business Value and Tokenomics month filter, and the Digital Onboarding Prod demo agent (seed it first with `backend/scripts/seed_happy_path.py`). `consistency.mjs` checks that each action has one place and each figure one rule (Governance, Edit window, Executive against Business Impact, Platform, Playground redirect, archive). `demo_agents.mjs` checks the demo and archived agents.

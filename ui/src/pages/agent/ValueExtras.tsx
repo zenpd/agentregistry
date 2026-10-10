@@ -8,7 +8,7 @@ function errorMessage(e: any, fallback: string): string {
   return typeof detail === 'string' ? detail : e?.message || fallback
 }
 
-// Revenue tab → Measured outcomes: counts from a CSV file, a webhook or typed in,
+// Business Value tab → Measured outcomes: counts from a CSV file, a webhook or typed in,
 // and the cost of each outcome over the last 30 days.
 export function MeasuredOutcomes({ agentId }: { agentId: string }) {
   const me = useMe()
@@ -70,7 +70,7 @@ export function MeasuredOutcomes({ agentId }: { agentId: string }) {
   )
 }
 
-// Revenue tab → Other models: the last 30 days of tokens priced at every model in the price list.
+// Tokenomics tab → Other models: the last 30 days of tokens priced at every model in the price list.
 export function ModelWhatIf({ agentId }: { agentId: string }) {
   const [pct, setPct] = useState(0)
   const [d, setD] = useState<WhatIf | null>(null)

@@ -15,13 +15,30 @@ variables:
   frontendApp: 'agentregistry-fe'
   backendApp: 'agentregistry-be'
   frontendRepo: 'agentregistry-fe'
-  tag: 'latest'
+  # Each image is tagged with the commit it was built from; latest also moves to it.
+  tag: '$(Build.SourceVersion)'
 
 pool:
   vmImage: 'ubuntu-latest'
 
 stages:
+  - stage: Test
+    displayName: Type check and build
+    jobs:
+      - job: Test
+        steps:
+          - task: NodeTool@0
+            inputs: { versionSpec: '20.x' }
+          - script: |
+              set -euo pipefail
+              cd ui
+              npm ci
+              npx tsc --noEmit
+              npm run build
+            displayName: Type check and build the UI
+
   - stage: BuildDeploy
+    dependsOn: Test
     displayName: Build & Deploy Frontend
     jobs:
       - job: BuildDeploy
@@ -37,7 +54,7 @@ stages:
                 IMAGE="$(acrLoginServer)/$(frontendRepo):$(tag)"
 
                 echo "== Build & push =="
-                az acr build --registry $(acrName) --image "$(frontendRepo):$(tag)" \
+                az acr build --registry $(acrName) --image "$(frontendRepo):$(tag)" --image "$(frontendRepo):latest" \
                   --file ui/Dockerfile ui
 
                 # Backend internal FQDN for the nginx /api proxy (http, allow-insecure).

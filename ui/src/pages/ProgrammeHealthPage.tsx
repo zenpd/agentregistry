@@ -10,12 +10,19 @@ const usd = (c: number) => `$${(c / 100).toLocaleString(undefined, { minimumFrac
 const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 
 function Tile({ icon, label, value, sub, testId, open, onOpen }: { icon: React.ReactNode; label: string; value: string; sub: string; testId: string; open?: boolean; onOpen?: () => void }) {
-  return (
-    <div className={`card p-4 ${open ? 'ring-2 ring-zen-400' : ''}`} data-testid={testId}>
+  const body = (
+    <>
       <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-600">{icon}{label}</div>
       <div className="mt-1 text-2xl font-bold text-slate-900">{value}</div>
       <div className="mt-1 text-xs text-slate-600">{sub}</div>
-      {onOpen && <button type="button" className="mt-1.5 text-xs font-semibold text-zen-700 hover:underline" aria-expanded={!!open} onClick={onOpen}>{open ? 'Hide the list' : 'Show what is counted'}</button>}
+    </>
+  )
+  // The whole card is clickable and opens the rows the figure is counted from.
+  if (!onOpen) return <div className="card p-4" data-testid={testId}>{body}</div>
+  return (
+    <div className={`card p-4 cursor-pointer transition hover:shadow-card-hover ${open ? 'ring-2 ring-zen-400' : ''}`} role="button" tabIndex={0} aria-expanded={!!open}
+      title="Click to see what is counted" data-testid={testId} onClick={onOpen} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}>
+      {body}
     </div>
   )
 }
@@ -133,7 +140,7 @@ export default function ProgrammeHealthPage() {
 
       <div className="card p-5 space-y-2" data-testid="search-gaps">
         <h2 className="font-semibold text-slate-900 flex items-center gap-2"><Search size={16} /> Searched for and not found <InfoTip term="search_gap" /></h2>
-        <p className="text-[13px] text-slate-600">Searches on the AI Registry page that found no agent in the last 90 days, most people first.</p>
+        <p className="text-[13px] text-slate-600">Searches on the Agent Registry page that found no agent in the last 90 days, most people first.</p>
         {h.searchGaps.length === 0
           ? <p className="text-[13px] text-slate-500">No search came back empty.</p>
           : (

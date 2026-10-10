@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import ChargebackCard from './ChargebackCard'
 import ManualUsagePanel from './ManualUsagePanel'
 import InfoTip from '../../components/InfoTip'
@@ -13,10 +14,13 @@ import {
   type Tokenomics,
   type UsageRefreshResult,
 } from '../../services/ops/tokenomics'
-import { Loading, MiniStat, SectionLabel, SEVERITY_PILL, SourceBadge, fmtNumber, type TabProps, useReloadOn } from './shared'
+import { Loading, MiniStat, SectionLabel, SEVERITY_PILL, SourceBadge, fmtCents, fmtNumber, type TabProps, useReloadOn } from './shared'
 import Disclosure from '../../components/Disclosure'
-
-const WINDOWS = [30, 90] as const
+import MonthPicker, { isMonthKey, monthLabel } from '../../components/MonthPicker'
+import { getEconomics, type AgentEconomicsDetail } from '../../services/ops/economics'
+import { ModelWhatIf } from './ValueExtras'
+import { CostBreakdown, InfraPanel, TokenTile } from './CostPanels'
+import { Tile } from './costUi'
 
 // Chart palette: validated categorical slots 1-3 (blue, aqua, orange) for the
 // token stack; the cost line is its own panel, so it keeps the app's teal.
@@ -137,25 +141,34 @@ function describeAnomaly(a: CostAnomaly): string {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function TokenomicsTab({ agentId, dataVersion }: TabProps) {
-  const [days, setDays] = useState<number>(30)
+  // '30' or '90' for the last days, or YYYY-MM for one month.
+  const [period, setPeriod] = useState<string>('30')
+  const month = isMonthKey(period) ? period : null
+  const days = month ? 30 : Number(period)
+  const [econ, setEcon] = useState<AgentEconomicsDetail | null>(null)
   const [data, setData] = useState<Tokenomics | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshResult, setRefreshResult] = useState<UsageRefreshResult | null>(null)
   const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)   // the figures on screen stay while another period loads
   const request = useRef(0)
 
   const load = useCallback(async () => {
     const id = ++request.current
+    setLoading(true)
     try {
-      const res = await getTokenomics(agentId, days)
+      const [res, e] = await Promise.all([getTokenomics(agentId, days, month), getEconomics(agentId, month).catch(() => null)])
       if (id !== request.current) return
       setData(res.data)
+      setEcon(e?.data ?? null)
       setError(null)
     } catch (e) {
       if (id === request.current) setError(errorMessage(e, 'Could not load tokenomics'))
+    } finally {
+      if (id === request.current) setLoading(false)
     }
-  }, [agentId, days])
+  }, [agentId, days, month])
 
   useEffect(() => {
     load()
@@ -197,6 +210,10 @@ export default function TokenomicsTab({ agentId, dataVersion }: TabProps) {
   return (
     <div className="space-y-5">
       <StatusStrip data={data} refreshing={refreshing} onRefresh={refresh} />
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600" data-testid="usage-period">
+        <span>Showing <b className="text-slate-800">{month ? monthLabel(month) : `the last ${data.days} days`}</b>: {fmtDay(data.windowStart, true)} to {fmtDay(data.windowEnd, true)} (UTC)</span>
+        <MonthPicker value={period} onChange={setPeriod} presets={[{ key: '30', label: 'Last 30 days' }, { key: '90', label: 'Last 90 days' }]} testId="usage-month" />
+      </div>
       {error && <p className="text-xs text-rose-600">Reload failed: {error}</p>}
       <RefreshNotice data={data} result={refreshResult} error={refreshError} refreshing={refreshing} />
       {data.source === 'seed' && <DemoNotice linked={data.linked} />}
@@ -204,36 +221,25 @@ export default function TokenomicsTab({ agentId, dataVersion }: TabProps) {
       <ManualUsagePanel agentId={agentId} onChanged={load} />
 
       {hasData && (
-        <>
-          <Headline data={data} />
+        <div className={`space-y-5 transition-opacity duration-150 ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
+          {month ? <MonthHeadline data={data} /> : <Headline data={data} />}
+          {econ && <CostSection agentId={agentId} econ={econ} month={month} />}
           <section className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <SectionLabel tip="tokens">Daily usage — last {data.days} days (UTC)</SectionLabel>
-              <div className="flex gap-1" role="group" aria-label="Chart window">
-                {WINDOWS.map(w => (
-                  <button
-                    key={w}
-                    onClick={() => setDays(w)}
-                    aria-pressed={days === w}
-                    className={`px-2 py-0.5 text-xs rounded-md border transition-colors ${
-                      days === w ? 'border-zen-600 bg-zen-50 text-zen-700' : 'border-gray-200 text-slate-600 hover:text-slate-700'
-                    }`}
-                  >
-                    {w} days
-                  </button>
-                ))}
-              </div>
+              <SectionLabel tip="tokens">Daily usage — {month ? monthLabel(month) : `last ${data.days} days`} (UTC)</SectionLabel>
             </div>
             <DailyUsageChart daily={data.daily} />
           </section>
           <ModelTable data={data} />
-          <ForecastPanel data={data} />
-        </>
+          {!month && <ForecastPanel data={data} />}
+        </div>
       )}
 
       <AnomalyList data={data} onChanged={load} />
       <BudgetEditor agentId={agentId} budget={data.budget} onSaved={load} />
       <ChargebackCard agentId={agentId} />
+      <ModelWhatIf agentId={agentId} />
+      {econ && <InfraPanel agentId={agentId} econ={econ} onChanged={load} />}
     </div>
   )
 }
@@ -363,6 +369,35 @@ function EmptyState({ data }: { data: Tokenomics }) {
 }
 
 // ── Headline ─────────────────────────────────────────────────────────────────
+
+// Token cost, hosting cost and their total for the month on screen, with the split and where each figure comes from.
+function CostSection({ agentId, econ, month }: { agentId: string; econ: AgentEconomicsDetail; month: string | null }) {
+  return (
+    <section className="space-y-3" data-testid="cost-section">
+      <SectionLabel tip="cost_to_run">Cost of {month ? monthLabel(month) : 'this month'}{econ.period.daysElapsed < econ.period.daysInPeriod ? ' (projected to the full month)' : ''}</SectionLabel>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        <TokenTile econ={econ} />
+        <Tile label="Hosting cost" value={fmtCents(econ.infraCostCents)}
+          sub={<><SourceBadge source={econ.infraSource} /><span>{econ.infraSource === 'estimate' ? `fixed figure for the ${econ.stage} stage` : econ.infraSource === 'metered' ? 'measured by Azure' : 'declared by the owner'}</span></>} />
+        <Tile label="Total cost" value={fmtCost(econ.totalCostCents)}
+          sub={<span>{econ.costComplete ? 'tokens + hosting' : 'hosting only, token cost unknown'} · <Link to={`/agents/${agentId}?tab=revenue`} className="text-zen-700 hover:underline">value against this cost: Business Value tab</Link></span>} />
+      </div>
+      <CostBreakdown econ={econ} />
+    </section>
+  )
+}
+
+// The headline of a chosen month: what that month's usage cost. The budget and forecast are about the present, so they are not shown.
+function MonthHeadline({ data }: { data: Tokenomics }) {
+  return (
+    <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <MiniStat label="Token cost" tip="tokens" value={fmtCost(data.totals.costCents)} hint={`${fmtDay(data.windowStart)} – ${fmtDay(data.windowEnd)} (UTC)`} />
+      <MiniStat label="Cost / call" tip="cost_to_run" value={fmtCost(data.costPerCallCents)} hint="Token cost ÷ calls in the month" />
+      <MiniStat label="LLM calls" value={fmtNumber(data.totals.calls)} hint={`${fmtNumber(data.totals.errors)} failed · ${fmtNumber(data.totals.runs)} traces`} />
+      <MiniStat label="Tokens in / out" value={`${fmtCompact(data.totals.inputTokens)} / ${fmtCompact(data.totals.outputTokens)}`} hint="Input and output tokens" />
+    </section>
+  )
+}
 
 function Headline({ data }: { data: Tokenomics }) {
   const b = data.budget

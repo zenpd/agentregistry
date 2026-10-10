@@ -41,7 +41,7 @@ export const GLOSSARY = {
   decision_chain: 'Every decision (reviews, stage changes, waivers, access, classification, ownership, retirement, stop requests) is sealed with a hash that includes the hash before it, so changing or removing one breaks every hash after it.',
   incident: 'A problem with an agent, linked from PagerDuty, ServiceNow or entered here. Anyone who may change records can ask the owner to stop the agent, and the owner acknowledges.',
   tool_class: 'The highest risk class among the tools, systems, databases and knowledge bases an agent declares, from the approved tool list in Settings.',
-  department: 'The business unit that runs the agent. Business Impact groups value and cost by department.',
+  department: 'The business unit that runs the agent. The Executive page groups value and cost by department.',
   business_outcome: 'The result the agent exists to deliver, in one line. It is what its value is measured against.',
   declared_value: 'The monthly value the owner says the agent delivers. It is a claim until finance confirms it.',
   hours_saved: 'Hours of human work the agent saves each month, as declared by the owner.',
@@ -76,6 +76,9 @@ export const GLOSSARY = {
   // ── Cost, value and risk ─────────────────────────────────────────────────────
   tokens: 'The pieces of text a model reads and writes. Models charge by the token.',
   cost_to_run: 'What the agent costs each month: token cost plus hosting cost.',
+  total_agents: 'Every agent that is not retired (Deprecated). In Production means live. In pipeline means in Ideation, Development or Testing.',
+  cost_and_return: 'Cost to run is token cost plus hosting cost each month. Return on cost is value divided by cost to run: above 1× means the agents return more than they cost.',
+  open_risk_findings: 'Findings from the risk scan, from people, and from cost and spend, that are still open. An agent is marked at risk by a person on its record.',
   cost_complete: 'Whether both parts of the cost (tokens and hosting) are known. If one is missing, the real cost is at least the figure shown.',
   return_on_cost: 'Value divided by cost to run. The value is the figure finance attested or adjusted, or the owner’s declared figure when finance has not reviewed it. Above 1× means it returns more than it costs.',
   value_waiting: 'Value declared for agents that are not live yet. It is what going live would add.',

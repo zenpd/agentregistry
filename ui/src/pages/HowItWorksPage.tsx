@@ -13,14 +13,14 @@ const STATUS: Record<Status, { label: string; className: string }> = {
 
 // An agent's path through the registry, from first registration to reuse.
 const JOURNEY: { title: string; what: string; where: string; to: string; icon: typeof PlusCircle }[] = [
-  { title: 'Register', what: 'Pick a project found in Phoenix, or paste the app’s address, and the form fills itself. Similar agents are shown first, so a team reuses instead of rebuilding.', where: 'Discovered Agents · AI Registry', to: '/discovered', icon: PlusCircle },
+  { title: 'Register', what: 'Pick a project found in Phoenix, or paste the app’s address, and the form fills itself. Similar agents are shown first, so a team reuses instead of rebuilding.', where: 'Discovered Agents · Agent Registry', to: '/discovered', icon: PlusCircle },
   { title: 'Contract', what: 'Endpoint, inputs, outputs, SLA and owner — what another team needs to call it.', where: 'Agent → Integrate', to: '/agents', icon: FileText },
   { title: 'Reviews', what: 'Architecture, Security and Data Protection each decide, with evidence and an expiry date.', where: 'Integration Approval · agent Governance tab', to: '/approvals', icon: ShieldCheck },
   { title: 'Stage', what: 'Ideation → Development → Testing → Production. Stage rules list what is still missing.', where: 'Agent → Governance', to: '/governance', icon: ClipboardList },
   { title: 'Certified for reuse', what: 'Automatic once it is in Production, every required review is approved and no high or critical risk is open.', where: 'Agent → Integrate', to: '/agents', icon: BadgeCheck },
   { title: 'Consume', what: 'Teams try it with their own input, then request access. The owner approves.', where: 'Agent → Integrate · Integration Approval', to: '/approvals', icon: KeyRound },
   { title: 'Monitor', what: 'Usage, cost, risk and last-seen activity are kept current by the daily jobs (the scheduler is on unless the installation turned it off).', where: 'Pipelines', to: '/pipelines', icon: LineChart },
-  { title: 'Report', what: 'Leaders see value, cost and what is holding value back, per business unit.', where: 'Executive · Business Impact', to: '/business', icon: BarChart3 },
+  { title: 'Report', what: 'Leaders see value, cost and what is holding value back, per business unit.', where: 'Executive (with the business impact by unit)', to: '/', icon: BarChart3 },
 ]
 
 // How an application gets from Phoenix into the registry, step by step.
@@ -86,15 +86,14 @@ const INSIGHT_STEPS: { title: string; text: string }[] = [
 ]
 
 const PERSONAS: { who: string; why: string; pages: { label: string; to: string }[] }[] = [
-  { who: 'Executives', why: 'Portfolio health, value against cost, risk', pages: [{ label: 'Executive', to: '/' }, { label: 'Business Impact', to: '/business' }] },
-  { who: 'Business unit owners', why: 'My unit’s agents, outcomes and blockers', pages: [{ label: 'Business Impact', to: '/business' }] },
-  { who: 'Builders and product teams', why: 'Find, register, contract and call agents', pages: [{ label: 'AI Registry', to: '/agents' }] },
+  { who: 'Executives', why: 'Portfolio health, value against cost, risk', pages: [{ label: 'Executive', to: '/' }] },
+  { who: 'Business unit owners', why: 'My unit’s agents, outcomes and blockers', pages: [{ label: 'Executive (business impact by unit)', to: '/' }] },
+  { who: 'Builders and product teams', why: 'Find, register, contract and call agents', pages: [{ label: 'Agent Registry', to: '/agents' }] },
   { who: 'Reviewers (Architecture · Security · Data Protection)', why: 'Decide reviews and access requests', pages: [{ label: 'Integration Approval', to: '/approvals' }, { label: 'Governance', to: '/governance' }] },
   { who: 'IT and architecture', why: 'Shared systems, dependencies, blast radius', pages: [{ label: 'Platform', to: '/platform' }, { label: 'All Agents Graph', to: '/dependencies' }] },
   { who: 'Admins', why: 'Tracing endpoint, users, rules, connectors, background jobs', pages: [{ label: 'Settings', to: '/settings' }, { label: 'Pipelines', to: '/pipelines' }] },
-  { who: 'Finance reviewers', why: 'Attest or adjust the value owners declare, chargeback', pages: [{ label: 'Business Impact', to: '/business' }, { label: 'Programme Health', to: '/programme' }] },
+  { who: 'Finance reviewers', why: 'Attest or adjust the value owners declare, chargeback', pages: [{ label: 'Executive (business impact by unit)', to: '/' }] },
   { who: 'Compliance and auditors', why: 'Control coverage, evidence packs, the decision log, the audit trail', pages: [{ label: 'Compliance', to: '/compliance' }, { label: 'Audit Trail', to: '/audit' }] },
-  { who: 'Programme leads', why: 'Known agents, owners, review speed, reuse, searches that found nothing', pages: [{ label: 'Programme Health', to: '/programme' }] },
 ]
 
 type Row = { item: string; detail: string; status: Status }
@@ -103,13 +102,12 @@ const COLUMNS: { title: string; sub: string; rows: Row[] }[] = [
     title: 'Screens', sub: 'What you see in the browser',
     rows: [
       { item: 'Executive overview', detail: 'Totals, value against cost, risk by category, pipeline, value by unit', status: 'working' },
-      { item: 'Business Impact', detail: 'Per unit: value, cost to run, return, value waiting to go live, missing numbers', status: 'working' },
-      { item: 'AI Registry', detail: 'Search by what agents do, reuse status on every card, registration with a duplicate check', status: 'working' },
-      { item: 'Agent page', detail: 'Overview, Diagram, Governance, Tokenomics, Revenue & Expenditure, Risk, Integrate', status: 'working' },
+      { item: 'Executive: business impact by unit', detail: 'Per unit: value, cost to run, return, value waiting to go live, missing numbers', status: 'working' },
+      { item: 'Agent Registry', detail: 'Search by what agents do, reuse status on every card, registration with a duplicate check', status: 'working' },
+      { item: 'Agent page', detail: 'Overview, Diagram, Governance, Tokenomics, Business Value, Risk, Integrate', status: 'working' },
       { item: 'Discovered Agents', detail: 'Phoenix projects that are not registered yet: register one (the form fills from its traces and from the app itself) or dismiss it. Shows which registered agents have gone quiet', status: 'working' },
       { item: 'Ask the Registry', detail: 'A question in plain words, answered from the registry with links to the agents concerned', status: 'working' },
       { item: 'Integration Approval', detail: 'Access requests, reviews and classifications awaiting a decision (ranked by findings, risk tier and wait, with who can decide and who is away) and governance findings in one inbox, and a Decided history', status: 'working' },
-      { item: 'Programme Health', detail: 'Known against discovered agents, owners, review decision time, overdue reviews, reuse by unit, searches that found nothing, chargeback', status: 'working' },
       { item: 'Compliance', detail: 'EU AI Act, ISO/IEC 42001, NIST AI RMF and India DPDP Act controls mapped to the records the registry holds, with the gaps named per agent, evidence exports, the decision log check, the data and retention report and a GRC export', status: 'working' },
       { item: 'Audit Trail', detail: 'Every event, filterable, with CSV export', status: 'working' },
       { item: 'Platform and Dependencies', detail: 'Shared systems, concentration risk, call network and the dependency graph', status: 'working' },
@@ -139,7 +137,7 @@ const COLUMNS: { title: string; sub: string; rows: Row[] }[] = [
       { item: 'Role-based access', detail: 'Eight roles, enforced on every action. A Finance Reviewer attests value, an Auditor has read-only access until an end date with every request logged. Each review gate is decided by its own role (Architect Steward, Security Reviewer, Data Protection Officer) or a Registry Admin, and the signed-in person is recorded as the reviewer', status: 'working' },
       { item: 'Audit trail', detail: 'Every change, decision and automatic action, filterable by person, action, record and date, with CSV export. Audit rows cannot be changed or deleted, even in the database', status: 'working' },
       { item: 'Notifications', detail: 'A daily message to each person about what waits for them, and an immediate notice to admins when a scheduled job fails. Always in the in-app inbox (the bell); e-mail and a Teams channel once configured', status: 'working' },
-      { item: 'Demo agents', detail: 'The seeded example agents are labelled Demo and shown on every page, so a first look has agents and graphs. Settings → Demo agents hides them (the choice is kept per browser) and lists archived agents, which are left out everywhere but kept and can be brought back. DEMO_AGENTS_ENABLED=false in the backend environment turns them off for the whole installation', status: 'working' },
+      { item: 'Demo agents', detail: 'One complete example agent, labelled Demo, is always shown so that every page has a fully filled-in agent to look at. The other example agents are hidden. DEMO_AGENTS_ENABLED=false in the backend settings leaves all of them out', status: 'working' },
     ],
   },
   {

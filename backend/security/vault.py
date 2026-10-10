@@ -9,12 +9,15 @@ A secret URI looks like:
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
 
 log = logging.getLogger("security.vault")
 
 
-@lru_cache(maxsize=64)
+# Only values that were read are kept. A failed read (the container's identity is not ready yet, for example) is
+# tried again on the next call and is never remembered for the life of the process.
+_cache: dict[str, str] = {}
+
+
 def get_secret_by_uri(secret_uri: str) -> str | None:
     """Fetch a secret value from Azure Key Vault given its full URI.
 
@@ -23,6 +26,8 @@ def get_secret_by_uri(secret_uri: str) -> str | None:
     """
     if not secret_uri:
         return None
+    if secret_uri in _cache:
+        return _cache[secret_uri]
     try:
         from azure.identity import DefaultAzureCredential
         from azure.keyvault.secrets import SecretClient
@@ -40,6 +45,8 @@ def get_secret_by_uri(secret_uri: str) -> str | None:
 
         client = SecretClient(vault_url=vault_url, credential=DefaultAzureCredential())
         secret = client.get_secret(secret_name, version)
+        if secret.value:
+            _cache[secret_uri] = secret.value
         return secret.value
     except Exception as exc:  # noqa: BLE001
         log.warning("failed to resolve secret %s: %s", secret_uri, exc)

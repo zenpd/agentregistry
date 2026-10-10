@@ -9,6 +9,12 @@ function PlaygroundRedirect() {
   return <Navigate to={agent ? `/agents/${agent}?tab=integrate` : '/agents'} replace />
 }
 void PlaygroundPage   // kept until the final cleanup
+
+// Business Impact is a section of the Executive page. Old /business links land there, with the unit filter kept.
+function BusinessRedirect() {
+  const { search } = window.location
+  return <Navigate to={`/${search}#business-impact`} replace />
+}
 import SettingsPage from './pages/SettingsPage'
 import ExecutivePage from './pages/ExecutivePage'
 import AgentsPage from './pages/AgentsPage'
@@ -17,6 +23,7 @@ import GovernancePage from './pages/GovernancePage'
 import PlatformView from './pages/PlatformView'
 import DependencyGraphView from './pages/DependencyGraphView'
 import BusinessView from './pages/BusinessView'
+void BusinessView   // rendered inside the Executive page
 import ApprovalsPage from './pages/ApprovalsPage'
 import DiscoveredPage from './pages/DiscoveredPage'
 import AskPage from './pages/AskPage'
@@ -44,7 +51,7 @@ function AuthShell() {
     <AppShell>
       <Routes>
         <Route path="/" element={<ExecutivePage />} />
-        <Route path="/business" element={<BusinessView />} />
+        <Route path="/business" element={<BusinessRedirect />} />
         <Route path="/discovered" element={<DiscoveredPage />} />
         <Route path="/ask" element={<AskPage />} />
         <Route path="/approvals" element={<ApprovalsPage />} />

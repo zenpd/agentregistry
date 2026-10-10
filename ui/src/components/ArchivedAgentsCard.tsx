@@ -7,7 +7,7 @@ import { errorMessage } from '../pages/agent/shared'
 type Archived = { id: string; name: string; stage: string; isDemo: boolean; archivedAt: string; reason: string | null }
 
 // Settings → Archived agents: agents left out of every page, count and job but kept
-// with all their records. An agent is archived from its delete dialog on AI Registry.
+// with all their records. An agent is archived from its delete dialog on Agent Registry.
 export default function ArchivedAgentsCard({ canEdit }: { canEdit: boolean }) {
   const [archived, setArchived] = useState<Archived[] | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
@@ -26,7 +26,7 @@ export default function ArchivedAgentsCard({ canEdit }: { canEdit: boolean }) {
         <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600"><Archive size={20} /></div>
         <div>
           <h3 className="text-[16px] font-extrabold text-slate-900">Archived agents{archived ? ` (${archived.length})` : ''}</h3>
-          <p className="text-[13px] text-slate-600">Left out of every page, count and job, and kept with all their records. An agent is archived from its delete dialog on AI Registry.</p>
+          <p className="text-[13px] text-slate-600">Left out of every page, count and job, and kept with all their records. An agent is archived from its delete dialog on Agent Registry.</p>
         </div>
       </div>
       {archived && archived.length === 0 && <p className="text-[13px] text-slate-600">No agent is archived.</p>}

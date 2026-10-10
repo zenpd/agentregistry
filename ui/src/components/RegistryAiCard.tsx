@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Cpu } from 'lucide-react'
-import { getAiUsage, runAiOffCheck, setAiCap, setAiSwitch, type AiUsage } from '../services/ops/aiUsage'
+import { checkAiModel, getAiUsage, runAiOffCheck, setAiCap, setAiSwitch, type AiUsage } from '../services/ops/aiUsage'
 import { errorMessage } from '../pages/agent/shared'
 
 const usd = (cents: number | null | undefined) => cents == null ? '—' : `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -14,6 +14,8 @@ export default function RegistryAiCard({ canEdit }: { canEdit: boolean }) {
   const [busy, setBusy] = useState(false)
   const [showRuns, setShowRuns] = useState(false)
   const [check, setCheck] = useState<Awaited<ReturnType<typeof runAiOffCheck>>['data'] | null>(null)
+  const [model, setModel] = useState<{ ok: boolean; message: string } | null>(null)
+  const [testing, setTesting] = useState(false)
 
   const load = () => getAiUsage().then(r => { setData(r.data); setCap(r.data.monthlyCapCents ? String(r.data.monthlyCapCents / 100) : '') }).catch(e => setMsg(errorMessage(e, 'Could not load AI usage')))
   useEffect(() => { load() }, [])
@@ -33,6 +35,21 @@ export default function RegistryAiCard({ canEdit }: { canEdit: boolean }) {
           <h3 className="text-[16px] font-extrabold text-slate-900">The registry’s own AI</h3>
           <p className="text-[13px] text-slate-600">Every AI call the registry makes is recorded with its model, prompt version, tokens and cost. A switched-off function answers without AI, and says so.</p>
         </div>
+      </div>
+
+      <div className={`rounded-lg p-3 ring-1 text-[13px] ${data.model.configured ? 'bg-emerald-50 ring-emerald-200 text-emerald-900' : 'bg-amber-50 ring-amber-200 text-amber-900'}`} data-testid="ai-model">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span className="font-semibold">AI model: </span>
+            {data.model.configured
+              ? <>{data.model.deployment} at {data.model.endpointHost}. The key comes from {data.model.keyFrom}.</>
+              : <>{data.model.problem}</>}
+          </div>
+          {canEdit && <button type="button" className="btn-secondary btn-sm" disabled={testing} data-testid="ai-model-test"
+            onClick={async () => { setTesting(true); setModel(null); try { setModel((await checkAiModel()).data) } catch (e) { setModel({ ok: false, message: errorMessage(e, 'The test did not run') }) } finally { setTesting(false) } }}>
+            {testing ? 'Testing…' : 'Test the connection'}</button>}
+        </div>
+        {model && <p className={`mt-1 font-medium ${model.ok ? 'text-emerald-800' : 'text-rose-700'}`} role="status">{model.ok ? '✓ ' : '✗ '}{model.message}</p>}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

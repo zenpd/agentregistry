@@ -32,7 +32,7 @@ try {
   const demo = everyone.filter(a => a.isDemo), total = everyone.length
   await page.goto(`${B}/`); await page.waitForSelector('[data-testid=user-chip]', { timeout: 30000 }); await page.waitForTimeout(2500)
   ok('the top bar shows no demo label', await page.locator('[data-testid=demo-switch]').count() === 0 && !/demo agents/i.test(await page.textContent('header').catch(() => '')))
-  ok(`Executive counts all ${total} agents`, new RegExp(`Total Agents\\s*${total}`).test((await page.textContent('main')).replace(/\s+/g, ' ')))
+  ok(`Executive counts all ${everyone.filter(a => a.stage !== 'Deprecated').length} agents that are not retired`, new RegExp(`Total agents\\s*${everyone.filter(a => a.stage !== 'Deprecated').length}`).test((await page.textContent('[data-testid=bu-kpis]')).replace(/\s+/g, ' ')))
   await page.goto(`${B}/agents`); await page.waitForSelector('h3', { timeout: 30000 }); await page.waitForTimeout(800)
   const names = await page.locator('h3').allTextContents()
   ok(`the agent list shows all ${total} agents, ${demo.length} labelled Demo`, names.length === total && names.filter(t => /Demo/.test(t)).length === demo.length, `${names.length} agents`)
@@ -52,8 +52,8 @@ try {
     await pause(4000)
   }
 
-  await page.goto(`${B}/settings`); await page.waitForSelector('[data-testid=demo-agents]', { timeout: 30000 }); await page.waitForTimeout(1200)
-  ok('Settings offers the demo switch, ticked', await page.isChecked('[data-testid=demo-toggle]'))
+  await page.goto(`${B}/settings`); await page.waitForSelector('[data-testid=registry-ai]', { timeout: 30000 }); await page.waitForTimeout(1200)
+  ok('Settings has no Demo agents card for now', await page.locator('[data-testid=demo-agents]').count() === 0)
   ok('Settings shows no archived agents card', await page.locator('[data-testid=archived-agents]').count() === 0)
   await page.goto(`${B}/business`); await page.waitForSelector('[data-testid=bu-kpis]', { timeout: 30000 }); await page.waitForTimeout(1500)
   const biz = await page.textContent('main')

@@ -383,7 +383,8 @@ export interface RiskSummary {
   financialFindings?: number
 }
 
-export const getRiskSummary = () => api.get<RiskSummary>('/governance/risks/summary')
+// dept: a department id, or '__none__' for agents with no department. Without it, every agent.
+export const getRiskSummary = (dept?: string) => api.get<RiskSummary>('/governance/risks/summary', { params: dept ? { dept } : {} })
 
 // ── Economics (governance/economics.py) — revenue vs expenditure ────────────
 
@@ -635,6 +636,7 @@ export const createException = (data: { agent_id: string; gate: string; reason: 
 // ── Admin ─────────────────────────────────────────────────────────────────────
 
 export interface Taxonomy {
+  departments?: { id: string; name: string }[]
   stages: string[]
   gates: string[]
   reviewStatuses: string[]

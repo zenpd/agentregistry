@@ -48,7 +48,7 @@ const ACTIONS_BY_STATUS: Record<RiskStatus, RiskAction[]> = {
 }
 
 const ORIGIN_LABEL: Record<string, string> = {
-  economics: 'Revenue & Expenditure rule',
+  economics: 'Business Value rule',
   cost_anomalies: 'Cost anomaly',
   waste_findings: 'Waste finding',
 }
@@ -754,7 +754,7 @@ function FinancialSection({ financial }: { financial: FinancialFinding[] }) {
         {hasDemo && <SourceBadge source="seed" />}
       </div>
       <p className="text-[12px] text-slate-500">
-        Read live from cost anomalies, waste findings and the financial flags of the Revenue & Expenditure tab each time this tab loads.
+        Read live from cost anomalies, waste findings and the financial flags of the Business Value tab each time this tab loads.
         They are not stored in the register and clear when the underlying condition clears. Visibility only: nothing
         here pauses or limits the agent.
       </p>

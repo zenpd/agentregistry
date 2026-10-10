@@ -489,13 +489,17 @@ async def test_scheduled_runs_that_did_no_work_are_retried_same_day(db):
     day = now.replace(hour=0, minute=0, second=0, microsecond=0)
     async with get_db_session() as s:
         for job, status in [("usage_ingestion", "stale"), ("cost_rollup", "cancelled"),
-                            ("risk_scan", "error"), ("infra_costs", "not_configured")]:
+                            ("risk_scan", "error"), ("infra_costs", "not_configured"),
+                            ("phoenix_discovery", "unreachable")]:
             s.add(JobRun(id=f"old-{job}", job=job, agent_id=None, trigger="scheduled", status=status,
                          summary={}, started_at=day))
+        # Phoenix could not be reached 10 minutes ago: too soon to try again. An earlier "unreachable" run is retried.
+        s.add(JobRun(id="recent-unreachable", job="consumer_observation", agent_id=None, trigger="scheduled", status="unreachable",
+                     summary={}, started_at=now - timedelta(minutes=10)))
         s.add(JobRun(id="manual", job="governance_checks", agent_id=None, trigger="manual", status="ok",
                      summary={}, started_at=day))
     done = await job_runner.scheduled_jobs_done_on(day, now)
-    assert done == {"risk_scan", "infra_costs"}
+    assert done == {"risk_scan", "infra_costs", "consumer_observation"}
 
 
 @pytest.mark.asyncio

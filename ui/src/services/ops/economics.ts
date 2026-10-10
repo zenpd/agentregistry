@@ -1,6 +1,6 @@
 import api from '../api'
 
-// Revenue & Expenditure tab (backend: api/routers/ops/economics.py).
+// Business Value tab (backend: api/routers/ops/economics.py).
 // Every cost carries its source; an unknown figure is null, never 0.
 
 // manual: usage typed in or imported for an agent without tracing.
@@ -104,8 +104,9 @@ export interface AgentEconomicsDetail {
   expenditureCents: number
 }
 
-export const getEconomics = (agentId: string) =>
-  api.get<AgentEconomicsDetail>(`/agents/${agentId}/economics`)
+// month is "YYYY-MM": the figures of that month. Without it, the current month.
+export const getEconomics = (agentId: string, month?: string | null) =>
+  api.get<AgentEconomicsDetail>(`/agents/${agentId}/economics`, { params: month ? { month } : {} })
 
 // snake_case: the endpoint's original contract.
 export interface CostPerOutcome {

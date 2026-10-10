@@ -74,6 +74,9 @@ async def test_tools_read_real_records_cite_them_and_change_nothing(db):
     assert results["search_agents"]["agents"][0]["id"] == "a2"
     assert results["get_dependencies"]["status"] != "ok"                                     # no Phoenix project: says so, no crash
     assert "review:a1:arb" in book.labels and book.tools_used[0] == "get_record"
+    # A tool that fails is reported to the model as {"error": ...}. None of them may, or an insight says "the data is missing".
+    assert [name for name, r in results.items() if isinstance(r, dict) and "error" in r] == []
+    assert "month" in results["get_economics"] and "totals" in results["get_usage_and_cost"] or "days" in results["get_usage_and_cost"]
 
 
 @pytest.mark.asyncio
@@ -282,7 +285,7 @@ async def test_an_unreachable_model_is_reported_not_raised(db, monkeypatch):
     from shared.config import get_settings
     monkeypatch.setattr(get_settings(), "azure_openai_api_key", "")
     r = await run_insight(SPECS["agent_brief"], agent_id="a1", request="x")
-    assert r["status"] == "unavailable" and "No model is configured" in r["reason"]
+    assert r["status"] == "unavailable" and "No AI model is set up" in r["reason"]
 
 
 def test_every_insight_forbids_verdicts_and_treats_data_as_untrusted():
@@ -550,3 +553,49 @@ async def test_an_insight_written_by_older_instructions_is_marked_stale(client):
         (await s.execute(select(Insight))).scalars().first().prompt_version = "v0"
     tab = (await client.get("/api/v1/agents/a1/insights", params={"tab": "overview"})).json()
     assert tab["insights"][0]["stale"] is True
+
+
+# ── the AI model's settings ─────────────────────────────────────────────────
+
+def test_a_key_vault_read_that_failed_is_tried_again_not_remembered(monkeypatch):
+    from security import vault
+    calls = []
+
+    class Secret:
+        value = "the-key"
+
+    class Client:
+        def __init__(self, vault_url, credential):
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("the identity is not ready")
+
+        def get_secret(self, name, version):
+            return Secret()
+    import sys, types
+    ident = types.ModuleType("azure.identity"); ident.DefaultAzureCredential = lambda: object()
+    kvs = types.ModuleType("azure.keyvault.secrets"); kvs.SecretClient = Client
+    for name, mod in (("azure", types.ModuleType("azure")), ("azure.identity", ident), ("azure.keyvault", types.ModuleType("azure.keyvault")), ("azure.keyvault.secrets", kvs)):
+        monkeypatch.setitem(sys.modules, name, mod)
+    vault._cache.clear()
+    uri = "https://v.vault.azure.net/secrets/k"
+    assert vault.get_secret_by_uri(uri) is None            # first read fails
+    assert vault.get_secret_by_uri(uri) == "the-key"       # the next one is not blocked by the failure
+    assert vault.get_secret_by_uri(uri) == "the-key" and len(calls) == 2   # and a value that was read is kept
+    vault._cache.clear()
+
+
+def test_settings_fill_in_a_secret_that_was_missing_at_start(monkeypatch):
+    from security import vault
+    from shared.config import Settings
+    s = Settings(azure_openai_api_key="", azure_openai_api_key_kv_uri="https://v.vault.azure.net/secrets/k")
+    monkeypatch.setattr(vault, "get_secret_by_uri", lambda uri: "from-the-vault")
+    assert s.resolve_missing_secrets() == ["azure_openai_api_key"] and s.azure_openai_api_key == "from-the-vault"
+    assert s.resolve_missing_secrets() == []                 # nothing is missing now
+
+
+def test_the_model_setup_hint_says_what_is_missing_and_shows_no_secret():
+    from agents.insights.runtime import model_setup_hint
+    from shared.config import Settings
+    hint = model_setup_hint(Settings(azure_openai_endpoint="", azure_openai_api_key="", azure_openai_api_key_kv_uri="https://v.vault.azure.net/secrets/k"))
+    assert "AZURE_OPENAI_ENDPOINT" in hint and "Key Vault" in hint and "v.vault.azure.net" not in hint

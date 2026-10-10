@@ -32,7 +32,9 @@ router = APIRouter(prefix="/api/v1", tags=["Agent Ops — Insights"])
 
 # Which automatic updates each tab mentions (None: all of them). A tab lists only what it shows.
 TAB_FIELDS: dict[str, tuple[str, ...] | None] = {
-    "overview": None, "governance": None,
+    "overview": None,
+    # The governance tab lists what its checklist looks at: the model, the purpose, the dependencies and the endpoint.
+    "governance": ("model_name", "description", "mcp_servers", "knowledge_bases", "api_endpoint"),
     "diagram": ("mcp_servers", "knowledge_bases", "model_name"),
     "tokenomics": ("model_name",),
     "integrate": ("description", "capabilities", "inputs", "outputs", "api_endpoint"),

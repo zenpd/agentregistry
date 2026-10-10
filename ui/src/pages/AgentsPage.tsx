@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { BadgeCheck, Pencil, Trash2 } from 'lucide-react'
 import { getAgents, getTaxonomy, type RegistryAgent, type Taxonomy } from '../services/api'
 import OnboardingModal from '../components/OnboardingModal'
@@ -57,7 +57,8 @@ export default function AgentsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [stageFilter, setStageFilter] = useState('')
+  const [searchParams] = useSearchParams()
+  const [stageFilter, setStageFilter] = useState(searchParams.get('stage') || '')
   const [typeFilter, setTypeFilter] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
   const [catFilter, setCatFilter] = useState('')
@@ -112,7 +113,7 @@ export default function AgentsPage() {
     <div className="space-y-4 animate-fade-in">
       <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold gradient-text">AI Registry</h1>
+          <h1 className="text-2xl font-bold gradient-text">Agent Registry</h1>
           <p className="text-slate-600 mt-0.5">Every registered agent. Search or filter, open one, or register a new one.</p>
         </div>
         {can(me, 'create')

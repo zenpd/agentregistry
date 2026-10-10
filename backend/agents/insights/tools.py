@@ -223,7 +223,7 @@ async def get_usage_and_cost(agent_id: str, book: RefBook) -> dict:
     with usage, how it compares with the average of the earlier usage days, so
     the agent quotes calculated ratios instead of working them out itself."""
     from api.routers.ops import tokenomics
-    t = await tokenomics.agent_tokenomics(agent_id, days=30, _=_USER)
+    t = await tokenomics.agent_tokenomics(agent_id, days=30, month=None, _=_USER)
     days = [d for d in t["daily"] if d["calls"]]
     rows, seen = [], []
     for d in days:
@@ -267,7 +267,7 @@ async def get_usage_and_cost(agent_id: str, book: RefBook) -> dict:
 
 async def get_economics(agent_id: str, book: RefBook) -> dict:
     from api.routers.ops import economics
-    e = await economics.agent_economics_endpoint(agent_id, _=_USER)
+    e = await economics.agent_economics_endpoint(agent_id, month=None, _=_USER)
     return {
         "ref": book.ref("economics", agent_id, label="Value against cost"),
         "month": e["period"]["month"], "valueDeclared": e["valueDeclared"],

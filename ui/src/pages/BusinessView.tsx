@@ -3,7 +3,7 @@ import { VALUE_STATE_SHORT } from '../services/ops/value'
 import ValueSpendSection from '../components/ValueSpendSection'
 import { Link, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, CircleDashed, Coins, Hourglass, Pencil, Rocket, TrendingUp, X, ChevronRight } from 'lucide-react'
-import { getAgents, getGovernanceSummary, getPortfolioEconomics, requiredReviewsOf, type AgentEconomics, type GovernanceSummary, type RegistryAgent } from '../services/api'
+import { getAgents, getTaxonomy, getGovernanceSummary, getPortfolioEconomics, requiredReviewsOf, type AgentEconomics, type GovernanceSummary, type RegistryAgent } from '../services/api'
 import InfoTip from '../components/InfoTip'
 import type { GlossaryKey } from '../lib/glossary'
 import EditAgentModal from '../components/EditAgentModal'
@@ -83,12 +83,33 @@ type Focus = { kind: 'blocker'; blocker: Blocker } | { kind: 'gap'; gap: Gap } |
 // Business Impact: what each business unit is running, what it produces and
 // what it costs. Summaries stay small; one agent's detail opens on click.
 // The unit filter lives in the URL (?dept=...), so a BU owner can bookmark it.
-export default function BusinessView() {
+// What the page hands to the widgets placed in its slots: the agents of the chosen business unit.
+export interface UnitContext {
+  unitKey: string            // '' for every unit, a department id, or '__none__'
+  unitLabel: string
+  list: RegistryAgent[]      // every agent of the unit, retired ones included
+  running: RegistryAgent[]   // without the retired ones
+  valueOf: (a: RegistryAgent) => number
+}
+// Places for other widgets inside the page, so one filter drives them all.
+export interface PageSlots {
+  // The Total agents card opens a list on the page that embeds this view.
+  agentsCard?: { open: boolean; toggle: () => void }
+  kpis?: (c: UnitContext) => React.ReactNode
+  afterKpis?: (c: UnitContext) => React.ReactNode
+  pipeline?: (c: UnitContext) => React.ReactNode
+  risk?: (c: UnitContext) => React.ReactNode
+  mix?: (c: UnitContext) => React.ReactNode
+  end?: (c: UnitContext) => React.ReactNode
+}
+
+export default function BusinessView({ embedded = false, slots = {} }: { embedded?: boolean; slots?: PageSlots }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const dept = searchParams.get('dept') || ''
   const [agents, setAgents] = useState<RegistryAgent[]>([])
   const [econ, setEcon] = useState<Map<string, AgentEconomics>>(new Map())
   const [rules, setRules] = useState<GovernanceSummary | null>(null)
+  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([])
   const [showCost, setShowCost] = useState(false)
   const [showValue, setShowValue] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -108,17 +129,19 @@ export default function BusinessView() {
     .finally(() => setLoading(false)), [])
 
   useEffect(() => { reload() }, [reload])
+  useEffect(() => { getTaxonomy().then(r => setDepartments(r.data.departments || [])).catch(() => setDepartments([])) }, [])
   // A different unit starts with the full list and nothing expanded.
   useEffect(() => { setFocus(null); setOpen(null) }, [dept])
 
   if (loading) return <div className="p-8 text-center text-slate-600">Loading…</div>
   if (error) return <div className="p-8 text-center text-rose-500">Error: {error}</div>
 
+  // Every business unit is offered, also one with no agent yet.
   const units = [...agents.reduce((m, a) => {
     const u = m.get(deptKey(a)) || { key: deptKey(a), label: deptLabel(a), count: 0 }
     u.count += 1
     return m.set(u.key, u)
-  }, new Map<string, { key: string; label: string; count: number }>()).values()]
+  }, new Map<string, { key: string; label: string; count: number }>(departments.map(d => [d.id, { key: d.id, label: d.name, count: 0 }]))).values()]
     .sort((a, b) => (a.key === UNASSIGNED ? 1 : b.key === UNASSIGNED ? -1 : a.label.localeCompare(b.label)))
   const unit = units.find(u => u.key === dept)
   const list = unit ? agents.filter(a => deptKey(a) === unit.key) : agents
@@ -155,46 +178,52 @@ export default function BusinessView() {
     active ? 'bg-zen-600 text-white border-zen-600' : 'bg-white text-slate-700 border-gray-200 hover:border-gray-300 hover:text-slate-800'
   }`
 
+  const ctx: UnitContext = { unitKey: unit ? unit.key : '', unitLabel: unit ? unit.label : 'all business units', list, running, valueOf }
+
   return (
-    <div className="space-y-5 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold gradient-text">Business Impact</h1>
-        <p className="text-slate-600 mt-0.5">What each business unit is running, the outcomes it produces and what it costs. Filter to your team.</p>
-      </div>
+    <div className="space-y-5 animate-fade-in" id={embedded ? 'business-impact' : undefined}>
+      {!embedded && (
+        <div>
+          <h1 className="text-2xl font-bold gradient-text">Business Impact</h1>
+          <p className="text-slate-600 mt-0.5">What each business unit is running, the outcomes it produces and what it costs. Filter to your team. Click a figure to see how it is made up.</p>
+        </div>
+      )}
 
       <div className="flex gap-2 flex-wrap" role="group" aria-label="Business unit" data-testid="bu-chips">
         <button type="button" onClick={() => select('')} aria-pressed={!unit} className={chip(!unit)}>
           All business units <span className="opacity-70">{agents.length}</span>
         </button>
         {units.map(u => (
-          <button key={u.key} type="button" onClick={() => select(u.key)} aria-pressed={unit?.key === u.key} className={chip(unit?.key === u.key)}>
+          <button key={u.key} type="button" onClick={() => select(u.key)} aria-pressed={unit?.key === u.key}
+            className={`${chip(unit?.key === u.key)} ${u.count === 0 && unit?.key !== u.key ? 'opacity-60' : ''}`} title={u.count === 0 ? `No agent is registered for ${u.label} yet` : undefined}>
             {u.label} <span className="opacity-70">{u.count}</span>
           </button>
         ))}
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="bu-kpis">
-        <Kpi label="Agents running" value={running.length.toLocaleString()}
-          sub={`${live.length} live in production${list.length > running.length ? ` · ${list.length - running.length} retired (Deprecated) not counted` : ''}`} />
-        <Kpi label="Value / month" tip="declared_value" value={fmtMoney(realized + projected)} accent="text-zen-600"
-          sub={`${fmtMoney(realized)} from agents in Production · ${fmtMoney(projected)} from agents not yet in Production`}
-          action={<button type="button" className="mt-1.5 text-xs font-semibold text-zen-700 hover:underline" aria-expanded={showValue}
-            onClick={() => setShowValue(v => !v)} data-testid="value-breakdown-toggle">{showValue ? 'Hide the calculation' : 'Show the calculation'}</button>} />
-        <Kpi label="Cost to run / month" tip="cost_to_run" value={`${costUnknown ? '≥' : ''}${fmtCents(costCents)}`} accent="text-rose-600"
-          sub={`tokens + hosting${costUnknown ? ` · ${costUnknown} agent${costUnknown === 1 ? '' : 's'} with no usage data` : ''}`}
-          action={<button type="button" className="mt-1.5 text-xs font-semibold text-zen-700 hover:underline" aria-expanded={showCost}
-            onClick={() => setShowCost(v => !v)} data-testid="cost-breakdown-toggle">{showCost ? 'Hide the calculation' : 'Show the calculation'}</button>} />
-        <Kpi label="Return on cost" tip="return_on_cost" accent="text-zen-700"
-          value={costCents > 0 && valueCents > 0 ? fmtTimes(valueCents / costCents) : '—'}
-          sub={costCents > 0 && valueCents > 0 ? `${fmtMoney(valueCents / 100)} value ÷ ${fmtCents(costCents)} cost to run = ${fmtTimes(valueCents / costCents)} · ${hours.toLocaleString()} h saved (≈ ${Math.round(hours / FTE_HOURS_PER_MONTH)} FTE)`
-            : valueCents > 0 ? 'no cost recorded yet' : 'no value declared yet'} />
+      <div className="space-y-4" data-testid="bu-kpis">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Kpi label="Total agents" tip="total_agents" value={running.length.toLocaleString()} testId="kpi-agents"
+          sub={`${live.length} in Production · ${running.filter(isPipeline).length} in pipeline${list.length > running.length ? ` · ${list.length - running.length} retired, not counted` : ''}`}
+          open={slots.agentsCard?.open} onOpen={slots.agentsCard ? slots.agentsCard.toggle : () => document.getElementById('bu-agents')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+          hint={slots.agentsCard ? 'The agents in the pipeline' : 'Go to the list of agents'} />
+        <Kpi label="Value / month" tip="declared_value" value={fmtMoney(realized + projected)} accent="text-zen-600" testId="value-breakdown-toggle"
+          sub={`${fmtMoney(realized)} in Production · ${fmtMoney(projected)} not yet in Production · ${hours.toLocaleString()} h saved (≈ ${Math.round(hours / FTE_HOURS_PER_MONTH)} FTE)`}
+          open={showValue} onOpen={() => setShowValue(v => !v)} hint="How the value is calculated" />
+        <Kpi label="Cost to run / month" tip="cost_and_return" value={`${costUnknown ? '≥' : ''}${fmtCents(costCents)}`} accent="text-rose-600" testId="cost-breakdown-toggle"
+          sub={`tokens + hosting · ${costCents > 0 && valueCents > 0 ? `return on cost ${fmtTimes(valueCents / costCents)} (${fmtMoney(valueCents / 100)} ÷ ${fmtCents(costCents)})` : valueCents > 0 ? 'no cost recorded yet' : 'no value declared yet, so no return on cost'}${costUnknown ? ` · ${costUnknown} agent${costUnknown === 1 ? '' : 's'} with no usage data` : ''}`}
+          open={showCost} onOpen={() => setShowCost(v => !v)} hint="How the cost is calculated" />
+        {slots.kpis?.(ctx)}
       </div>
+      </div>
+      {slots.afterKpis?.(ctx)}
 
       {showValue && <ValueBreakdown agents={running} econ={econ} valueOf={valueOf} unitLabel={unit ? unit.label : 'all business units'} />}
       {showCost && <CostBreakdown agents={running} econ={econ} totalCents={costCents} unknown={costUnknown} unitLabel={unit ? unit.label : 'all business units'} />}
 
-      <ValueSpendSection unitKey={unit && unit.key !== UNASSIGNED ? unit.key : null} unitLabel={unit ? unit.label : 'all business units'}
-        unitAgentIds={unit ? list.map(a => a.id) : null} />
+      {slots.risk?.(ctx)}
+
+      {slots.pipeline?.(ctx)}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
         <SummaryCard icon={<Rocket size={18} />} tone="bg-zen-50 text-zen-600" title="Value waiting to go live" tip="value_waiting"
@@ -256,7 +285,13 @@ export default function BusinessView() {
         </SummaryCard>
       </div>
 
-      <div className="card p-5">
+
+      <ValueSpendSection unitKey={unit && unit.key !== UNASSIGNED ? unit.key : null} unitLabel={unit ? unit.label : 'all business units'}
+        unitAgentIds={unit ? list.map(a => a.id) : null} />
+
+      {slots.mix?.(ctx)}
+
+      <div className="card p-5" id="bu-agents">
         <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
           <div>
             <h2 className="text-[16px] font-extrabold text-slate-900">Agents in {unit ? unit.label : 'every business unit'}</h2>
@@ -336,6 +371,8 @@ export default function BusinessView() {
         </div>
       </div>
 
+      {slots.end?.(ctx)}
+
       {fixing && (
         <EditAgentModal agent={fixing} onClose={() => setFixing(null)} onSaved={() => { setFixing(null); reload() }} />
       )}
@@ -343,13 +380,22 @@ export default function BusinessView() {
   )
 }
 
-function Kpi({ label, value, sub, accent, tip, action }: { label: string; value: string; sub: string; accent?: string; tip?: GlossaryKey; action?: React.ReactNode }) {
-  return (
-    <div className="card p-4">
+// A figure on a card. The whole card is clickable: it opens the working behind the figure, or goes to the list.
+export function Kpi({ label, value, sub, accent, tip, onOpen, open, hint, testId }: {
+  label: string; value: string; sub: string; accent?: string; tip?: GlossaryKey; onOpen?: () => void; open?: boolean; hint?: string; testId?: string
+}) {
+  const body = (
+    <>
       <div className="text-xs text-slate-600 uppercase tracking-wide">{label}{tip && <> <InfoTip term={tip} /></>}</div>
       <div className={`text-2xl font-bold mt-1 ${accent || 'text-slate-900'}`}>{value}</div>
       <div className="text-xs text-slate-500 mt-1">{sub}</div>
-      {action}
+    </>
+  )
+  if (!onOpen) return <div className="card p-4">{body}</div>
+  return (
+    <div className={`card p-4 cursor-pointer transition hover:shadow-card-hover ${open ? 'ring-2 ring-zen-400' : ''}`} role="button" tabIndex={0} title={hint}
+      aria-expanded={open} data-testid={testId} onClick={onOpen} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}>
+      {body}
     </div>
   )
 }
@@ -534,6 +580,7 @@ function CostBreakdown({ agents, econ, totalCents, unknown, unitLabel }: {
     </section>
   )
 }
+
 
 function SummaryCard({ icon, tone, title, tip, sub, figure, figureSub, testId, children }: {
   icon: React.ReactNode; tone: string; title: string; tip?: GlossaryKey; sub: string; figure: string; figureSub: string; testId: string; children: React.ReactNode

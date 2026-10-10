@@ -21,7 +21,7 @@ const TAB_ICON: Record<Tab, typeof Bot> = {
 }
 const TAB_LABEL: Record<Tab, string> = {
   overview: 'Overview', diagram: 'Diagram', governance: 'Governance',
-  tokenomics: 'Tokenomics', revenue: 'Revenue & Expenditure', risk: 'Risk', integrate: 'Integrate',
+  tokenomics: 'Tokenomics', revenue: 'Business Value', risk: 'Risk', integrate: 'Integrate',
 }
 
 // Every tab is scoped to the agent id in the route.
@@ -71,7 +71,7 @@ export default function AgentPage() {
 
   return (
     <div className="space-y-4 animate-fade-in max-w-5xl">
-      <Link to="/agents" className="text-sm text-slate-500 hover:text-slate-700">&larr; AI Registry</Link>
+      <Link to="/agents" className="text-sm text-slate-500 hover:text-slate-700">&larr; Agent Registry</Link>
 
       <div className="card p-0 overflow-hidden">
         <header className="px-6 pt-5 pb-4 bg-gradient-to-r from-zen-50 via-white to-white border-b border-slate-100">
@@ -105,11 +105,11 @@ export default function AgentPage() {
                 )}
                 {agent.isDemo && (
                   <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[12px] font-semibold text-amber-800 ring-1 ring-amber-300" data-testid="demo-badge"
-                    title="A seeded example agent. Its numbers are demo data. Settings → Demo agents hides the demo agents from every page.">Demo agent</span>
+                    title="An example agent. Its numbers are demo data, not measured from a running system.">Demo agent</span>
                 )}
                 {agent.archivedAt && (
                   <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[12px] font-semibold text-slate-700 ring-1 ring-slate-300" data-testid="archived-badge"
-                    title="Left out of every page, count and job, but kept in the database. Settings → Demo agents brings it back.">Archived</span>
+                    title="Left out of every page, count and job, but kept in the database.">Archived</span>
                 )}
               </div>
             </div>

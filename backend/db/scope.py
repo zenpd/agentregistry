@@ -19,6 +19,11 @@ their own agent-scoped URL and code that asks for them with ``showing_archived()
 With DEMO_AGENTS_ENABLED=false the demo agents are left out everywhere too, even
 their own agent-scoped URL: the installation runs as if they were not there.
 
+One kind of demo agent is always shown: a showcase agent (``source == "showcase"``), the
+complete example used to present the registry. It stays a demo agent in every other way
+(it carries the Demo badge and is not read from Phoenix), and DEMO_AGENTS_ENABLED=false
+hides it like the others.
+
 Queries that aggregate a child table (usage rows, reviews, risks) without
 selecting from ``agents`` are not covered by the ORM filter; they call
 ``hidden_agent_ids`` and leave those ids out themselves.
@@ -32,6 +37,7 @@ from sqlalchemy import and_, event, func, or_, select
 from sqlalchemy.orm import Session, with_loader_criteria
 
 HEADER = b"x-include-demo"
+SHOWCASE = "showcase"
 _AGENT_PATH = re.compile(r"^/api/v1/agents/([^/]+)")
 
 _hide_demo: ContextVar[bool] = ContextVar("hide_demo", default=False)
@@ -77,11 +83,13 @@ def _criteria():
     from db.models import Agent
 
     not_demo = func.coalesce(Agent.is_demo, False) == False  # noqa: E712
+    # A viewer who hides the demo agents still sees the showcase agent.
+    not_hidden_demo = or_(not_demo, func.coalesce(Agent.source, "") == SHOWCASE)
     # What this viewer leaves out: archived agents, and demo agents when hidden. The
     # agent named in the URL is shown anyway.
     shown = Agent.archived_at.is_(None) if not _show_archived.get() else None
     if _hide_demo.get():
-        shown = not_demo if shown is None else and_(shown, not_demo)
+        shown = not_hidden_demo if shown is None else and_(shown, not_hidden_demo)
     keep = _always_show.get()
     if shown is not None and keep:
         shown = or_(shown, Agent.id.in_(keep))
@@ -119,10 +127,11 @@ async def hidden_agent_ids(db) -> set[str]:
     from db.models import Agent
 
     keep = set(_always_show.get())
-    hiding = _hide_demo.get() or not demo_enabled()
     cond = Agent.archived_at.is_not(None)
-    if hiding:
+    if not demo_enabled():
         cond = or_(cond, Agent.is_demo == True)  # noqa: E712
+    elif _hide_demo.get():
+        cond = or_(cond, and_(Agent.is_demo == True, func.coalesce(Agent.source, "") != SHOWCASE))  # noqa: E712
     with unfiltered():
         rows = (await db.execute(select(Agent.id).where(cond))).scalars().all()
     if not demo_enabled():

@@ -1,6 +1,6 @@
 // Consistency check: one place for each action and one rule for each figure.
 // Governance statuses are read-only links, cleared follows the governance rules, the Edit window does not change
-// owner or value, Executive and Business Impact agree on value, Platform links to the graph page, and /playground
+// owner or value, the business impact section of Executive matches the API, Platform links to the graph page, and /playground
 // lands on the Integrate tab.
 // Creates one probe agent and deletes it at the end.
 import { chromium } from 'playwright'
@@ -34,16 +34,17 @@ try {
   // Edit window: owner and value are not editable there
   await page.goto(`${B}/agents`); await page.waitForSelector('h3', { timeout: 30000 }); await page.waitForTimeout(800)
   await page.click('[aria-label="Edit Probe Consistency"]'); await page.waitForSelector('[data-testid=edit-agent-form]', { timeout: 10000 })
-  ok('the Edit window links to Overview for the owner and to Revenue & Expenditure for the value',
-    await page.locator('#edit-owner, #edit-value').count() === 0 && /Change on Overview/.test(await text('[data-testid=edit-owner]')) && /Declare on Revenue/.test(await text('[data-testid=edit-value]')))
+  ok('the Edit window links to Overview for the owner and to Business Value for the value',
+    await page.locator('#edit-owner, #edit-value').count() === 0 && /Change on Overview/.test(await text('[data-testid=edit-owner]')) && /Declare on Business Value/.test(await text('[data-testid=edit-value]')))
   await page.keyboard.press('Escape'); await page.locator('[data-testid=edit-agent-form] button', { hasText: 'Cancel' }).click()
 
-  // Executive and Business Impact agree on the value of all stages
-  await page.goto(`${B}/`); await page.waitForSelector('[data-testid=user-chip]', { timeout: 30000 }); await page.waitForTimeout(3000)
-  const exec = money((/Value \/ mo, all stages[^$]*(\$[\d.,]+[KM]?)/i.exec(await text('main')) || [])[1])
-  await page.goto(`${B}/business`); await page.waitForSelector('[data-testid=bu-kpis]', { timeout: 30000 }); await page.waitForTimeout(2500)
-  const biz = money((/Value \/ month[^$]*(\$[\d.,]+[KM]?)/i.exec(await text('[data-testid=bu-kpis]')) || [])[1])
-  ok('Executive and Business Impact show the same value for all stages', exec !== null && exec === biz, `${exec} vs ${biz}`)
+  // The business impact section of the Executive page counts the value of every agent that is not retired, as the API does
+  await page.goto(`${B}/`); await page.waitForSelector('#business-impact [data-testid=bu-kpis]', { timeout: 30000 }); await page.waitForTimeout(3000)
+  const bizValue = money((/Value \/ month[^$]*(\$[\d.,]+[KM]?)/i.exec(await text('#business-impact [data-testid=bu-kpis]')) || [])[1])
+  // The page hides the demo agents unless the box is ticked in Settings, so the API is asked the same way.
+  const econAll = (await (await fetch(API + '/value/economics', { headers: { Authorization: `Bearer ${TOKEN}` } })).json()).agents
+  const apiValue = econAll.filter(e => e.stage !== 'Deprecated').reduce((n, e) => n + (e.valueCents ?? 0), 0) / 100
+  ok('the Executive page value matches the sum over agents that are not retired', bizValue !== null && Math.abs(bizValue - apiValue) / Math.max(apiValue, 1) < 0.01, `${bizValue} vs ${apiValue}`)
 
   // Platform and Playground
   await page.goto(`${B}/platform`); await page.waitForSelector('[data-testid=to-dependencies]', { timeout: 30000 })

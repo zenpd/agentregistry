@@ -152,8 +152,9 @@ const REFRESH_TIMEOUT_MS = 10 * 60_000
 
 const agentPath = (agentId: string) => `/agents/${encodeURIComponent(agentId)}`
 
-export const getTokenomics = (agentId: string, days = 30) =>
-  api.get<Tokenomics>(`${agentPath(agentId)}/tokenomics`, { params: { days } })
+// month is "YYYY-MM": that calendar month instead of the last `days` days.
+export const getTokenomics = (agentId: string, days = 30, month?: string | null) =>
+  api.get<Tokenomics>(`${agentPath(agentId)}/tokenomics`, { params: month ? { month } : { days } })
 
 export const refreshUsage = (agentId: string, days?: number) =>
   api.post<UsageRefreshResult>(`${agentPath(agentId)}/usage/refresh`, null, {
